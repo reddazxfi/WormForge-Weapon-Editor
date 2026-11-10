@@ -1,0 +1,89 @@
+import JSZip from 'jszip';
+import { WeaponProject } from '../types/weapon';
+import {
+  generateLuaCode,
+  generateModToml,
+  generateProfileToml,
+  sanitizeModFolder,
+  wepBundlePath,
+} from './luaGenerator';
+import {
+  createDefaultHoldSheet,
+  createDefaultMissileSheet,
+} from './defaultArt';
+
+export async function exportModZip(project: WeaponProject): Promise<Blob> {
+  const zip = new JSZip();
+  const modFolder = sanitizeModFolder(project.id);
+  const profileName = (project.name || modFolder).replace(/[\\/:*?"<>|]/g, '_');
+
+  const luaCode = generateLuaCode(project);
+  const modToml = generateModToml(project);
+  const profileToml = generateProfileToml(project);
+
+  // The layout from the mod tutorial: mod.toml and profiles/ have fixed names,
+  // and mod.toml's `entry` (weapons/<folder>.lua, see generateModToml) says where
+  // the weapon's Lua is. Nothing else reads weapon/, profile/ or a root
+  // weapons.lua, so none of those copies are written.
+  zip.file(`${modFolder}/mod.toml`, modToml);
+  zip.file(`${modFolder}/weapons/${modFolder}.lua`, luaCode);
+  zip.file(`${modFolder}/profiles/${profileName}.toml`, profileToml);
+
+  // The original Project X record, when the weapon is declared with `wep`
+  // instead of `copy_from`. The engine reads it relative to the bundle root.
+  const wepPath = wepBundlePath(project);
+  if (wepPath && project.wepFile) {
+    zip.file(`${modFolder}/${wepPath}`, project.wepFile);
+  }
+
+  // Custom Icon
+  if (project.customIconFile) {
+    zip.file(`${modFolder}/sprites/${modFolder}/icon.png`, project.customIconFile);
+  }
+
+  // Hold Art Sheet. The generated Lua always declares hold.sheet, so an
+  // enabled hold without an upload ships the default Bazooka/Grenade art
+  // instead of a path to a missing file (which fails at load).
+  if (project.hold && project.hold.enabled) {
+    const holdBlob = project.hold.sheetFile
+      ? project.hold.sheetFile
+      : await createDefaultHoldSheet(project, project.hold.frames);
+    zip.file(`${modFolder}/sprites/${modFolder}/hold.png`, holdBlob);
+  }
+
+  // Missile/Projectile Sprite Sheet (custom mode always declares the sheet).
+  if (
+    project.missileSprite &&
+    project.missileSprite.enabled &&
+    project.missileSprite.mode === 'custom'
+  ) {
+    const missileBlob = project.missileSprite.sheetFile
+      ? project.missileSprite.sheetFile
+      : await createDefaultMissileSheet(
+          project,
+          project.missileSprite.anim || 'rotation',
+          project.missileSprite.frames
+        );
+    zip.file(`${modFolder}/sprites/${modFolder}/missile.png`, missileBlob);
+  }
+
+  // Any other custom sprite assets
+  for (const cs of Object.values(project.customSprites)) {
+    if (cs.file) {
+      zip.file(`${modFolder}/${cs.path}`, cs.file);
+    }
+  }
+
+  return await zip.generateAsync({ type: 'blob' });
+}
+
+export function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

@@ -1,0 +1,6 @@
+cog_config.png
+
+Bundled with wkLua.dll as the manager's add-on settings icon.
+
+Provided by BomSymbols; free for commercial use.
+Source: https://icon-icons.com/icon/cog-gear-machine-office-setting-settings/107765?ii_item_modal=1&ii_modal_origin=%2Fsearch%2Ficons%2Fgear

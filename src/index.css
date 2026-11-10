@@ -1,0 +1,81 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* WormForge's forge-red, sampled from the mod loader logo. */
+  --color-forge-50: #fdf4f2;
+  --color-forge-100: #fbe6e2;
+  --color-forge-200: #f7cdc6;
+  --color-forge-300: #f0a99e;
+  --color-forge-400: #e67d6d;
+  --color-forge-500: #d65443;
+  --color-forge-600: #bf3928;
+  --color-forge-700: #a02c1f;
+  --color-forge-800: #85271e;
+  --color-forge-900: #6f251e;
+  --color-forge-950: #3c0f0b;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    text-rendering: optimizeLegibility;
+  }
+
+  .font-heading {
+    font-family: 'Chakra Petch', sans-serif;
+  }
+
+  .font-mono {
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+
+  /* Native controls (checkboxes, radios, ranges) follow the forge accent. */
+  input[type='checkbox'],
+  input[type='radio'],
+  input[type='range'] {
+    accent-color: var(--color-forge-600);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-forge-500);
+    outline-offset: 2px;
+  }
+}
+
+/* Custom scrollbars for dense editor panels */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
