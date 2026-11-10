@@ -355,11 +355,15 @@ that `vite preview` at `/` hides).
   `bun run build`, uploads `dist/` and deploys with
   `actions/deploy-pages@v4`.
 - It triggers on pushes to `main` and `workflow_dispatch`.
-- `configure-pages` uses `enablement: true`; the repo still needs a remote and
-  Pages enabled (public repo, or a paid plan for private Pages).
+- Pages must be enabled once by hand: **Settings → Pages → Source: GitHub
+  Actions**. `configure-pages` deliberately does **not** use `enablement: true`;
+  that made the action try to create the Pages site with the workflow token and
+  fail with *"Resource not accessible by integration"* on repos where the token
+  cannot create it. If the repo is private, Pages needs a paid plan or the repo
+  must be public.
 - Site URL: `https://<user>.github.io/<repo>/`. The relative base means the repo
   name does not have to match anything in the config.
-- There is no remote configured yet and no desktop release workflow.
+- There is no desktop release workflow.
 
 ---
 

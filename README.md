@@ -84,8 +84,11 @@ The desktop binary will be output to `src-tauri/target/release/`.
 The workflow at [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds the app and publishes `dist/` to GitHub Pages on every push to `main` (and from **Actions** > **Deploy Weapon Studio to GitHub Pages** > **Run workflow**).
 
 1. Push this repository to GitHub.
-2. Go to **Settings** > **Pages** and set **Source** to **GitHub Actions** (the workflow asks for it automatically).
-3. The site is served at `https://<user>.github.io/<repo>/`.
+2. Go to **Settings** > **Pages** and set **Source** to **GitHub Actions**. This must be done once by hand: the workflow does not create the Pages site for you.
+3. If the repository is private, GitHub Pages requires a paid plan (Pro/Team/Enterprise); otherwise make the repository public.
+4. Push to `main` again, or re-run the workflow from the **Actions** tab.
+
+The site is served at `https://<user>.github.io/<repo>/`.
 
 `vite.config.ts` uses `base: './'`, so the build works from any repository subpath, and `assetUrl()` resolves the logo and default sprites the same way in the dev server, Pages and the Tauri webview.
 
