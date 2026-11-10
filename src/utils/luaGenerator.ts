@@ -69,6 +69,18 @@ function formatNumber(value: number, digits = 4): string {
   return value.toFixed(digits).replace(/0+$/, '').replace(/\.$/, '');
 }
 
+/** `#rrggbb` (or `rrggbb`) to the 0-255 components the trail module takes. */
+function hexToRgb(color: string): { r: number; g: number; b: number } {
+  const hex = (color || '').replace('#', '').trim();
+  const full = hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return { r: 255, g: 255, b: 255 };
+  return {
+    r: parseInt(full.slice(0, 2), 16),
+    g: parseInt(full.slice(2, 4), 16),
+    b: parseInt(full.slice(4, 6), 16),
+  };
+}
+
 // Where the hold sheet lives in the exported pack. The Lua and mod.toml must
 // agree with each other and with modExporter, which writes an uploaded sheet to
 // sprites/<mod folder>/hold.png. A path stored earlier (project.hold.sheet) can
@@ -159,6 +171,13 @@ export function generateLuaCode(project: WeaponProject): string {
   const usesHold = project.hold && project.hold.enabled;
   const missileSpriteEnabled = !!project.missileSprite?.enabled;
   const usesMissileSprite = missileSpriteEnabled && project.missileSprite.mode === 'custom';
+  // The effects SDK's ribbon trail follows a missile WA builds from this
+  // record, so it only applies to the missile families (a strike's bombs are
+  // not one: their `m.weapon` is nil).
+  const ribbonTrail = project.ribbonTrail;
+  const usesRibbonTrail =
+    !!ribbonTrail?.enabled &&
+    (project.fireType === 'power' || (project.fireType === 'drop' && project.body.fuse));
 
   if (usesHold) {
     lines.push('local holds = require("wf-lib/holds")');
@@ -166,7 +185,10 @@ export function generateLuaCode(project: WeaponProject): string {
   if (usesMissileSprite) {
     lines.push('local sb = require("wf-lib/px_sprite_builder")');
   }
-  if (usesHold || usesMissileSprite) {
+  if (usesRibbonTrail) {
+    lines.push('local trail = require("wf-lib/effects/trail")');
+  }
+  if (usesHold || usesMissileSprite || usesRibbonTrail) {
     lines.push('');
   }
 
@@ -242,15 +264,20 @@ export function generateLuaCode(project: WeaponProject): string {
 
   // Pack art the claim uses. `sb.flight` (below) reads its sheet through this
   // field; the hold sheet is registered the same way so both paths agree.
+  // Claim `sprites`: pack paths (quoted) and the effects SDK's own ribbon
+  // sheets (bare module fields, resolved from its asset namespace).
   const packSprites: string[] = [];
   if (usesHold && project.hold?.sheetFile) {
-    packSprites.push(holdSheetPath(project));
+    packSprites.push(luaQuote(holdSheetPath(project)));
   }
   if (usesMissileSprite) {
-    packSprites.push(`sprites/${modFolder}/missile.png`);
+    packSprites.push(luaQuote(`sprites/${modFolder}/missile.png`));
+  }
+  if (usesRibbonTrail) {
+    packSprites.push('trail.BEAM', 'trail.GLOW');
   }
   if (packSprites.length > 0) {
-    lines.push(`      sprites = { ${packSprites.map(luaQuote).join(', ')} },`);
+    lines.push(`      sprites = { ${packSprites.join(', ')} },`);
   }
 
   // Fire type specific properties
@@ -1369,7 +1396,7 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push(`        hand_radius = ${h.handRadius ?? 10},`);
     lines.push('        hand_rotation = 1,');
     lines.push('        hand_radial_rotation = 1,');
-    lines.push(`        weap_radius = ${h.weapRadius ?? -8},`);
+    lines.push(`        weap_radius = ${h.weapRadius ?? 6},`);
     lines.push(`        weap_rotation = ${(1 + (h.weapRotation || 0) / 180).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')},`);
     lines.push('        weap_radial_rotation = 1,');
     if (h.frames > 1) {
@@ -1405,6 +1432,64 @@ export function generateLuaCode(project: WeaponProject): string {
   }
 
   lines.push('    }');
+
+  // Effects-SDK ribbon trail (`wf-lib/effects/trail`): PX's effect manager
+  // samples the round's position on game frames and draws a tapering ribbon,
+  // so its colour, widths and length are ours to choose. Attached on the
+  // round's first missile frame, exactly as the PX ports do (famas, megashark,
+  // px_ninja_star): WA fires this record itself, so there is no
+  // `wa.weapons.launch` id to hand `trail.add`.
+  if (usesRibbonTrail) {
+    const t = ribbonTrail!;
+    const { r, g, b } = hexToRgb(t.color);
+    const max = Math.max(2, Math.round(t.max));
+    const every = Math.max(1, Math.round(t.every));
+    const vanish = Math.max(1, Math.round(t.vanish));
+    lines.push('    trail.install()');
+    lines.push('    local TRAIL = {');
+    lines.push(`      max = ${max}, every = ${every}, vanish = ${vanish},`);
+    lines.push(`      core_w = ${formatNumber(Math.max(0, t.coreWidth))},`);
+    lines.push(`      glow_w = ${formatNumber(Math.max(0, t.glowWidth))},`);
+    lines.push(`      r = ${r}, g = ${g}, b = ${b},`);
+    lines.push('    }');
+    lines.push('    -- The driver needs an owner: whose turn it is, else any living worm.');
+    lines.push('    local function trail_worm()');
+    lines.push('      local first');
+    lines.push('      for _, w in ipairs(wa.worms.all()) do');
+    lines.push('        if w.turn then return w end');
+    lines.push('        if not first and w.hp > 0 then first = w end');
+    lines.push('      end');
+    lines.push('      return first');
+    lines.push('    end');
+    if (t.target === 'main') {
+      // Cluster bits are born where their parent died, while its ribbon is
+      // still shedding points, so a first-seen round with a ribbon already
+      // live for this weapon is a bit and is left alone. The live ids are an
+      // array: `pairs` order is not lockstep-safe (wfcheck's lockstep-pairs).
+      lines.push('    local trailed = {}');
+      lines.push('    local function trail_live()');
+      lines.push('      for i = 1, #trailed do');
+      lines.push('        if trail.has(trailed[i]) then return true end');
+      lines.push('      end');
+      lines.push('      return false');
+      lines.push('    end');
+    }
+    lines.push('    local seen = {}');
+    lines.push('    wa.on.missile_frame(function(m)');
+    lines.push('      if m.weapon ~= ctx.id or m.phase ~= "pre" then return end');
+    lines.push('      if seen[m.id] then return end');
+    lines.push('      seen[m.id] = true');
+    if (t.target === 'main') {
+      lines.push('      if trail_live() then return end');
+    }
+    if (t.target === 'main') {
+      lines.push('      if trail.add(m.id, trail_worm(), TRAIL) then trailed[#trailed + 1] = m.id end');
+    } else {
+      lines.push('      trail.add(m.id, trail_worm(), TRAIL)');
+    }
+    lines.push('    end)');
+    lines.push('');
+  }
 
   // px_sprite_builder draws the flight sheet with a follower actor and hides
   // WA's missile (`m.sprite = 0`). Its `anim` is PX's ANIM_TYPE, not the
@@ -1451,6 +1536,11 @@ export function generateModToml(project: WeaponProject): string {
   const usesMissileSprite =
     !!project.missileSprite?.enabled && project.missileSprite.mode === 'custom';
   const usesSdk = usesHold || usesMissileSprite;
+  // The ribbon trail lives in its own library bundle (`effects.sdk`), which
+  // exports `wf-lib/effects/trail` and the beam/glow sheets.
+  const usesRibbonTrail =
+    !!project.ribbonTrail?.enabled &&
+    (project.fireType === 'power' || (project.fireType === 'drop' && project.body.fuse));
 
   const lines: string[] = [
     `id = ${luaQuote(project.id)}`,
@@ -1461,8 +1551,11 @@ export function generateModToml(project: WeaponProject): string {
     'format_version = 2',
   ];
 
-  if (usesSdk) {
-    lines.push('dependencies = ["wf.sdk"]');
+  const dependencies: string[] = [];
+  if (usesSdk) dependencies.push('wf.sdk');
+  if (usesRibbonTrail) dependencies.push('effects.sdk');
+  if (dependencies.length > 0) {
+    lines.push(`dependencies = [${dependencies.map(luaQuote).join(', ')}]`);
   }
 
   if (project.customIconFile) {

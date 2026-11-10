@@ -53,3 +53,6 @@ test-results/
 # Local scratch
 tmp/
 *.zip
+
+# Generated test pack (tools/gen_test_pack.ts)
+test_pack/

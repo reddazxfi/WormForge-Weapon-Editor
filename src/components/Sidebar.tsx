@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Download,
   Upload,
@@ -8,9 +8,10 @@ import {
   Layers,
   Sparkles,
   ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
 import { WeaponProject } from '../types/weapon';
-import { RECORD_TABS, RecordTabId } from '../data/recordTabs';
+import { bitActionOf, visibleRecordTabs, RecordTabDef, RecordTabId } from '../data/recordTabs';
 import { assetUrl } from '../utils/assetUrl';
 
 type WorkspaceTab = 'editor' | 'hold' | 'code';
@@ -29,7 +30,7 @@ interface SidebarProps {
 }
 
 const WORKSPACE: { id: WorkspaceTab; label: string; hint: string; icon: React.ElementType; key: string }[] = [
-  { id: 'editor', label: 'Weapon Record', hint: 'Identity, flight, payload', icon: Layers, key: '1' },
+  { id: 'editor', label: 'Weapon Record', hint: 'Type, flight, payload', icon: Layers, key: '1' },
   { id: 'hold', label: 'Hold & Sprite Builder', hint: 'Worm grip and flight art', icon: Sparkles, key: '2' },
   { id: 'code', label: 'Bundle Code', hint: 'Lua, mod.toml, profile', icon: FileCode2, key: '3' },
 ];
@@ -101,6 +102,41 @@ const ProjectCard: React.FC<{ project: WeaponProject; onCopyId: () => void }> = 
   </div>
 );
 
+const RecordSectionRow: React.FC<{
+  tab: RecordTabDef;
+  active: boolean;
+  onClick: () => void;
+  badge?: React.ReactNode;
+  nested?: boolean;
+}> = ({ tab, active, onClick, badge, nested }) => {
+  const Icon = tab.icon;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      className={`relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+        active
+          ? 'bg-stone-100 font-semibold text-stone-900 dark:bg-stone-800/70 dark:text-stone-100'
+          : 'text-stone-500 hover:bg-stone-50 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800/40 dark:hover:text-stone-200'
+      }`}
+    >
+      {active && (
+        <span
+          className={`absolute ${nested ? '-left-[9px]' : '-left-[5px]'} top-1.5 h-4 w-[3px] rounded-full bg-forge-500`}
+          aria-hidden="true"
+        />
+      )}
+      <Icon
+        className={`${nested ? 'h-3 w-3 opacity-60' : 'h-3.5 w-3.5 opacity-70'} shrink-0`}
+        aria-hidden="true"
+      />
+      <span className="min-w-0 flex-1 truncate">{tab.label}</span>
+      {badge}
+    </button>
+  );
+};
+
 export const Sidebar: React.FC<SidebarProps> = ({
   project,
   activeTab,
@@ -113,6 +149,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setIsDark,
   onCopyId,
 }) => {
+  // A section can own sub-sections (Collision Bitmask lives under Missile
+  // Action). The parent row still selects its own tab; the chevron only opens
+  // and closes the children.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const tabs = visibleRecordTabs(project.burst, bitActionOf(project.body.clustlet));
+
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 flex-col border-r border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 lg:flex">
       <div className="border-b border-stone-100 px-5 pb-4 pt-5 dark:border-stone-800">
@@ -179,39 +221,65 @@ export const Sidebar: React.FC<SidebarProps> = ({
               Record Sections
             </div>
             <div className="space-y-0.5 border-l border-stone-200 pl-1 dark:border-stone-800">
-              {RECORD_TABS.map(({ id, label, icon: Icon }) => {
-                const active = activeSubTab === id;
+              {tabs.filter((tab) => !tab.parent).map((tab) => {
+                const children = tabs.filter((child) => child.parent === tab.id);
+                const open = openGroups[tab.id] ?? true;
                 return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setActiveSubTab(id)}
-                    aria-current={active ? 'page' : undefined}
-                    className={`relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
-                      active
-                        ? 'bg-stone-100 font-semibold text-stone-900 dark:bg-stone-800/70 dark:text-stone-100'
-                        : 'text-stone-500 hover:bg-stone-50 hover:text-stone-800 dark:text-stone-400 dark:hover:bg-stone-800/40 dark:hover:text-stone-200'
-                    }`}
-                  >
-                    {active && (
-                      <span className="absolute -left-[5px] top-1.5 h-4 w-[3px] rounded-full bg-forge-500" aria-hidden="true" />
+                  <div key={tab.id}>
+                    <div className="flex items-center gap-0.5">
+                      <RecordSectionRow
+                        tab={tab}
+                        active={activeSubTab === tab.id}
+                        onClick={() => setActiveSubTab(tab.id)}
+                        badge={
+                          tab.id === 'action' ? (
+                            <span className="rounded bg-stone-200 px-1 font-mono text-[9px] uppercase text-stone-600 dark:bg-stone-700 dark:text-stone-300">
+                              {project.action || 'none'}
+                            </span>
+                          ) : tab.id === 'burst' ? (
+                            <span className="rounded bg-stone-200 px-1 font-mono text-[9px] uppercase text-stone-600 dark:bg-stone-700 dark:text-stone-300">
+                              {project.burst || 'plain'}
+                            </span>
+                          ) : tab.id === 'callbacks' && project.enableCustomLua ? (
+                            <span
+                              className="h-1.5 w-1.5 rounded-full bg-forge-500"
+                              aria-label="Custom Lua enabled"
+                            />
+                          ) : null
+                        }
+                      />
+                      {children.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenGroups((groups) => ({ ...groups, [tab.id]: !open }))
+                          }
+                          aria-expanded={open}
+                          aria-label={`${open ? 'Hide' : 'Show'} ${tab.label} sub-sections`}
+                          className="rounded-md p-1.5 text-stone-400 hover:bg-stone-50 hover:text-stone-700 dark:hover:bg-stone-800/40 dark:hover:text-stone-200"
+                        >
+                          <ChevronDown
+                            className={`h-3.5 w-3.5 transition-transform ${open ? '' : '-rotate-90'}`}
+                            aria-hidden="true"
+                          />
+                        </button>
+                      )}
+                    </div>
+
+                    {children.length > 0 && open && (
+                      <div className="ml-3 mt-0.5 space-y-0.5 border-l border-stone-200 pl-2 dark:border-stone-700">
+                        {children.map((child) => (
+                          <RecordSectionRow
+                            key={child.id}
+                            tab={child}
+                            active={activeSubTab === child.id}
+                            onClick={() => setActiveSubTab(child.id)}
+                            nested
+                          />
+                        ))}
+                      </div>
                     )}
-                    <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate">{label}</span>
-                    {id === 'action' && (
-                      <span className="rounded bg-stone-200 px-1 font-mono text-[9px] uppercase text-stone-600 dark:bg-stone-700 dark:text-stone-300">
-                        {project.action || 'none'}
-                      </span>
-                    )}
-                    {id === 'burst' && (
-                      <span className="rounded bg-stone-200 px-1 font-mono text-[9px] uppercase text-stone-600 dark:bg-stone-700 dark:text-stone-300">
-                        {project.burst || 'plain'}
-                      </span>
-                    )}
-                    {id === 'callbacks' && project.enableCustomLua && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-forge-500" aria-label="Custom Lua enabled" />
-                    )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -346,9 +414,9 @@ export const MobileBar: React.FC<MobileBarProps> = ({
           onChange={(e) => setActiveSubTab(e.target.value as RecordTabId)}
           className="w-full rounded-md border border-stone-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
         >
-          {RECORD_TABS.map(({ id, label }) => (
+          {visibleRecordTabs(project.burst, bitActionOf(project.body.clustlet)).map(({ id, label, parent }) => (
             <option key={id} value={id}>
-              {label}
+              {parent ? `— ${label}` : label}
             </option>
           ))}
         </select>

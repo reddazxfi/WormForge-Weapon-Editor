@@ -63,10 +63,10 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
       <div className="flex items-center justify-between pb-4 mb-5 border-b border-stone-100 dark:border-stone-800">
         <div>
           <h2 className="font-heading text-base font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
-            Weapon Identity & Panel Placement
+            Weapon config & Panel Placement
           </h2>
           <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
-            Define identity, donor template, and stock replacement slot.
+            Define weapon, donor template, and stock replacement slot.
           </p>
         </div>
         <div className="hidden items-center gap-1.5 rounded border border-forge-200/60 bg-forge-50 px-2.5 py-1 font-mono text-[11px] text-forge-700 sm:flex dark:border-forge-800/60 dark:bg-forge-950/40 dark:text-forge-300">

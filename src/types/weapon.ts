@@ -196,6 +196,30 @@ export interface PackArtAsset {
   rotationFrames?: number;
 }
 
+/**
+ * The effects SDK's ribbon trail (`wf-lib/effects/trail`), attached to a weapon's
+ * own projectile. Unlike `missile.trail.*` (the native stock particle trail this
+ * record inherits), this is drawn by Lua from sampled positions, so its colour,
+ * widths and length are free.
+ */
+export interface RibbonTrailConfig {
+  enabled: boolean;
+  /** Points kept behind the round (`max`). */
+  max: number;
+  /** Sample a point every N game frames (`every`). */
+  every: number;
+  /** Driver frames between shed points while fading (`vanish`). */
+  vanish: number;
+  /** Core ribbon width in pixels (`core_w`). */
+  coreWidth: number;
+  /** Glow pass width in pixels (`glow_w`); 0 draws the core only. */
+  glowWidth: number;
+  /** Hex colour, e.g. `#ff8800` (`r`, `g`, `b`). */
+  color: string;
+  /** Attach to the primary round only, or to its cluster bits as well. */
+  target: 'main' | 'all';
+}
+
 export type MissileAnimType = 'track' | 'rotation' | 'slow' | 'medium' | 'fast' | 'none';
 
 export interface MissileSpriteConfig {
@@ -292,6 +316,8 @@ export interface WeaponProject {
   roamConfig: RoamActionConfig;
   digConfig: DigActionConfig;
   fireConfig: FirePayloadConfig;
+  /** Effects-SDK ribbon trail for this weapon's projectile. */
+  ribbonTrail: RibbonTrailConfig;
   hold: HoldConfig;
   /** Uploaded PNG/GIF art for the record fields that accept pack paths. */
   packArt: Partial<Record<PackArtSlot, PackArtAsset>>;

@@ -674,3 +674,101 @@ The editor shows the field as a labelled select (`MISSILE_ANIM_TYPES` in
 imported value" entry for `.wep` values outside 0-6. The generated rotation
 sheets set 2 (track movement); a hand-authored cycle sheet uses 1 or 4-6.
 
+
+## Effects-SDK ribbon trail on the main projectile
+
+`spec/lua_sdk/effects_sdk/libs/trail.lua` is PX's effect-manager trail: it
+samples a round's position on game frames and the engine draws a tapering ribbon
+through those points. `px_ninja_star`, `famas`, `megashark`,
+`fire_while_holding_megashark` and `ripper_star` all use it the same way:
+`trail.install()` in the claim, `trail.BEAM`/`trail.GLOW` in `sprites`, attach on
+the round's first missile frame (or on the id `wa.weapons.launch` returns), and
+`trail.drop(id)` at the impact. The SDK is its own library bundle
+(`effects.sdk`, exports `wf-lib/effects/trail`).
+
+New in the editor (`project.ribbonTrail`, card on Indices & Particles):
+- knobs are the module's own: `max` (points), `every` (frames per point),
+  `vanish` (frames between shed points while fading), `core_w`, `glow_w` and a
+  hex colour converted to `r,g,b`; presets cover PX's bullet numbers
+  (12/2/2/8/13/white), a thin line and a long green streak.
+- generated Lua emits `dependencies = ["effects.sdk"]` in mod.toml,
+  `local trail = require("wf-lib/effects/trail")`, `trail.install()`, the two
+  SDK sheets in the claim's `sprites`, and a `wa.on.missile_frame` hook that
+  adds the trail on a round's first `pre` frame with a `TRAIL` table.
+- the hook finds an owner the way the SDK does (turn worm, else any living
+  worm), because WA fires the record itself and there is no `launch` id.
+- **Cluster bits.** Target `main` remembers the live ids in an array and skips a
+  round whose first frame arrives while one of them still has a ribbon: bits are
+  born where the parent died, while its ribbon is still shedding points. Target
+  `all` trails every round of the burst instead. The ids are iterated with
+  `ipairs`, not `pairs`, so wfcheck's `lockstep-pairs` stays quiet.
+- **Scope.** Only missile families (`power`, and `drop` with a fuse) show the
+  card. A strike's bombs and crate bombs have no `m.weapon`, so a strike cannot
+  be matched by weapon id; mines/actors (taze_mine's use) need sampling from the
+  actor's own frame, which is a different hook and not built yet.
+- Verified: generated Lua has the require/install/hook and no `pairs`;
+  mod.toml lists `effects.sdk`; `wfcheck --format pretty` reports no findings;
+  Playwright applies the presets and the colour/width fields, and the Code view
+  shows the emitted `TRAIL` values.
+
+## In-game behaviour test pack (`tools/gen_test_pack.ts`)
+
+Twenty components in one bundle, one profile, all art from
+`spec/default_grenade.png`. The script has a tiny PNG codec (8-bit RGBA
+decode/encode, no dependencies) and bakes 360° rotation strips with the same
+convention as `src/utils/rotateSheet.ts`, so a pack can be thrown into
+`WormForge/Mods/` and the engine behaviours checked in one match.
+
+Coverage: sprite-builder track/rotation and builder+homing, stock sprite 50 as
+the baseline, claim `sprite` with animation 1/2, cluster bit sheets with
+animation 1/2/5 and `sprite_count = 1`, native trail pack art (missile and bit),
+effects-SDK ribbon trail (main and every-round, incl. a roam animal), strikes
+(claim body still/directional, strike cluster bits, homing strike art), and a
+fire payload. Each entry in `test_pack/README.md` states its intent, expected
+result and failure symptom.
+
+Output is git-ignored. `bun run tools/gen_test_pack.ts` regenerates it; `wfcheck
+--format pretty test_pack/wftest_pack` is clean for all 20 Lua files.
+
+## UI: nested record sections and the dead native-trail card
+
+- `recordTabs.tsx` tabs can carry `parent`. Collision Bitmask now sits under
+  Missile Action (`parent: 'action'`), which also tidies the sidebar and the
+  mobile picker (`— Collision Bitmask`). The parent row is still a normal button
+  that selects its own tab; a chevron on its right toggles the children
+  (`aria-expanded`), open by default through the sidebar's `openGroups` state.
+  This is the shape to reuse for Clusters/Air strike if they grow sub-sections.
+- The native trail card was unusable: "Enable Trail" and every preset called
+  `updateOverride` several times in one handler, and each call spread the same
+  `project.recordOverrides` prop, so only the final key survived. The checkbox
+  therefore unchecked itself and every trail field stayed disabled (presets left
+  a stray `sprite` write). Added `updateOverrides(patch)` that merges all keys in
+  one `onChange`; the checkbox now writes enabled + power/speed/sprite together
+  and the presets write their four values. Verified in the browser: enable
+  checks, fields un-disable with 25/250/smoke, "Spark Emitter" gives 40/180/
+  sparks, and the generated Lua contains the `trail = { sprite = "sparks", ... }`
+  block.
+
+## Burst Payload split into sections
+
+The clusters editor was one enormous page. It is now a parent plus five
+children in `recordTabs.tsx` (same `parent` mechanism as Collision Bitmask):
+
+- `burst` — payload selector (plain / clusters / fire), cluster ejection numbers
+  and the fire payload fields;
+- `burst_bit` — "Bit Behaviour": bit action selector, sprite/trail, damage,
+  gravity, speed, fuse, sounds and pack art;
+- `burst_bit_collision` — "Bit Collision": the bit's `ends_on_contact` grid;
+- `burst_bit_bounce`, `burst_bit_homing`, `burst_bit_roam`, `burst_bit_dig` — one
+  entry per bit action.
+
+Those entries are **navigation helpers, not separate views**: the whole burst
+page stays on screen (selector, ejection numbers, behaviour, collision, the
+matching action group, fire payload) and a child click scrolls to its `id`. Only
+the sections that apply are rendered: bit sections need `burst = "clusters"`,
+and an action entry/section appears only while `bit.action` is that action
+(`visibleRecordTabs` + `bitActionOf` in `recordTabs.tsx`). Verified in the
+browser: no bit entries for a plain payload, Bit Behaviour/Collision plus only
+Bit Bounce for a bouncing bit, the page shows behaviour + collision + bounce
+together, clicking Bit Collision scrolls to the grid, and switching the bit
+action to homing swaps the nav entry and the section.

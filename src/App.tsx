@@ -123,6 +123,16 @@ const INITIAL_PROJECT: WeaponProject = {
     spread_generations: 10,
     decay_mode: 'resting',
   },
+  ribbonTrail: {
+    enabled: false,
+    max: 12,
+    every: 2,
+    vanish: 2,
+    coreWidth: 8,
+    glowWidth: 13,
+    color: '#ffffff',
+    target: 'main',
+  },
   hold: {
     enabled: true,
     sheet: '',
@@ -130,7 +140,7 @@ const INITIAL_PROJECT: WeaponProject = {
     handRadius: 10,
     // PX holds are authored right-facing: at level aim a negative radius puts
     // the weapon on the forward side. Positive radii are the rear-hand side.
-    weapRadius: -8,
+    weapRadius: 6,
     weapRotation: 0,
     scale: 1,
     handScale: 1,
@@ -319,11 +329,11 @@ export default function App() {
     editor: {
       eyebrow: 'Weapon Record',
       title: 'Shape the weapon',
-      description: 'Identity, donor slot, flight physics, payload and collision behaviour.',
+      description: 'Type, donor slot, flight physics, payload and collision behaviour.',
     },
     hold: {
       eyebrow: 'Hold & Sprite Builder',
-      title: 'Grip and flight art',
+      title: 'Aim and flight art',
       description: 'Check the worm hold at every aim angle and the 50 Hz missile animation.',
     },
     code: {

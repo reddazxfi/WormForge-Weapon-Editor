@@ -331,7 +331,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     }
 
     // 2. Weapon Sprite
-    const weapRadius = Number(hold.weapRadius ?? -8);
+    const weapRadius = Number(hold.weapRadius ?? 6);
     const scale = (Number(hold.scale) || 1) * putAwayShrink;
 
     // worm_hold.rs: `rot_w = rot + PI * weap_radial_rotation`; the generator

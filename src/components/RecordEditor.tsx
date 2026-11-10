@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   WeaponProject,
   CollisionMask,
@@ -8,6 +8,7 @@ import {
   ClustletConfig,
   RoamActionConfig,
   DigActionConfig,
+  RibbonTrailConfig,
 } from '../types/weapon';
 import { COLLISION_FLAGS, MISSILE_ANIM_HINT, MISSILE_ANIM_TYPES } from '../data/recordSchema';
 
@@ -94,7 +95,7 @@ import {
   Volume2,
   Sliders,
 } from 'lucide-react';
-import type { RecordTabId } from '../data/recordTabs';
+import { bitActionOf, type RecordTabId } from '../data/recordTabs';
 import { PackSpriteUpload } from './PackSpriteUpload';
 
 interface RecordEditorProps {
@@ -118,6 +119,14 @@ const STOCK_MISSILE_SPRITES = [
   { id: 'petrol_bomb', name: 'Petrol / Fire Bomb ("petrol_bomb")' },
   { id: 'holy_grenade', name: 'Holy Hand Grenade ("holy_grenade")' },
   { id: 'arrow', name: 'Bow Arrow ("arrow")' },
+];
+
+const BURST_BIT_TABS: RecordTabId[] = [
+  'burst_bit',
+  'burst_bit_bounce',
+  'burst_bit_homing',
+  'burst_bit_roam',
+  'burst_bit_dig',
 ];
 
 const DEFAULT_BIT_ROAM: RoamActionConfig = {
@@ -159,9 +168,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
   // follow: their art lives on the claim's `sprite` field and in the shifted
   // munition slab.
   const isStrike = project.fireType === 'cursor' && !project.teleport;
-  const bitAction =
-    clustlet.bit_action ??
-    (clustlet.homing !== 'off' ? 'homing' : clustlet.contact === 'bounce' ? 'bounce' : 'none');
+  const bitAction = bitActionOf(clustlet);
 
   const updateBody = (patch: Partial<typeof body>) => {
     onChange({ body: { ...body, ...patch } });
@@ -179,6 +186,58 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
       updated[path] = value;
     }
     onChange({ recordOverrides: updated });
+  };
+
+  // Several keys at once. Calling `updateOverride` twice in one handler loses
+  // the first write: each call spreads the same `project.recordOverrides` prop,
+  // so only the last one survives (this is what made the trail checkbox look
+  // dead - it enabled the trail and then overwrote it with the preset fields).
+  const updateOverrides = (patch: Record<string, any>) => {
+    const updated = { ...project.recordOverrides };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined || value === '' || value === null) delete updated[key];
+      else updated[key] = value;
+    }
+    onChange({ recordOverrides: updated });
+  };
+
+  const isBurstTab = activeSubTab === 'burst' || BURST_BIT_TABS.includes(activeSubTab);
+
+  // The burst sub-tabs are navigation helpers over one page: the whole payload
+  // stays on screen and a click scrolls to its section.
+  useEffect(() => {
+    if (!activeSubTab.startsWith('burst')) return;
+    const anchors: Record<string, string> = {
+      burst: 'burst-payload',
+      burst_bit: 'burst-bit',
+      burst_bit_collision: 'burst-bit-collision',
+      burst_bit_bounce: 'burst-bit-bounce',
+      burst_bit_homing: 'burst-bit-homing',
+      burst_bit_roam: 'burst-bit-roam',
+      burst_bit_dig: 'burst-bit-dig',
+    };
+    const target = anchors[activeSubTab];
+    if (!target) return;
+    document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [activeSubTab]);
+
+  // Effects-SDK ribbon trail. Only a missile family has rounds for
+  // `wa.on.missile_frame` to hand the trail module (a strike's bombs have no
+  // weapon id).
+  const canRibbonTrail =
+    project.fireType === 'power' || (project.fireType === 'drop' && body.fuse);
+  const ribbon: RibbonTrailConfig = project.ribbonTrail ?? {
+    enabled: false,
+    max: 12,
+    every: 2,
+    vanish: 2,
+    coreWidth: 8,
+    glowWidth: 13,
+    color: '#ffffff',
+    target: 'main',
+  };
+  const updateRibbon = (patch: Partial<RibbonTrailConfig>) => {
+    onChange({ ribbonTrail: { ...ribbon, ...patch } });
   };
 
   // Two independent selections. `ends_on_contact` stops the projectile;
@@ -1077,9 +1136,10 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
         </div>
       )}
 
-      {/* Tab 3: Burst Payload (Single Choice: Plain / Clusters / Fire) */}
-      {activeSubTab === 'burst' && (
+      {/* Tab 3: Burst Payload and its sub-sections */}
+      {isBurstTab && (
         <div className="p-6 space-y-6">
+          <div id="burst-payload" className="scroll-mt-6 space-y-6">
           <div>
             <h3 className="font-heading text-sm font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
               Burst Payload Selection (`burst`)
@@ -1253,9 +1313,17 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   </p>
                 </div>
               </div>
+            </div>
+          )}
+          </div>
 
+          {project.burst === 'clusters' && (
+            <div
+              id="burst-bit"
+              className="scroll-mt-6 p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-4 animate-in fade-in"
+            >
               {/* Cluster bit action & behaviour (`clusters.bit`) */}
-              <div className="pt-4 border-t border-stone-200 dark:border-stone-800 space-y-4">
+              <div className="space-y-4">
                 <div>
                   <div className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
                     Cluster Bit Behaviour (`clusters.bit`)
@@ -1442,15 +1510,31 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   </div>
                 )}
 
-                <div className="space-y-2">
-                  <div className="text-[11px] font-bold text-stone-700 dark:text-stone-300 uppercase tracking-wide">
-                    Bit Contact Ends On (`bit.ends_on_contact`)
-                  </div>
-                  {bitMaskGrid('ends_on_contact', clustlet.ends_on_contact)}
-                </div>
+              </div>
+            </div>
+          )}
 
-                {bitAction === 'bounce' && (
-                  <div className="p-3 rounded-xl border border-forge-500/30 bg-forge-50/10 dark:bg-forge-950/10 space-y-4">
+          {project.burst === 'clusters' && (
+            <div
+              id="burst-bit-collision"
+              className="scroll-mt-6 p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-3 animate-in fade-in"
+            >
+              <div className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
+                Bit Contact Ends On (`bit.ends_on_contact`)
+              </div>
+              <p className="text-[11px] text-stone-500">
+                Targets whose contact ends the child. `bounce.hits` is separate: it only
+                adds targets the bounce action reacts to.
+              </p>
+              {bitMaskGrid('ends_on_contact', clustlet.ends_on_contact)}
+            </div>
+          )}
+
+                {project.burst === 'clusters' && bitAction === 'bounce' && (
+                  <div
+                    id="burst-bit-bounce"
+                    className="scroll-mt-6 p-3 rounded-xl border border-forge-500/30 bg-forge-50/10 dark:bg-forge-950/10 space-y-4"
+                  >
                     <div className="text-[11px] font-bold text-forge-700 dark:text-forge-300 uppercase tracking-wide">
                       Bit Bounce Configuration (`clusters.bit.bounce`)
                     </div>
@@ -1505,8 +1589,11 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   </div>
                 )}
 
-                {bitAction === 'homing' && (
-                  <div className="p-3 rounded-xl border border-sky-500/30 bg-sky-50/10 dark:bg-sky-950/10 space-y-4">
+                {project.burst === 'clusters' && bitAction === 'homing' && (
+                  <div
+                    id="burst-bit-homing"
+                    className="scroll-mt-6 p-3 rounded-xl border border-sky-500/30 bg-sky-50/10 dark:bg-sky-950/10 space-y-4"
+                  >
                     <div className="text-[11px] font-bold text-sky-700 dark:text-sky-300 uppercase tracking-wide">
                       Bit Homing Configuration (`clusters.bit.homing`)
                     </div>
@@ -1555,8 +1642,11 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   </div>
                 )}
 
-                {bitAction === 'roam' && (
-                  <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-50/10 dark:bg-amber-950/10 space-y-4">
+                {project.burst === 'clusters' && bitAction === 'roam' && (
+                  <div
+                    id="burst-bit-roam"
+                    className="scroll-mt-6 p-3 rounded-xl border border-amber-500/30 bg-amber-50/10 dark:bg-amber-950/10 space-y-4"
+                  >
                     <div className="text-[11px] font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wide">
                       Bit Roaming Configuration (`clusters.bit.roam`)
                     </div>
@@ -1615,8 +1705,11 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   </div>
                 )}
 
-                {bitAction === 'dig' && (
-                  <div className="p-3 rounded-xl border border-orange-500/30 bg-orange-50/10 dark:bg-orange-950/10 space-y-4">
+                {project.burst === 'clusters' && bitAction === 'dig' && (
+                  <div
+                    id="burst-bit-dig"
+                    className="scroll-mt-6 p-3 rounded-xl border border-orange-500/30 bg-orange-50/10 dark:bg-orange-950/10 space-y-4"
+                  >
                     <div className="text-[11px] font-bold text-orange-700 dark:text-orange-300 uppercase tracking-wide">
                       Bit Digging Configuration (`clusters.bit.dig`)
                     </div>
@@ -1629,9 +1722,6 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     </div>
                   </div>
                 )}
-              </div>
-            </div>
-          )}
 
           {/* Fire payload configuration */}
           {project.burst === 'fire' && (
@@ -1864,12 +1954,20 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     type="checkbox"
                     checked={!!project.recordOverrides['missile.trail.enabled']}
                     onChange={(e) => {
-                      updateOverride('missile.trail.enabled', e.target.checked);
-                      if (e.target.checked && project.recordOverrides['missile.trail.power'] === undefined) {
-                        updateOverride('missile.trail.power', 25);
-                        updateOverride('missile.trail.speed', 250);
-                        updateOverride('missile.trail.sprite', 'smoke');
+                      if (!e.target.checked) {
+                        updateOverride('missile.trail.enabled', false);
+                        return;
                       }
+                      updateOverrides({
+                        'missile.trail.enabled': true,
+                        ...(project.recordOverrides['missile.trail.power'] === undefined
+                          ? {
+                              'missile.trail.power': 25,
+                              'missile.trail.speed': 250,
+                              'missile.trail.sprite': 'smoke',
+                            }
+                          : {}),
+                      });
                     }}
                     className="rounded text-forge-600 focus:ring-forge-500 w-3.5 h-3.5"
                   />
@@ -1884,36 +1982,42 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                 <span className="text-[10px] text-stone-400 font-medium mr-1 uppercase">Presets:</span>
                 <button
                   type="button"
-                  onClick={() => {
-                    updateOverride('missile.trail.enabled', true);
-                    updateOverride('missile.trail.sprite', 'smoke');
-                    updateOverride('missile.trail.power', 25);
-                    updateOverride('missile.trail.speed', 250);
-                  }}
+                  onClick={() =>
+                    updateOverrides({
+                      'missile.trail.enabled': true,
+                      'missile.trail.sprite': 'smoke',
+                      'missile.trail.power': 25,
+                      'missile.trail.speed': 250,
+                    })
+                  }
                   className="px-2 py-1 text-[11px] rounded bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 font-medium transition-colors cursor-pointer"
                 >
                   Smoke Trail
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    updateOverride('missile.trail.enabled', true);
-                    updateOverride('missile.trail.sprite', 'sparks');
-                    updateOverride('missile.trail.power', 40);
-                    updateOverride('missile.trail.speed', 180);
-                  }}
+                  onClick={() =>
+                    updateOverrides({
+                      'missile.trail.enabled': true,
+                      'missile.trail.sprite': 'sparks',
+                      'missile.trail.power': 40,
+                      'missile.trail.speed': 180,
+                    })
+                  }
                   className="px-2 py-1 text-[11px] rounded bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 font-medium transition-colors cursor-pointer"
                 >
                   Spark Emitter
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    updateOverride('missile.trail.enabled', true);
-                    updateOverride('missile.trail.sprite', 'fire_smoke');
-                    updateOverride('missile.trail.power', 50);
-                    updateOverride('missile.trail.speed', 320);
-                  }}
+                  onClick={() =>
+                    updateOverrides({
+                      'missile.trail.enabled': true,
+                      'missile.trail.sprite': 'fire_smoke',
+                      'missile.trail.power': 50,
+                      'missile.trail.speed': 320,
+                    })
+                  }
                   className="px-2 py-1 text-[11px] rounded bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 font-medium transition-colors cursor-pointer"
                 >
                   Fire Smoke
@@ -2046,6 +2150,242 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                 </label>
               </div>
             </div>
+
+            {/* Card: effects-SDK ribbon trail. The stock particle trail above is
+                a record field with a stock sprite; this one is drawn by Lua from
+                sampled positions, so colour and widths are free. */}
+            {canRibbonTrail && (
+              <div className="md:col-span-2 p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-850/40 space-y-4">
+                <div className="flex items-center justify-between border-b border-stone-200 dark:border-stone-700/80 pb-2.5">
+                  <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-forge-500" />
+                    Ribbon Trail (`wf-lib/effects/trail`)
+                  </span>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={ribbon.enabled}
+                      onChange={(e) => updateRibbon({ enabled: e.target.checked })}
+                      className="rounded text-forge-600 focus:ring-forge-500 w-3.5 h-3.5"
+                    />
+                    <span className="text-xs font-semibold text-stone-700 dark:text-stone-300">
+                      Enable
+                    </span>
+                  </label>
+                </div>
+
+                <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                  Lua samples the round every {ribbon.every} game frame(s) and the engine
+                  draws a tapering ribbon through those points, so the colour and widths
+                  are yours — the stock particle trail above is a record field with a stock
+                  sprite. Adds the `effects.sdk` library to the bundle.
+                </p>
+
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  <span className="text-[10px] text-stone-400 font-medium mr-1 uppercase">Presets:</span>
+                  {[
+                    {
+                      name: 'PX bullet',
+                      patch: { max: 12, every: 2, vanish: 2, coreWidth: 8, glowWidth: 13, color: '#ffffff' },
+                    },
+                    {
+                      name: 'Thin line',
+                      patch: { max: 8, every: 1, vanish: 2, coreWidth: 3, glowWidth: 6, color: '#ffffff' },
+                    },
+                    {
+                      name: 'Green streak',
+                      patch: { max: 12, every: 1, vanish: 1, coreWidth: 5, glowWidth: 9, color: '#7cff5a' },
+                    },
+                  ].map((preset) => (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      onClick={() => updateRibbon(preset.patch)}
+                      className="px-2 py-1 text-[11px] rounded bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 font-medium transition-colors cursor-pointer"
+                    >
+                      {preset.name}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="ribbon-color"
+                      className="text-xs font-semibold text-stone-700 dark:text-stone-300"
+                    >
+                      Colour (`r`, `g`, `b`)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="ribbon-color"
+                        type="color"
+                        value={
+                          /^#[0-9a-fA-F]{6}$/.test(ribbon.color) ? ribbon.color : '#ffffff'
+                        }
+                        onChange={(e) => updateRibbon({ color: e.target.value })}
+                        className="h-8 w-10 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 cursor-pointer"
+                      />
+                      <input
+                        type="text"
+                        value={ribbon.color}
+                        onChange={(e) => updateRibbon({ color: e.target.value })}
+                        spellCheck={false}
+                        className="w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="ribbon-core"
+                      className="text-xs font-semibold text-stone-700 dark:text-stone-300"
+                    >
+                      Core width (`core_w`)
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="ribbon-core"
+                        type="number"
+                        min={0}
+                        max={40}
+                        step={0.5}
+                        value={ribbon.coreWidth}
+                        onChange={(e) => updateRibbon({ coreWidth: Number(e.target.value) })}
+                        className="w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                      />
+                      <span className="absolute right-2 top-1.5 text-[10px] text-stone-400">px</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="ribbon-glow"
+                      className="text-xs font-semibold text-stone-700 dark:text-stone-300"
+                    >
+                      Glow width (`glow_w`)
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="ribbon-glow"
+                        type="number"
+                        min={0}
+                        max={40}
+                        step={0.5}
+                        value={ribbon.glowWidth}
+                        onChange={(e) => updateRibbon({ glowWidth: Number(e.target.value) })}
+                        className="w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                      />
+                      <span className="absolute right-2 top-1.5 text-[10px] text-stone-400">px</span>
+                    </div>
+                    <p className="text-[10px] text-stone-400">0 draws the core only.</p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="ribbon-max"
+                      className="text-xs font-semibold text-stone-700 dark:text-stone-300"
+                    >
+                      Length (`max`)
+                    </label>
+                    <input
+                      id="ribbon-max"
+                      type="number"
+                      min={2}
+                      max={64}
+                      value={ribbon.max}
+                      onChange={(e) => updateRibbon({ max: Number(e.target.value) })}
+                      className="w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                    />
+                    <p className="text-[10px] text-stone-400">Points kept.</p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="ribbon-every"
+                      className="text-xs font-semibold text-stone-700 dark:text-stone-300"
+                    >
+                      Sample every (`every`)
+                    </label>
+                    <input
+                      id="ribbon-every"
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={ribbon.every}
+                      onChange={(e) => updateRibbon({ every: Number(e.target.value) })}
+                      className="w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                    />
+                    <p className="text-[10px] text-stone-400">Game frames per point.</p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="ribbon-vanish"
+                      className="text-xs font-semibold text-stone-700 dark:text-stone-300"
+                    >
+                      Fade (`vanish`)
+                    </label>
+                    <input
+                      id="ribbon-vanish"
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={ribbon.vanish}
+                      onChange={(e) => updateRibbon({ vanish: Number(e.target.value) })}
+                      className="w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                    />
+                    <p className="text-[10px] text-stone-400">Frames between shed points.</p>
+                  </div>
+
+                  <div className="space-y-1 col-span-2">
+                    <span className="text-xs font-semibold text-stone-700 dark:text-stone-300">
+                      Attach to
+                    </span>
+                    <div className="grid grid-cols-2 gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-lg border border-stone-200 dark:border-stone-700 text-xs">
+                      {(
+                        [
+                          { id: 'main', label: 'Main round' },
+                          { id: 'all', label: 'Every round + bits' },
+                        ] as const
+                      ).map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => updateRibbon({ target: option.id })}
+                          className={`py-1.5 font-medium rounded-md transition-colors ${
+                            ribbon.target === option.id
+                              ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-bold'
+                              : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-stone-400">
+                      Main round skips cluster bits (they are born where the parent's
+                      ribbon is still fading). Every round trails a full burst.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div
+                    aria-hidden="true"
+                    className="h-1.5 w-full rounded-full"
+                    style={{
+                      background: `linear-gradient(90deg, transparent, ${ribbon.color})`,
+                      boxShadow: ribbon.glowWidth > 0 ? `0 0 6px ${ribbon.color}88` : undefined,
+                    }}
+                  />
+                  <p className="text-[10px] text-stone-400">
+                    Ribbon fades toward the tail; widths and colour are emitted as
+                    `TRAIL` in the generated Lua.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Card 3: Native Sound & Sub-Action Indices */}
             <div className="md:col-span-2 p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-850/40 space-y-4">

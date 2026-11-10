@@ -100,8 +100,21 @@ Node 26.x, Vite 8.3.x, React 19.3.x, Tailwind 4.3.x, TypeScript 7.0.x.
 
 - `activeTab: 'editor' | 'hold' | 'code'` (hotkeys `1` / `2` / `3`, ignored
   while typing in an input/textarea/select);
-- `activeSubTab: RecordTabId` (the eight record sections, shared with the
-  sidebar and mobile `<select>`);
+- `activeSubTab: RecordTabId` (the record sections, shared with the sidebar and
+  mobile `<select>`); `recordTabs.tsx` nests a section under another with
+  `parent`. Collision Bitmask sits under Missile Action, and Burst Payload owns
+  Bit Behaviour, Bit Collision and one entry per bit action (Bit Bounce/Homing/
+  Roam/Dig). The parent row still selects its own tab and a chevron opens/closes
+  the children (sidebar `openGroups`, open by default); the mobile picker
+  prefixes children with `—`.
+- The burst sub-tabs are **navigation helpers over one page**, not separate
+  views: every payload section is rendered together (selector, ejection, bit
+  behaviour, bit collision, the selected action group, fire payload), and
+  clicking a child scrolls to its `id` (`RecordEditor`'s `activeSubTab` effect).
+  `visibleRecordTabs(burst, bitAction)` in `recordTabs.tsx` hides the bit
+  sections unless the payload is clusters and an action entry unless that action
+  is selected; `bitActionOf()` is the single bit-action expression. Other tabs
+  (Flight, Action, …) stay exclusive — do not mix the two models.
 - `isDark` with `localStorage['wf_theme_v2']`; **light is the default** unless a
   stored value says dark. `index.html` applies the stored class before paint.
 - modals: `.wep` import and the inline bundle-code view.
@@ -208,7 +221,19 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
 - Clustlets carry `clusters.bit.action` (`impact`/`bounce`/`homing`/`roam`/
   `dig`). The groups share native slots, so decode/emit only the active group.
 - `dependencies = ["wf.sdk"]` is added when hold art or the PX flight builder is
-  used.
+  used; `effects.sdk` is added for the ribbon trail (it exports
+  `wf-lib/effects/trail` and its beam/glow sheets).
+- **Ribbon trail (`project.ribbonTrail`).** The effects SDK samples the round on
+  game frames and draws a tapering ribbon, so colour (`r,g,b` from a hex UI
+  colour), `core_w`/`glow_w`, `max`, `every` and `vanish` are free. Emission:
+  `require("wf-lib/effects/trail")`, `trail.install()`, `trail.BEAM`/`trail.GLOW`
+  in the claim's `sprites`, and a `wa.on.missile_frame` hook that adds the trail
+  on a round's first `pre` frame (WA fires the record itself, so there is no
+  `launch` id, as in px_ninja_star/famas/megashark). Target `main` skips cluster
+  bits (they appear where the parent died while its ribbon is still fading);
+  `all` trails a whole burst. Live trail ids are kept in an array, never with
+  `pairs` (wfcheck `lockstep-pairs`). Only missile families get the card: strike
+  bombs have no `m.weapon`, so their rounds cannot be matched this way.
 - Hold geometry is emitted in PX units:
   `weap_rotation = 1 + degrees/180`, `hand_rotation = 1`,
   `weap_radial_rotation = 1`, `hand_radial_rotation = 1`.
@@ -342,6 +367,19 @@ bun run lint
 bun run build
 ```
 
+Test pack for engine behaviour (dev only, output is git-ignored):
+
+```powershell
+bun run tools/gen_test_pack.ts   # -> test_pack/wftest_pack/ + test_pack/README.md
+```
+
+It writes one bundle with 20 components, one profile ("WF Test Pack") and all
+art derived from `spec/default_grenade.png` (single frame for the sprite builder,
+32/16-frame rotation strips for bits, a 4-frame strip for native trails). Each
+test carries its intent, expected result and failure symptom in
+`test_pack/README.md`; the profile places them on 20 distinct stock slots with
+infinite ammo.
+
 Compiler check (lives in the code-editor repo):
 
 ```powershell
@@ -449,6 +487,12 @@ that `vite preview` at `/` hides).
     WormForge's debris port (`particles.rs` switches on a differently-numbered
     `anim_kind`) or from PX's `WeapSprite` type numbers, which are not the
     record's values. Details in the notes file.
+19. **One handler, one `onChange`.** `updateOverride` spreads the
+    `project.recordOverrides` prop, so calling it twice in a row keeps only the
+    last key (this made the native trail checkbox look dead: it enabled the
+    trail and then overwrote that write with the preset fields). Use
+    `updateOverrides(patch)` for multi-key edits. The same staleness applies to
+    any `onChange` object built from `project` rather than from previous state.
 
 ---
 
