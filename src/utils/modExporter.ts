@@ -4,6 +4,8 @@ import {
   generateLuaCode,
   generateModToml,
   generateProfileToml,
+  packArtPath,
+  PACK_ART_SLOTS,
   sanitizeModFolder,
   wepBundlePath,
 } from './luaGenerator';
@@ -65,6 +67,16 @@ export async function exportModZip(project: WeaponProject): Promise<Blob> {
           project.missileSprite.frames
         );
     zip.file(`${modFolder}/sprites/${modFolder}/missile.png`, missileBlob);
+  }
+
+  // Uploaded record art (trails, cluster bit sheets). The Lua and mod.toml
+  // point at this exact path, so the file is always written when it is declared.
+  for (const slot of PACK_ART_SLOTS) {
+    const asset = project.packArt?.[slot];
+    const path = packArtPath(project, slot);
+    if (asset?.file && path) {
+      zip.file(`${modFolder}/${path}`, asset.file);
+    }
   }
 
   // Any other custom sprite assets

@@ -39,6 +39,30 @@ export const COLLISION_FLAGS: Record<string, number> = {
   water: 4194304,
 };
 
+/**
+ * WA's animation type (`missile.animation`, `clusters.bit.animation`,
+ * `missile.homing.animation`, `clusters.bit.homing.animation`). The field does
+ * not change how many frames the sheet has - the art does - it says where the
+ * drawn frame's animation value comes from, and WA picks the frame from that.
+ *
+ * The numbers below come from PX's weapon editor: seven otherwise identical
+ * grenade records that differ only at record +0x64
+ * (`wep_Formatting/grenade_animtypes/`, fire type 1 / subtype 2 / method 3).
+ * PX's editor lists them in this same order, and its `WeapSprite` uses the
+ * 0.5 / 0.8 / 1.35 spin rates for slow / faster / fast.
+ */
+export const MISSILE_ANIM_TYPES: { value: number; label: string }[] = [
+  { value: 0, label: 'Horiz. velocity (frames follow |vx|, mirrored left)' },
+  { value: 1, label: 'Cycle (spins through the sheet; WA grenade)' },
+  { value: 2, label: 'Track movement (faces the flight; WA bazooka)' },
+  { value: 3, label: 'Track speed (PX speed-tracking mode)' },
+  { value: 4, label: 'Slow cycle (0.5x spin)' },
+  { value: 5, label: 'Faster cycle (0.8x spin)' },
+  { value: 6, label: 'Fast cycle (1.35x spin)' },
+];
+
+export const MISSILE_ANIM_HINT =
+  'WA animation type, by PX\u2019s own names: 0 horiz. velocity, 1 cycle, 2 track movement, 3 track speed, 4 slow / 5 faster / 6 fast cycle. The sheet frame count comes from the art, not this number.';
 export const RECORD_GROUPS: { id: string; label: string; icon?: string }[] = [
   { id: 'fires', label: 'Firing & Launch' },
   { id: 'handling', label: 'Handling & Shots' },

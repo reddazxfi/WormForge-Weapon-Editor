@@ -2,6 +2,7 @@ import {
   BodyConfig,
   ClustletConfig,
   DigActionConfig,
+  PackArtSlot,
   RoamActionConfig,
   WeaponProject,
 } from '../types/weapon';
@@ -80,6 +81,53 @@ export function holdSheetPath(project: WeaponProject): string {
   return sheet && sheet.startsWith(own) ? sheet : `${own}hold.png`;
 }
 
+/** Every record slot that accepts pack art during installation. */
+export const PACK_ART_SLOTS: PackArtSlot[] = [
+  'strike_sprite',
+  'missile_trail',
+  'cluster_sprite',
+  'cluster_homing_sprite',
+  'cluster_trail',
+];
+
+/** Bundle filenames for the pack art. They are fixed per slot so the file name
+ *  cannot collide with hold.png / missile.png / icon.png in the same folder. */
+const PACK_ART_STEM: Record<PackArtSlot, string> = {
+  missile_trail: 'trail',
+  cluster_sprite: 'bit',
+  cluster_homing_sprite: 'bit_homing',
+  cluster_trail: 'bit_trail',
+  strike_sprite: 'body',
+};
+
+/** Whether an uploaded sheet for this slot reaches the record at all. The
+ *  engine writes a strike's cluster render timer with `set_cluster_render_timer`
+ *  (entry+0x170) and no strike shift; the shifted slot is 0x184, so
+ *  `cluster.homing_sprite` would land on another field of a fire type 3 record.
+ *  A strike's munition homing art follows the claim `sprite` (0xC0) instead. */
+export function packArtSlotApplies(project: WeaponProject, slot: PackArtSlot): boolean {
+  if (slot === 'cluster_homing_sprite') {
+    return !(project.fireType === 'cursor' && !project.teleport);
+  }
+  return true;
+}
+
+/** Where an uploaded pack-art sheet is written in the exported bundle, or null
+ *  when that slot has no upload. Worked out from the current weapon id on every
+ *  export, so a rename cannot leave a stale `sprites/<old id>/...` path. */
+export function packArtPath(project: WeaponProject, slot: PackArtSlot): string | null {
+  const asset = project.packArt?.[slot];
+  // The generator, mod.toml and the exporter must agree: no file, no path, so a
+  // declaration can never point at an image the archive does not contain.
+  if (!asset?.file || !packArtSlotApplies(project, slot)) return null;
+  const fileName = asset.file.name || asset.fileName || '';
+  if (!fileName) return null;
+  // The engine slices by file type: PNG strips are sliced by `frames`, GIFs
+  // carry their own timing, so keep the real extension.
+  const extension = fileName.toLowerCase().endsWith('.gif') ? 'gif' : 'png';
+  return `sprites/${sanitizeModFolder(project.id)}/${PACK_ART_STEM[slot]}.${extension}`;
+}
+
 /** A safe `.wep` filename for the exported bundle. */
 export function sanitizeWepFileName(name: string): string {
   const base = (name || 'weapon.wep').replace(/\\/g, '/').split('/').pop() || 'weapon.wep';
@@ -98,6 +146,15 @@ export function generateLuaCode(project: WeaponProject): string {
   const modFolder = sanitizeModFolder(project.id);
   const donor = project.based_on.startsWith('stock.') ? project.based_on : `stock.${project.based_on}`;
   const lines: string[] = [];
+
+  // Uploaded pack art. Trails and cluster sheets are loaded by the engine for
+  // this weapon only (the path is an installation declaration, not something a
+  // simulation-time `launch` override can use).
+  const strikeBodyArt = packArtPath(project, 'strike_sprite');
+  const missileTrailArt = packArtPath(project, 'missile_trail');
+  const clusterBitArt = packArtPath(project, 'cluster_sprite');
+  const clusterBitHomingArt = packArtPath(project, 'cluster_homing_sprite');
+  const clusterBitTrailArt = packArtPath(project, 'cluster_trail');
 
   const usesHold = project.hold && project.hold.enabled;
   const missileSpriteEnabled = !!project.missileSprite?.enabled;
@@ -156,6 +213,31 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push(`      panel_icon = ${luaQuote(`sprites/${modFolder}/icon.png`)},`);
   } else if (project.panel_icon) {
     lines.push(`      panel_icon = ${luaQuote(project.panel_icon)},`);
+  }
+
+  // Cluster bit art is a claim-level declaration: the engine loads the sheet
+  // and writes its installed id into `clusters.bit.sprite` (or the strike's
+  // cluster sprite) / the cluster render timer. A pack path cannot go into the
+  // record tables themselves; those take stock names or numeric ids.
+  const clusterArt: string[] = [];
+  if (clusterBitArt) clusterArt.push(`sprite = ${luaQuote(clusterBitArt)}`);
+  // `cluster.homing_sprite` is applied with `set_cluster_render_timer`, which
+  // writes entry+0x170 with no strike shift. `packArtPath` refuses it on a fire
+  // type 3 record (see `packArtSlotApplies`), so this is safe for every family.
+  if (clusterBitHomingArt) {
+    clusterArt.push(`homing_sprite = ${luaQuote(clusterBitHomingArt)}`);
+  }
+  if (clusterArt.length > 0) {
+    lines.push(`      cluster = { ${clusterArt.join(', ')} },`);
+  }
+
+  // The weapon's own body sheet. For an air strike this is the only art path:
+  // the sprite builder follows a placed weapon's missile, and `missile.sprite`
+  // in a record takes stock ids only. `retarget_strike_sprite_id` writes the
+  // strike munition (0x74) and carries the sheet into its homing sprite (0xC0)
+  // and cluster sprite (0x138) when they shared the stock body.
+  if (strikeBodyArt) {
+    lines.push(`      sprite = ${luaQuote(strikeBodyArt)},`);
   }
 
   // Pack art the claim uses. `sb.flight` (below) reads its sheet through this
@@ -472,7 +554,25 @@ export function generateLuaCode(project: WeaponProject): string {
       'missile.trail.bubbles_per_second',
     ];
     const trailEnabled = project.recordOverrides['missile.trail.enabled'];
-    if (trailEnabled === false && baseOverrides['missile.trail.enabled']) {
+    if (missileTrailArt) {
+      // A pack image replaces the stock trail sprite for this weapon only; the
+      // engine loads it and writes its id into the native trail field.
+      lines.push('        trail = {');
+      lines.push(`          sprite = ${luaQuote(missileTrailArt)},`);
+      const packTrailPower = project.recordOverrides['missile.trail.power'];
+      if (packTrailPower !== undefined) {
+        lines.push(`          power = ${packTrailPower},`);
+      }
+      const packTrailSpeed = project.recordOverrides['missile.trail.speed'];
+      if (packTrailSpeed !== undefined) {
+        lines.push(`          speed = ${packTrailSpeed},`);
+      }
+      const packTrailBubbles = project.recordOverrides['missile.trail.bubbles_per_second'];
+      if (packTrailBubbles !== undefined) {
+        lines.push(`          bubbles_per_second = ${packTrailBubbles},`);
+      }
+      lines.push('        },');
+    } else if (trailEnabled === false && baseOverrides['missile.trail.enabled']) {
       // Clearing a trail inherited from the imported record: sprite 0 is the
       // engine's "no trail" value.
       lines.push('        trail = { sprite = 0 },');
@@ -780,7 +880,7 @@ export function generateLuaCode(project: WeaponProject): string {
     // Clusters block. `clusters.bit` is the child missile body, so it takes
     // the same action groups as `missile` (bounce/homing), not just a damage
     // number. The `.wep` importer decodes the child action at 0x168.
-    if (burst === 'clusters' && (burstTouched || clustletTouched)) {
+    if (burst === 'clusters' && (burstTouched || clustletTouched || clusterBitTrailArt)) {
       const c = body.clustlet;
       const baseCluster = baseBody?.clustlet;
       lines.push('      clusters = {');
@@ -860,7 +960,7 @@ export function generateLuaCode(project: WeaponProject): string {
         'bounce_explosion_variation',
       ].some((key) => clustletChanged(key as keyof ClustletConfig));
 
-      if (bitTouched || bitActionChanged) {
+      if (bitTouched || bitActionChanged || clusterBitTrailArt) {
         lines.push('        bit = {');
         if (bitActionChanged) lines.push(`          action = ${luaQuote(bitAction)},`);
 
@@ -878,6 +978,7 @@ export function generateLuaCode(project: WeaponProject): string {
         }
 
         if (
+          clusterBitTrailArt ||
           clustletChanged('trail') ||
           clustletChanged('trail_power') ||
           clustletChanged('trail_speed') ||
@@ -885,7 +986,12 @@ export function generateLuaCode(project: WeaponProject): string {
         ) {
           lines.push('          trail = {');
           const t = c.trail;
-          if (!t || t === 'none' || t === '0') {
+          if (clusterBitTrailArt) {
+            // Pack image: `clusters.bit.trail.sprite` accepts a bundle path
+            // (unlike `bit.sprite`, which only takes stock ids in the record).
+            // The engine loads the sheet for this weapon and writes its id in.
+            lines.push(`            sprite = ${luaQuote(clusterBitTrailArt)},`);
+          } else if (!t || t === 'none' || t === '0') {
             lines.push('            sprite = 0,');
           } else if (!isNaN(Number(t))) {
             lines.push(`            sprite = ${Number(t)},`);
@@ -1394,6 +1500,21 @@ export function generateModToml(project: WeaponProject): string {
     lines.push(`frames = ${project.hold.frames}`);
     lines.push(`fps = ${project.hold.fps || 15}`);
     lines.push('play = "loop"');
+  }
+
+  // Sheets uploaded for the fields that accept pack art. The engine slices and
+  // times them from these declarations, keyed by the same pack path Lua uses.
+  for (const slot of PACK_ART_SLOTS) {
+    const asset = project.packArt?.[slot];
+    const path = packArtPath(project, slot);
+    if (!asset || !path || emitted.has(path)) continue;
+    emitted.add(path);
+    lines.push('');
+    lines.push(`[sprites.${luaQuote(path)}]`);
+    // `frames` slices a vertical PNG; a GIF carries its own frame timing.
+    if (path.endsWith('.png') && asset.frames > 1) lines.push(`frames = ${asset.frames}`);
+    lines.push(`fps = ${asset.fps || 15}`);
+    lines.push(`play = ${luaQuote(asset.play || 'loop')}`);
   }
 
   for (const cs of Object.values(project.customSprites)) {

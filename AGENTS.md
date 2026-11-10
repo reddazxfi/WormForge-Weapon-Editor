@@ -41,6 +41,7 @@ different project. Do not modify it from this repository.
 │  │  ├─ WeaponSettings.tsx    # identity / donor / slot / icon / defaults
 │  │  ├─ RecordEditor.tsx      # the eight record sections
 │  │  ├─ HoldPreview.tsx       # hold + flight art builders (canvas)
+│  │  ├─ PackSpriteUpload.tsx  # upload for trail / cluster-bit pack art
 │  │  ├─ WepImportModal.tsx    # .wep drop zone and decode summary
 │  │  ├─ LuaPreviewModal.tsx   # generated Lua / mod.toml / profile
 │  │  └─ ProjectileSimulation.tsx # RETIRED, unused; do not re-enable
@@ -224,6 +225,32 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   `atan2(vy, vx) + PI/2` because PX sheets point up.
 - `missile.animation` is the native WA animation id and is unrelated to PX
   `anim`.
+- **Pack art on record sprite fields.** `missile.trail.sprite` and
+  `clusters.bit.trail.sprite` accept a bundle path inside the record tables;
+  the engine loads the sheet for that weapon and writes its installed id into
+  the native field. `cluster.sprite`, `cluster.homing_sprite` and the weapon's
+  own `sprite` are claim-level declarations (`cluster = { sprite, homing_sprite }`,
+  `sprite = "..."`): the engine installs the sheet and writes the id at install
+  (`clusters.bit.sprite` / strike cluster 0x138, cluster render timer, strike
+  body 0x74 — `retarget_strike_sprite_id` also carries the body sheet into the
+  strike's homing sprite 0xC0 and cluster sprite 0x138 when they shared it). A
+  path must never be written into the record's `bit.sprite`, which only takes
+  stock names or numeric ids. Uploads live in `project.packArt` and are emitted
+  through `packArtPath()`; an untouched `.wep` import still emits no tables,
+  except the one trail path that has to reach the record.
+- **Air strikes have no sprite-builder path.** `sb.flight` follows a placed
+  weapon's missile, and a strike fires created munitions, so its art is the
+  claim `sprite` (PX's `homing_air_strike` / `thumper_nade_strike` do exactly
+  this). Natively drawn sheets carry the rotation themselves, in WA's airmisl
+  order: a vertical strip, frame 0 up, clockwise, 32 frames for a full turn;
+  `missile.animation = 2` picks the frame from the flight direction and `1`
+  walks it with the missile's spin. `PackSpriteUpload`'s rotation sheet builds
+  that strip from a single frame (padded square cell, `frames` declared).
+- **No `cluster.homing_sprite` on strikes.** The engine applies it with
+  `set_cluster_render_timer`, which writes entry+0x170 with no strike shift;
+  the shifted slot is 0x184, so a fire type 3 record would have another cluster
+  field overwritten. `packArtSlotApplies()` refuses it there and the UI shows
+  the gap instead of the upload card.
 
 ---
 
@@ -285,6 +312,8 @@ never declare it without writing the file.
 - `mod.toml`, `weapons/<mod>.lua`, `profiles/<Name>.toml` are always written.
 - `weps/<file>.wep` is written only when `useWepFile` is on.
 - `sprites/<mod>/icon.png` when a custom icon exists.
+- `sprites/<mod>/body.png` when the weapon's own sheet (`sprite`) is uploaded —
+  the only art path for an air strike's munition.
 - `sprites/<mod>/hold.png` whenever hold art is enabled: uploaded sheet if
   present, otherwise the default art (never a dangling path).
 - `sprites/<mod>/missile.png` whenever custom flight art is enabled: uploaded
@@ -294,6 +323,13 @@ never declare it without writing the file.
   art and `[sprites."sprites/<mod>/hold.png"]` when the hold sheet has more than
   one frame (`frames`, `fps`, `play = "loop"`).
 - Profile name sanitizes `\\ / : * ? " < > |`.
+- Uploaded pack art (`project.packArt`) is written as
+  `sprites/<mod>/trail.png`, `bit.png`, `bit_homing.png`, `bit_trail.png` and
+  `body.png` (`.gif` keeps its extension) and declared in `mod.toml` with
+  `frames` (PNG only), `fps` and `play`. The path is rebuilt from the current
+  weapon id on every export (`packArtPath`), so renaming cannot leave a stale
+  folder. `packArtPath` returns null for `cluster_homing_sprite` on a strike
+  (see `packArtSlotApplies`).
 
 ---
 
@@ -389,6 +425,30 @@ that `vite preview` at `/` hides).
 14. **Labels must be associated with controls.** Several existing fields use
     plain `<label>` without `htmlFor`; improve them when touching that UI.
 15. **Two file inputs exist on the record page.** Use the file chooser in tests.
+    (There are more now: one per pack-art slot. Select them by order within the
+    active tab, or by the `pack-art-<slot>-*` / upload button they belong to.)
+16. **Record sprite fields are not all path-capable.** Only `missile.trail.sprite`
+    and `clusters.bit.trail.sprite` take a bundle path inside a record table;
+    body and cluster bit art go through the claim-level `sprite`,
+    `cluster.sprite` and `cluster.homing_sprite`. Writing a path into
+    `bit.sprite` is read as a sprite name and fails at load. The strike
+    homing-bit sheet (`cluster.homing_sprite`) is refused on strikes: the
+    engine writes that render timer without the +0x14 strike shift.
+17. **`clusters.bit.sprite_count` counts sprite ids, not frames.** Bit i draws
+    `bit.sprite + (i-1) % sprite_count` (MissileEntity ctor); with one pack
+    sheet it must be 1 or bits 2..n pull in the neighbouring WA sprites. Frame
+    count comes from the sheet itself (stock `clustlet` is 6; 32 is only the
+    fallback for an unknown stock sheet). Custom sheets loop at the declared
+    `fps` because `phase_delta` + `advance_loop` drive `animation_phase`.
+18. **`animation` values are behaviour, not frame counts.** PX's editor names
+    them in value order: 0 horiz. velocity, 1 cycle, 2 track movement,
+    3 track speed, 4 slow cycle (0.5x), 5 faster cycle (0.8x), 6 fast cycle
+    (1.35x). Verified by seven otherwise identical grenade records differing
+    only at record +0x64 (`wep_Formatting/grenade_animtypes/`). The sheet's
+    frame count always comes from the art. Do not document these from
+    WormForge's debris port (`particles.rs` switches on a differently-numbered
+    `anim_kind`) or from PX's `WeapSprite` type numbers, which are not the
+    record's values. Details in the notes file.
 
 ---
 

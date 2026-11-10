@@ -526,3 +526,151 @@ missile path had the same problem when `mode = "custom"` had no sheet.
 - Verified: default project previews the grenade and exports `hold.png`
   (46x46); a bazooka donor previews the blue zook and exports `hold.png`
   (32x32); 4 frames at 15 FPS emits `frames = 4` and `anim_speed = 2.5`.
+
+## Pack art for trails and cluster bits
+
+`weapon-records.md` ("Sprites and other declarations") says the record's sprite
+fields take stock names or numeric ids, but installation also accepts a pack
+image in four places: `missile.trail.sprite`, `clusters.bit.trail.sprite`,
+`cluster.sprite` and `cluster.homing_sprite`. The editor could not import any of
+them, which made a whole class of bundled art unreachable.
+
+- `WeaponProject.packArt` (`PackArtSlot` + `PackArtAsset`) holds an uploaded
+  PNG/GIF plus the mod.toml sheet timing (`frames`, `fps`, `play`). The bundle
+  path is never stored: `packArtPath(project, slot)` rebuilds
+  `sprites/<mod folder>/<stem>.<png|gif>` from the current weapon id, so
+  renaming a weapon cannot leave a stale folder (the bug the hold sheet had).
+- Claim emission: `cluster = { sprite = "...", homing_sprite = "..." }` is
+  written next to `panel_icon` when those sheets exist. The engine loads the
+  sheet and writes the installed id into `clusters.bit.sprite` (or the strike's
+  cluster sprite) and the cluster render timer, which is why the path must not
+  appear in the record's `bit.sprite` — `record_table` would read it as a sprite
+  name.
+- Trail emission: `missile.trail.sprite` and `clusters.bit.trail.sprite` take
+  the path directly (`trail_image_spec` in `lua-host/src/api.rs` copies the
+  trail table, sets `sprite = 0`, loads the sheet as an extra sheet, and the
+  engine patches the native id at install). Both were already diff-based; the
+  pack path is the only reason the clusters block is entered on an otherwise
+  untouched `.wep` import.
+- Mod export: `modExporter` writes each uploaded file and `generateModToml`
+  declares `[sprites."<path>"]` with `frames` (PNG only — the engine rejects
+  `frames` on a GIF), `fps` and `play`.
+- UI: `PackSpriteUpload.tsx` is reused in the Sprite tab (primary trail) and the
+  Burst tab (bit sheet, bit trail, homing bit sheet, the last one inside the bit
+  homing group). Uploading a primary trail also enables the trail and fills in
+  power 25 / speed 250, mirroring the existing Enable Trail checkbox.
+- Verified: `tsc --noEmit` and `vite build` clean; `wfcheck --format pretty`
+  reports no findings for a hand-built bundle and for a Playwright export with
+  all four slots uploaded; the `.wep`-baseline path emits only the trail tables
+  plus the two claims.
+
+## Cluster bit animation and `bit.sprite_count`
+
+Answering "does a bit sheet need 32 frames?": no. 32 is only the fallback length
+`sprite::actor_loop_delta` assumes for an unknown *stock* sheet; sprite 54
+(`clustlet`) is 6 frames. A pack sheet installed as a native sprite gets
+`phase_delta = 0x10000 * fps / (frames * 50)`, and `sprite::advance_loop` runs
+on every missile `MSG_FRAME_FINISH`, so the strip loops at the FPS declared in
+`mod.toml` whatever its frame count is. A 1-frame sheet is simply still art.
+Even without `frames`, the engine slices a square-cell vertical strip, and our
+`fps` / `play = "loop"` declaration supplies the looping the raw loader omits.
+
+The trap next to it is `clusters.bit.sprite_count` (0x120): it counts
+consecutive sprite **ids**, not frames — bit i draws
+`bit.sprite + (i-1) % sprite_count` (MissileEntity ctor 0x507E70). The editor
+called it "Sprite Frame Count", so a `.wep` import with 4 (e.g. a weapon whose
+bits used four different sprites) would send bits 2..4 to the neighbouring WA
+slots (55 petrolbm, 56 hgrenade, …) once a pack sheet was installed at one id.
+- `RecordEditor` now labels it "Bit Sprite Run" and explains the id run.
+- Uploading a bit sheet sets `sprite_count = 1`, since the bundle installs one
+  sheet as one id.
+- `bit.animation` / `homing.animation` copy no longer says "native frame count";
+  it is WA's animation *type* (0 normal, 1 spins the sprite, PX +0x64).
+
+## Air strike art and rotation sheets
+
+PX's own weapons (`WormForgeNew/mods/px/weapons/`) answered how strikes get art:
+`homing_air_strike.lua` sets only `sprite = ART.."flight.png"`, and
+`thumper_nade_strike.lua` adds `cluster = { sprite = ... }` on a
+`copy_from = "stock.carpet_bomb"` record. Both are claim-level declarations; the
+engine has no sprite-builder path for a strike because `sb.flight` follows a
+placed weapon's missile and a strike fires created munitions.
+
+Confirmed in `crates/engine/src/apply.rs` / `crates/game/src/weapon.rs`:
+- claim `sprite` -> `retarget_strike_sprite_id` (0x74), which also moves the
+  strike's homing sprite (0xC0) and cluster sprite (0x138) when they shared the
+  stock body;
+- `cluster.sprite` -> `set_strike_cluster_sprite_id` (0x138) on a strike;
+- `clusters.bit.trail.sprite` and `missile.trail.sprite` -> `record::offset`,
+  which applies STRIKE_SHIFT;
+- `cluster.homing_sprite` -> `set_cluster_render_timer`, which writes entry+0x170
+  with **no** strike shift. The shifted slot is 0x184, so on a fire type 3
+  record it would overwrite another cluster field. `packArtSlotApplies()` now
+  refuses that slot on strikes (`packArtPath` returns null: no Lua claim, no
+  mod.toml entry, no file), and the homing-bit card explains the gap. A strike's
+  munition homing art comes from the claim `sprite` instead.
+
+Sheet convention, from the pack's own comment and the art: PX's 32 frames laid
+left to right pointing right and anticlockwise were rotated into a vertical
+strip, top to bottom, pointing up and clockwise (`flight.png` is 60x1920 = 32
+frames of 60x60). `missile.animation` / `clusters.bit.animation` select where the
+frame's animation value comes from: 0 the timer, 1 the missile's spin, 2 the
+flight direction (PX also uses 3, 5 and 6), and WA picks the frame from that
+value - the sheet carries the rotation. The decoded `hairstrike_WEAP.wep` has the
+munition body sprite at 0x74 and `animation = 2` at 0x78.
+
+New in the editor:
+- `packArt.strike_sprite` -> `sprites/<mod>/body.png` + claim `sprite`, shown on
+  the Indices & Particles tab only for a strike record.
+- `src/utils/rotateSheet.ts` bakes a single frame into a full 360° strip: cell
+  padded to `ceil(hypot(w,h))` so diagonal frames keep their corners, frame i at
+  `i*2pi/N` clockwise, vertical PNG. `PackSpriteUpload` regenerates it from the
+  kept source upload (16/32/64 frames) and sets the record's native animation to
+  2 on rotate; "Use original frame" restores the single frame.
+- Verified: Playwright run on a Cursor Strike export produced `body.png`
+  46x1472 (32 frames) and `bit.png` 46x736 (16 frames), `mod.toml` declared both
+  frame counts, the Lua had `sprite`, `cluster = { sprite }`, `animation = 2`
+  and `sprite_count = 1`, no `homing_sprite`, and `wfcheck --format pretty`
+  reported no findings for that bundle and for a hand-built strike bundle.
+
+## Animation type numbers (`missile.animation`, `bit.animation`)
+
+The field is not a frame count; it picks where the drawn frame's animation
+value comes from (the sheet supplies the frames). The numbers were settled by
+experiment: seven byte-identical grenade records were made in PX's weapon editor
+and only the animation type changed
+(`wep_Formatting/grenade_animtypes/`, fire type 1 / subtype 2 / method 3,
+sprite 50). Every file differs from `cycle.wep` at exactly one dword - file
+0x68, record +0x64:
+
+| value | PX's name | behaviour |
+|---|---|---|
+| 0 | Horiz. velocity | frames follow the horizontal speed, mirrored when flying left |
+| 1 | Cycle | spins through the sheet (WA's grenade) |
+| 2 | Track movement | faces the flight direction (WA's bazooka) |
+| 3 | Track speed | PX's speed-tracking mode |
+| 4 | Slow cycle | 0.5x cycle |
+| 5 | Faster cycle | 0.8x cycle |
+| 6 | Fast cycle | 1.35x cycle |
+
+PX's editor lists them in that same order, so the dropdown order *is* the enum;
+the 0.5 / 0.8 / 1.35 rates are its `ANIM_SPEED` table for slow / medium / fast.
+Real records agree where they are common: grenades and Fire Orbs = 1, bazookas
+and rockets = 2, pigeon and the ball weapons = 3, gravedigger / thumper bits = 5,
+rollers and drills = 6.
+
+Two traps that produced wrong earlier guesses here:
+- WormForge's debris port (`crates/engine/src/particles.rs:452`) switches on a
+  value it calls `anim_kind` with 0 = timer, 2 = direction, 3 = horizontal
+  speed, 1 = spin. That numbering is not this record field's, so do not read the
+  enum off it (it also confirms that the debris code is not the reference for
+  documentation).
+- PX's `WeapSprite` has its own type numbers (`track = 2, rotation = 3,
+  slow/medium/fast = 1, none = 5`); those are its drawing modes, not `+0x64`.
+
+The editor shows the field as a labelled select (`MISSILE_ANIM_TYPES` in
+`src/data/recordSchema.ts`) for `missile.animation`, `missile.homing.animation`,
+`clusters.bit.animation` and `clusters.bit.homing.animation`, with a "keep the
+imported value" entry for `.wep` values outside 0-6. The generated rotation
+sheets set 2 (track movement); a hand-authored cycle sheet uses 1 or 4-6.
+

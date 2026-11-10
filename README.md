@@ -28,6 +28,8 @@ Maintenance and hand-off notes live in [AGENTS.md](AGENTS.md).
 - **Modern Asset Workflow**:
   - 32×32 PNG icon importer and exporter (saved to `sprites/<mod_name>/icon.png`).
   - Single-sheet PNG hold artwork with `holds.PX_POSTURE` (no legacy GIF conversions).
+  - Pack art for the record sprite fields the engine accepts an image in: the primary trail (`missile.trail.sprite`), the cluster bit sheet (`cluster.sprite`), the homing bit sheet (`cluster.homing_sprite`), the cluster bit trail (`clusters.bit.trail.sprite`) and the weapon's own body sheet (`sprite`) — the last one is the only way to give an **air strike** its munition art, since the sprite builder has no primary missile to follow. Uploaded PNG/GIF files are written into `sprites/<mod_name>/` and declared in `mod.toml`.
+  - Rotation sheets: bake a single projectile frame into a full 360° direction strip (16/32/64 frames, frame 0 pointing up and turning clockwise, WA's airmisl order) with the record's native animation set to follow the flight direction.
 - **Desktop Application (Tauri v2)**:
   - Native Windows desktop application with system menus, file dialogs, and native performance.
 
@@ -119,5 +121,6 @@ When clicking **Export Mod (.zip)**, the archive contains:
     icon.png (if custom)
     hold.png (when hold art is enabled; the default Grenade/Bazooka art is written until you upload a sheet)
     missile.png (when custom flight art is enabled; the default Grenade/Bazooka art is written until you upload a sheet)
+    trail.png / bit.png / bit_homing.png / bit_trail.png / body.png (only for the pack-art slots you uploaded)
 ```
 Drop the extracted folder into `WormForge/Mods/` next to `wf-lib/` and launch Worms Armageddon!

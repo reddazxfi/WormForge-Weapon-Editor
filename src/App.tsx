@@ -145,6 +145,7 @@ const INITIAL_PROJECT: WeaponProject = {
     handRadLower: 0,
     handRadUpper: 0,
   },
+  packArt: {},
   customSprites: {},
   recordOverrides: {
     'missile.explosion.push_pct': 80,

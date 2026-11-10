@@ -9,7 +9,7 @@ import {
   RoamActionConfig,
   DigActionConfig,
 } from '../types/weapon';
-import { COLLISION_FLAGS } from '../data/recordSchema';
+import { COLLISION_FLAGS, MISSILE_ANIM_HINT, MISSILE_ANIM_TYPES } from '../data/recordSchema';
 
 type CollisionTargetKey = Exclude<keyof CollisionMask, 'extra_bits'>;
 
@@ -95,6 +95,7 @@ import {
   Sliders,
 } from 'lucide-react';
 import type { RecordTabId } from '../data/recordTabs';
+import { PackSpriteUpload } from './PackSpriteUpload';
 
 interface RecordEditorProps {
   project: WeaponProject;
@@ -154,6 +155,10 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
 
   const body = project.body;
   const clustlet = body.clustlet;
+  // Air strikes (fire type 3) have no primary missile for the sprite builder to
+  // follow: their art lives on the claim's `sprite` field and in the shifted
+  // munition slab.
+  const isStrike = project.fireType === 'cursor' && !project.teleport;
   const bitAction =
     clustlet.bit_action ??
     (clustlet.homing !== 'off' ? 'homing' : clustlet.contact === 'bounce' ? 'bounce' : 'none');
@@ -238,6 +243,55 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
       <p className="text-[10px] text-stone-400">{desc}</p>
     </div>
   );
+
+  // WA's animation type. Shows every value with its meaning, because the
+  // numbers alone are impossible to remember (1 spins, 2 tracks, 3-5 slower and
+  // faster spins, 6 horizontal speed, 7 track by speed).
+  const animSelect = (
+    value: number,
+    onChangeValue: (next: number) => void,
+    label: string,
+    desc: string
+  ) => (
+    <div className="space-y-1.5">
+      <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChangeValue(Number(e.target.value))}
+        className="w-full text-xs px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+      >
+        {!MISSILE_ANIM_TYPES.some((type) => type.value === value) && (
+          <option value={value}>{value} — keep the imported value</option>
+        )}
+        {MISSILE_ANIM_TYPES.map((type) => (
+          <option key={type.value} value={type.value}>
+            {type.value} — {type.label}
+          </option>
+        ))}
+      </select>
+      <p className="text-[10px] text-stone-400">{desc}</p>
+    </div>
+  );
+
+  const animField = (path: string, label: string, fallback: number) =>
+    animSelect(
+      Number(project.recordOverrides[path] ?? fallback),
+      (next) => updateOverride(path, next),
+      label,
+      MISSILE_ANIM_HINT
+    );
+
+  const bitAnimField = (
+    key: 'animation' | 'homing_animation',
+    label: string,
+    fallback: number
+  ) =>
+    animSelect(
+      Number((clustlet[key] as number | undefined) ?? fallback),
+      (next) => updateClustlet({ [key]: next } as Partial<ClustletConfig>),
+      label,
+      MISSILE_ANIM_HINT
+    );
 
   const roamNum = (
     key:
@@ -1184,7 +1238,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Sprite Frame Count (`bit.sprite_count`)</label>
+                  <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Bit Sprite Run (`bit.sprite_count`)</label>
                   <input
                     type="number"
                     min={0}
@@ -1192,7 +1246,11 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     onChange={(e) => updateClustlet({ sprite_count: Number(e.target.value) })}
                     className="w-full text-xs font-mono px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
                   />
-                  <p className="text-[10px] text-stone-400">Native frame count for the child sprite sheet.</p>
+                  <p className="text-[10px] text-stone-400">
+                    How many consecutive sprite ids the bits take in turn: bit i draws
+                    `bit.sprite + (i-1) % count`. This is not a frame count — use 1 with an
+                    uploaded pack sheet, or bit 2+ pulls in the neighbouring WA sprites.
+                  </p>
                 </div>
               </div>
 
@@ -1264,6 +1322,9 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                       placeholder="clustlet / 54"
                       className="w-full text-xs font-mono px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
                     />
+                    <p className="text-[10px] text-stone-400">
+                      Stock name or id; an uploaded pack sheet replaces it at install.
+                    </p>
                   </div>
 
                   <div className="space-y-1.5">
@@ -1287,7 +1348,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     </select>
                   </div>
 
-                  {bitNum('animation', 'Bit Animation (`bit.animation`)', 0, 'Native frame count for the bit sprite sheet.')}
+                  {bitAnimField('animation', 'Bit Animation Type (`bit.animation`)', 0)}
                   {bitNum('speed_pct', 'Bit Speed (`bit.speed_pct`)', 100, 'Launch speed percentage.', { min: 0, max: 300, unit: '%' })}
                   {bitNum('wind_pct', 'Bit Wind Response (`bit.wind_pct`)', 100, 'Wind response percentage.', { min: 0, max: 300, unit: '%' })}
                   {bitNum('gravity_pct', 'Bit Gravity (`bit.gravity_pct`)', 100, 'Gravity percentage.', { min: 0, max: 300, unit: '%' })}
@@ -1298,6 +1359,38 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   {bitNum('countdown_ms', 'Bit Countdown (`bit.countdown`)', 0, 'Separate native countdown timer.', { min: 0, step: 500, unit: 'ms' })}
                   {bitNum('fuse', 'Bit Explosion Fuse (`bit.fuse`)', 5000, 'Milliseconds before detonation; 0 = impact.', { min: 0, step: 500, unit: 'ms' })}
                   {bitNum('flight_sound', 'Bit Flight Sound (`bit.flight_sound`)', 0, 'Native flight loop sound.')}
+                </div>
+
+                {/* Pack art for the child body. `cluster.sprite` and
+                    `cluster.homing_sprite` are claim declarations; the trail
+                    path goes straight into `clusters.bit.trail.sprite`. */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <PackSpriteUpload
+                    project={project}
+                    onChange={onChange}
+                    slot="cluster_sprite"
+                    label="Bit Sprite Sheet (`cluster.sprite`)"
+                    hint="Loaded as this weapon's cluster bit art and written to `clusters.bit.sprite` at install; the record field itself only takes stock ids."
+                    onUpload={() => {
+                      // One pack sheet is installed as a single sprite id. The
+                      // engine gives bit i `sprite + (i-1) % sprite_count`, so any
+                      // other value would send bits 2..n to neighbouring WA
+                      // sprites instead of this sheet.
+                      updateClustlet({ sprite_count: 1 });
+                    }}
+                    rotate={{
+                      // A generated direction sheet needs WA's direction mode:
+                      // the frame is picked from the flight vector.
+                      onRotate: () => updateClustlet({ animation: 2 }),
+                    }}
+                  />
+                  <PackSpriteUpload
+                    project={project}
+                    onChange={onChange}
+                    slot="cluster_trail"
+                    label="Bit Trail Sheet (`clusters.bit.trail.sprite`)"
+                    hint="Scoped to this weapon's child trail. The bit trail power, speed and bubbles below still apply."
+                  />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1434,7 +1527,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                         </select>
                       </div>
                       {bitNum('homing_sprite', 'Homing Sprite (`homing.sprite`)', 0, 'Native homing flight sprite.')}
-                      {bitNum('homing_animation', 'Homing Animation (`homing.animation`)', 0, 'Native frame count for the homing sprite.')}
+                      {bitAnimField('homing_animation', 'Homing Animation Type (`homing.animation`)', 0)}
                       {bitNum('homing_arm_ms', 'Arm Delay (`homing.arm`)', 1000, 'Milliseconds before steering begins.', { min: 0, step: 250, unit: 'ms' })}
                       {bitNum('homing_time_ms', 'Duration (`homing.time`)', 8000, 'Steering duration.', { min: 0, step: 500, unit: 'ms' })}
                       {bitNum('homing_trail_sprite', 'Homing Trail (`homing.trail.sprite`)', 0, 'Homing trail sprite.')}
@@ -1442,6 +1535,23 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                       {bitNum('homing_trail_speed', 'Homing Trail Speed (`homing.trail.speed`)', 0, 'Homing trail emission rate.')}
                       {bitNum('homing_trail_bubbles', 'Homing Trail Bubbles (`homing.trail.bubbles_per_second`)', 0, 'Bubbles per second.')}
                     </div>
+                    {isStrike ? (
+                      <p className="text-[10px] text-stone-400">
+                        Strike records are not offered a homing-bit sheet: the engine
+                        applies it with set_cluster_render_timer at +0x170 without the
+                        strike shift (+0x14), so it would land in the shifted cluster
+                        block. A strike&apos;s munition homing art follows the claim
+                        sheet instead.
+                      </p>
+                    ) : (
+                      <PackSpriteUpload
+                        project={project}
+                        onChange={onChange}
+                        slot="cluster_homing_sprite"
+                        label="Homing Bit Sheet (`cluster.homing_sprite`)"
+                        hint="Drawn by homing bits while they home (their render timer), scoped to this weapon."
+                      />
+                    )}
                   </div>
                 )}
 
@@ -1706,25 +1816,41 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   </p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-                    Native Flight Animation Mode (`missile.animation`)
-                  </label>
-                  <select
-                    value={project.recordOverrides['missile.animation'] ?? 0}
-                    onChange={(e) => updateOverride('missile.animation', Number(e.target.value))}
-                    className="w-full text-xs px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
-                  >
-                    <option value={0}>0 — Standard Native Animation</option>
-                    <option value={1}>1 — Continuous Rotation / Spin</option>
-                    <option value={2}>2 — Orient with Flight Velocity (Tracking)</option>
-                  </select>
-                  <p className="text-[11px] text-stone-500">
-                    Internal engine rotation mode applied to the stock sprite.
-                  </p>
-                </div>
+                {animField('missile.animation', 'Native Flight Animation Type (`missile.animation`)', 0)}
               </div>
             </div>
+
+            {/* Strike munition art. The sprite builder follows a placed weapon's
+                missile, so an air strike's munition can only take pack art here. */}
+            {isStrike && (
+              <div className="p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-850/40 space-y-3">
+                <div className="flex items-center justify-between border-b border-stone-200 dark:border-stone-700/80 pb-2.5">
+                  <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-2">
+                    <ImageIcon className="w-4 h-4 text-forge-500" />
+                    Strike Munition Art (`sprite`)
+                  </span>
+                  <span className="font-mono text-[10px] text-stone-400">body 0x74</span>
+                </div>
+                <p className="text-[11px] text-stone-500">
+                  Air strikes fire created munitions, so the sprite builder has no
+                  missile to follow. The claim&apos;s `sprite` is installed as the strike
+                  munition&apos;s art and carried into its homing sprite (0xC0) and cluster
+                  sprite (0x138) when they share the stock body.
+                </p>
+                <PackSpriteUpload
+                  project={project}
+                  onChange={onChange}
+                  slot="strike_sprite"
+                  label="Munition Sheet (`sprite`)"
+                  hint="Written to sprites/<mod>/body.png and installed on the strike body. A single frame is static; 32 direction frames match WA's airmisl order."
+                  rotate={{
+                    // `missile.animation` on a strike is the munition body's field;
+                    // 2 picks the frame from the flight direction.
+                    onRotate: () => updateOverride('missile.animation', 2),
+                  }}
+                />
+              </div>
+            )}
 
             {/* Card 2: Particle Trail Settings & Impact Particles */}
             <div className="p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-850/40 space-y-4">
@@ -1848,7 +1974,10 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     disabled={!project.recordOverrides['missile.trail.enabled']}
                     className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white disabled:opacity-50"
                   />
-                  <p className="text-[10px] text-stone-400">Stock name (smoke, sparks) or custom sprite.</p>
+                  <p className="text-[10px] text-stone-400">
+                    Stock name (smoke, sparks) or numeric id. An uploaded pack sheet
+                    replaces it.
+                  </p>
                 </div>
 
                 <div className="space-y-1">
@@ -1867,6 +1996,34 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   />
                   <p className="text-[10px] text-stone-400">0 disables underwater bubble emission.</p>
                 </div>
+              </div>
+
+              {/* Pack trail art: `missile.trail.sprite` also accepts a bundle
+                  image path, loaded and scoped to this weapon at install. */}
+              <div className="pt-2 border-t border-stone-200 dark:border-stone-700/80 space-y-2">
+                <div className="text-[11px] font-bold text-stone-700 dark:text-stone-300 uppercase tracking-wide">
+                  Pack Trail Art
+                </div>
+                <PackSpriteUpload
+                  project={project}
+                  onChange={onChange}
+                  slot="missile_trail"
+                  label="Trail Sheet (`missile.trail.sprite`)"
+                  hint="Replaces the stock trail sprite for this weapon only; the power and speed above still apply."
+                  onUpload={() => {
+                    // Uploading art means the trail should show: mirror the
+                    // Enable Trail checkbox, which fills in the usual defaults.
+                    const updated = { ...project.recordOverrides };
+                    updated['missile.trail.enabled'] = true;
+                    if (updated['missile.trail.power'] === undefined) {
+                      updated['missile.trail.power'] = 25;
+                    }
+                    if (updated['missile.trail.speed'] === undefined) {
+                      updated['missile.trail.speed'] = 250;
+                    }
+                    onChange({ recordOverrides: updated });
+                  }}
+                />
               </div>
 
               {/* Impact Particles check */}
@@ -2131,11 +2288,10 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   'homing',
                   'Stock sprite name or numeric id used while homing.'
                 )}
-                {numField(
+                {animField(
                   'missile.homing.animation',
-                  'Homing Animation (`homing.animation`)',
-                  0,
-                  'Native animation selector used while homing.'
+                  'Homing Animation Type (`homing.animation`)',
+                  0
                 )}
                 {spriteField(
                   'missile.homing.trail.sprite',

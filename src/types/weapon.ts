@@ -164,6 +164,38 @@ export interface CustomSpriteAsset {
   play: 'loop' | 'pingpong';
 }
 
+/**
+ * Native record art that also accepts a pack-relative image during weapon
+ * installation (weapon-records.md, "Sprites and other declarations"): the
+ * weapon's own body sheet (`sprite`, the only art path for an air strike's
+ * munition), `missile.trail.sprite`, `cluster.sprite`,
+ * `cluster.homing_sprite` and `clusters.bit.trail.sprite`. Unlike
+ * `CustomSpriteAsset`, the bundle path is derived at export time from the
+ * weapon id, so renaming the weapon cannot leave the declaration pointing at
+ * an old folder.
+ */
+export type PackArtSlot =
+  | 'missile_trail'
+  | 'cluster_sprite'
+  | 'cluster_homing_sprite'
+  | 'cluster_trail'
+  | 'strike_sprite';
+
+export interface PackArtAsset {
+  file?: File;
+  fileName?: string;
+  previewUrl?: string;
+  /** Vertical PNG frames, declared in mod.toml `[sprites."path"]`. */
+  frames: number;
+  fps: number;
+  play: 'loop' | 'once' | 'pingpong';
+  /** The untouched upload, kept so a rotation sheet can be rebuilt. */
+  sourceFile?: File;
+  sourceName?: string;
+  /** Frames of the generated rotation sheet; unset for a plain upload. */
+  rotationFrames?: number;
+}
+
 export type MissileAnimType = 'track' | 'rotation' | 'slow' | 'medium' | 'fast' | 'none';
 
 export interface MissileSpriteConfig {
@@ -261,6 +293,8 @@ export interface WeaponProject {
   digConfig: DigActionConfig;
   fireConfig: FirePayloadConfig;
   hold: HoldConfig;
+  /** Uploaded PNG/GIF art for the record fields that accept pack paths. */
+  packArt: Partial<Record<PackArtSlot, PackArtAsset>>;
   customSprites: Record<string, CustomSpriteAsset>;
   // Arbitrary named record overrides (e.g. "missile.explosion.push_pct": 120)
   recordOverrides: Record<string, any>;

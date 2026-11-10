@@ -18,6 +18,10 @@ yarn-error.log*
 pnpm-debug.log*
 bun-debug.log*
 
+wep_Formatting/
+example_mods_spritebuilder/
+example_mods_normal/
+
 # Environment and secrets
 .env
 .env.*
