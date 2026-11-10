@@ -3,6 +3,8 @@
 > Modern TypeScript & React Weapon Studio and Record Architect for **WormForge**.  
 > Import legacy Project X `.wep` files, configure weapon records, preview PX hold art and 50 Hz missile flight sprites, and export ready-to-play mod packages.
 
+Maintenance and hand-off notes live in [AGENTS.md](AGENTS.md).
+
 ---
 
 ## Features
