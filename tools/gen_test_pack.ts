@@ -833,6 +833,29 @@ const TESTS: TestCase[] = [
     expect: 'A static grenade flies, then starts spinning once the missile arms and homes; the art stays until the blast.',
     watch: 'No art change (WA not writing `missile.homing.sprite`), the sprite disappearing, or a one-frame flicker on the swap.',
   },
+  {
+    project: makeOp({
+      id: 'wftest.26_builder_dig',
+      name: 'WF 26 Builder Dig',
+      slot: 'mole_bomb',
+      action: 'dig',
+      body: { sprite: 'grenade', fuse: true, fuse_time_ms: 6000 },
+      missileSprite: {
+        enabled: true,
+        mode: 'custom',
+        anim: 'none',
+        frames: 32,
+        hideStock: true,
+      },
+      behaviorArt: { dig: { ...DEFAULT_ROLE_ART, mode: 'inherit' } },
+    }),
+    intent:
+      'Digging with the WFWS builder: the record dig sprites are zeroed and the builder animates the flight sheet on terrain probes.',
+    expect:
+      'Upright and cycling in flight; once it enters the land it turns to the heading and keeps cycling, with no mole and no Salvation-Army `wsv*` art.',
+    watch:
+      'The mole (dig sprites not zeroed), a `wsv*` frame, art frozen underground (probes never firing), or the sheet turning in mid-air.',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -890,7 +913,16 @@ for (const test of TESTS) {
     usesBuilders = true;
     mkdirSync(join(BUNDLE, 'sprites', folder), { recursive: true });
     const path = missileFlightSheetPath(project);
-    writeFileSync(join(BUNDLE, path), GRENADE_PNG);
+    // A multi-frame primary sheet uses the rotation strip, so a test can see the
+    // frame cycle (digging animates the round's own sheet).
+    const primaryFrames = project.missileSprite.frames ?? 1;
+    writeFileSync(
+      join(BUNDLE, path),
+      primaryFrames >= 32 ? ROT_32 : primaryFrames === 16 ? ROT_16 : GRENADE_PNG
+    );
+    if (primaryFrames > 1) {
+      spriteDecls.set(path, { frames: primaryFrames, fps: project.missileSprite.fps || 15, play: 'loop' });
+    }
     usedSheets.add(path);
 
     // WFWS extra roles. The exporter writes the uploaded sheet or the default

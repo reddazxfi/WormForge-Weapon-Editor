@@ -242,25 +242,44 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   for `wf-lib/holds`. Emission:
   - `require("wf-lib/wfws_sprite_builder")` whenever the primary builder is on
     (air strikes are excluded: their munitions have no placed missile).
-  - **`sprite = 0` is unconditional on the primary** while the builder is on.
-    The builder classifies a missile as the primary only when `m.sprite` is zero
-    at first sight; a `.wep` baseline or a `missile.sprite` override must not
-    survive, or the primary would classify as a bit and draw bit art.
+  - **`sprite = 0` is unconditional on the primary** while the builder is on:
+    it is how WA's own draw is hidden, and a `.wep` baseline or a
+    `missile.sprite` override must not survive.
+  - **Identity is "zero means cluster bit"** (`wfws_sprite_builder.lua`,
+    `classify`). WA copies a missile's flight sprite from its fire params and a
+    cluster bit's params are the *parent's* copy, so the primary carries the
+    record `sprite` and the bits are the zero ones — the opposite of the field
+    name. It only applies when a `bits` table is configured (`inherit` or no
+    bits = everything is the primary). `is_bit` overrides it; a future `m.bit`
+    (MissileEntity+0x150 pellet flag) is used first when the engine passes it.
+    `log = true` prints the first three frames of each missile
+    (`id`, `sprite`, `ident`) to settle it from the log; the Hold page's WFWS
+    section has a **Log Identity** checkbox that emits it (`missileSprite.logIdentity`).
   - `bits = { sheet, anim, cyclical, anim_speed, spin, scale, mirror, z }` for
     the bit role, `bits = "inherit"` for the primary art, and no `bits` key for
     native WA bits. When the bit builder owns the bits, the generator forces
     `clusters.bit.sprite` to a stock id (`clustlet`) if it was 0/empty and writes
     `sprite_count = 1`, and it **skips** the claim `cluster = { sprite, … }`
     declaration (the builder hides that sheet anyway).
-  - `states = { { scope, sig, sheet/native, … } }` for the configured behaviours.
-    The signal ids are written into the record's own sprite fields:
-    `missile.homing.sprite` (245+), `clusters.bit.homing.sprite`,
-    `dig.dive_sprite` + `sprite_1..3`, `sheep.flight_1/2` and
-    `roam.gas.animal_sprite`. WA writes one of those into `m.sprite` when the
-    behaviour changes; the builder records the last nonzero value before
-    zeroing and matches `sig` against it. `native = true` hands the state back
-    to WA. Only the behaviours the current action/burst actually has are
-    offered; `inherit` emits no state.
+  - **Digging is not a state and has no sheet.** Whenever the builder owns the
+    flight art and the record digs (`action = "dig"`, or a cluster bit whose
+    action is dig), the generator writes `dig.dive_sprite` and `dig.sprite_1..3`
+    as 0 — WA's mole frames (158-161) and PX's `wsvr/wsvru/wsvrd/wsvb`
+    (245-248) would otherwise draw under our sheet — and passes `dig = true` to
+    `sb.flight`. The builder then probes the terrain four times across the
+    heading (two hits = digging, PX's Bunker Buster test, 3 frames of
+    hysteresis) and cycles the role's own sheet while the round is in the land,
+    heading locked. A `native` dig role leaves the record's indexes alone (only
+    an author-set nonzero id is written, never a zero) and passes no `dig`.
+    `dig.dive_sprite` is not art to upload: the flight sheet is the dig
+    animation.
+  - `states = { { scope, sig, sheet/native, … } }` remains for homing/roam/gas,
+    but `sig` is a **legacy** path: `m.sprite` is the flight sprite only and WA
+    does not write behaviour sprites into it. New states must be timed (homing
+    `arm`/`time` in ms, 50 Hz → 20 ms/frame) or probed (dig), not matched by id.
+    `native = true` hands the state back to WA, but on a primary it restores the
+    last signal id, not the record's own art (which the builder zeroed), so it
+    is only safe while the record still names a real sprite.
   - The primary sheet, `bit_flight.png` and `state_<key>.png` are listed in the
     claim `sprites` and declared in `mod.toml`; the exporter writes the uploaded
     file or the default missile art, so a declared path always exists.
@@ -271,9 +290,10 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   - Behaviour art requires the primary builder; with it off the rows are stored
     but not emitted. Strikes have no builder path at all.
   - Known limits: a state does not automatically revert when WA stops writing
-    its sprite (the last signal wins); dig relies on WA writing the dig sprite
-    ids (otherwise a `when` callback is the fallback); a state swap respawns the
-    follower, so a one-frame flicker is possible.
+    its sprite (the last signal wins); a state swap respawns the follower, so a
+    one-frame flicker is possible; inert cluster pellets are drawn by the engine
+    as particles (`particles.rs::inert_pellet`), never become MissileEntitys, and
+    therefore get no builder art at all.
 - **Ribbon trail (`project.ribbonTrail`).** The effects SDK samples the round on
   game frames and draws a tapering ribbon, so colour (`r,g,b` from a hex UI
   colour), `core_w`/`glow_w`, `max`, `every` and `vanish` are free. Emission:

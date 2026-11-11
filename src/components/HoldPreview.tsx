@@ -1615,11 +1615,16 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                       role={behaviorArt[def.key] ?? defaultBehaviorRole}
                       onChange={(patch) => updateBehaviorArt(def.key, patch)}
                       title={def.label}
-                      description={`${def.description} Signal: ${def.record}.`}
+                      description={
+                        def.key === 'dig'
+                          ? 'Terrain-probed animation. Native keeps the record dig frames; anything else zeroes them and cycles the flight sheet.'
+                          : `${def.description} Signal: ${def.record}.`
+                      }
                       path={behaviorStateSheetPath(project, def.key)}
                       sig={behaviorSigs.get(def.key)}
                       inheritLabel="Inherit"
                       disabled={!builderOn}
+                      sheetless={def.key === 'dig'}
                     />
                   ))}
                 </div>
@@ -1787,11 +1792,37 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                       Stock Sprite Hidden (`sprite = 0`)
                     </div>
                     <div className="text-[11px] text-stone-500">
-                      Always written while the builder is on: it is how the builder
-                      recognises the primary round (a bit reports a nonzero `m.sprite`).
+                      Always written while the builder is on: it hides WA's round.
+                      Identity is the same field read backwards — with a bit sheet
+                      configured, the missile whose `m.sprite` is zero is the cluster
+                      bit (a bit inherits its parent's copy of the record sprite), so
+                      everything else is the primary.
                     </div>
                   </div>
                 </div>
+
+                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!project.missileSprite.logIdentity}
+                    onChange={(e) =>
+                      onChange({
+                        missileSprite: { ...project.missileSprite, logIdentity: e.target.checked },
+                      })
+                    }
+                    className="rounded text-forge-600 focus:ring-forge-500 mt-0.5"
+                  />
+                  <div>
+                    <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">
+                      Log Identity (`log = true`)
+                    </div>
+                    <div className="text-[11px] text-stone-500">
+                      One log line per missile&apos;s first frames with its id,
+                      `m.sprite` and the role it was classified as. Turn it off for
+                      the real bundle.
+                    </div>
+                  </div>
+                </label>
               </div>
             </div>
 

@@ -941,3 +941,64 @@ Bundle Code dependency panel adds `wfws.sdk` automatically.
 - Still to verify in game: `m.sprite` writable/restorable from `pre`; whether WA
   writes behaviour sprites once or every frame; dig; the swap flicker; roam
   `pre` while grounded.
+
+## 2026-11-11 — WFWS fix pass 1: identity flip and probe-driven digging
+
+The spb misidentified the two roles and treated digging as a sprite state. Both
+are now settled from how WA actually works.
+
+### Identity: zero means cluster bit
+
+WA copies a missile's flight sprite (`m.sprite`, MissileEntity+0x2EC) from its
+fire params at construction. A cluster bit's fire params are the **parent's
+copy** (`CreateClusters` passes the parent's own copy at +0x15C), so the primary
+is the missile carrying the record `sprite` and the bits are the ones reading 0.
+The builder's old `m.sprite ~= 0` test therefore drew the bit sheet on the
+primary and the primary sheet on the bits.
+
+`classify` is now `is_bit = bit_art and (m.sprite == 0)`. `bit_art` is true only
+when a `bits` table is configured: with `inherit` or no bits every missile is the
+primary, so a plain weapon cannot classify as a bit and (with the bit role
+NATIVE) draw nothing. `is_bit` still overrides, and a future `m.bit`
+(MissileEntity+0x150, "non-zero for a cluster bit") is preferred when present.
+`log = true` prints the first three frames of each missile (`id`, `sprite`,
+`ident`) so the convention can be read straight out of the log; the Hold page's
+WFWS section has a **Log Identity** checkbox (`missileSprite.logIdentity`) that
+emits it, so the game log can settle the flip in one match.
+
+### Digging: no art of its own
+
+The weapon does not write behaviour sprites into `m.sprite`, and a digging
+record's art is the separate `dig.dive_sprite` / `dig.sprite_1..3` fields (WA's
+mole 158-161; PX's Gravler points them at `wsvr/wsvru/wsvrd/wsvb` = 245-248 and
+replaces those stock sheets with `sprite_overrides`). A weapon also cannot start
+digging later: the action is fixed when the record is installed, so "digging" is
+only terrain contact changing the animation.
+
+- Generator: with the builder owning the flight art and the record digging
+  (`missile.action = "dig"`, or a cluster bit with `bit.action = "dig"`), the four
+  indexes are written as 0 — this is what removes the mole (or a `wsv*` frame)
+  from under the sheet — and `sb.flight` gets `dig = true`. A `native` dig role
+  leaves them alone: only an author-set nonzero id is written, never a zero.
+- Builder: four `wa.land.solid` probes across the heading (6 px ahead, ±3 px
+  spread, two hits = digging, 3 frames of hysteresis). While digging it locks the
+  heading and cycles the role's own sheet (`cyclical_frame`), ignoring
+  turn/spin types. No `sig`, no state sheet, no `mole_dig_rotation`.
+- `resolveBehaviorStates` skips `dig`, so it can no longer mint a 245+ sentinel or
+  a `state_dig.png`; the Hold page's digging card keeps only the mode choice
+  (native vs the flight sheet) and explains itself.
+
+### Exports ship the spec copy
+
+`src/data/wfwsSdk.ts` was a hand copy of the SDK files that the ZIP shipped, so
+edits to `spec/lua_sdk/wfws_sdk/` never reached an export. It now imports both
+files with Vite's `?raw`, one source of truth.
+
+### Validation
+
+- `wfcheck --format pretty spec/lua_sdk/wfws_sdk` and the regenerated 26-weapon
+  test pack (WF 26 Builder Dig added): no findings.
+- `bun run lint`, `bun run build`.
+- Generated Lua checked for all three shapes: dig + builder (four zeros, `dig =
+  true`, no `states`), dig + native role (no zero rows, no `dig = true`), cluster
+  bits with dig (bit indexes zeroed, `dig = true`).

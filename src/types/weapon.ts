@@ -352,6 +352,9 @@ export interface MissileSpriteConfig {
   animate: boolean;
   spin: boolean;
   hideStock: boolean;
+  /** Emit `log = true` in `sb.flight`: one log line per missile's first
+   *  frames with what the identity test saw. A debugging aid. */
+  logIdentity?: boolean;
 }
 
 export interface RoamActionConfig {

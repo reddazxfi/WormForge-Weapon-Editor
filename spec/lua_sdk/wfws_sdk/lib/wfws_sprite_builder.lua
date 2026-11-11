@@ -6,8 +6,13 @@
 --     primary, cluster bit, or an extra `roles` entry. Cached per missile id.
 --
 --   STATE (re-evaluated every pre phase): what is it doing right now?
---     homing, digging, roaming, emitting gas... Each state may swap the art,
---     the animation, or hand the missile back to WA (native = true).
+--     homing, roaming, emitting gas... Each state may swap the art, the
+--     animation, or hand the missile back to WA (native = true).
+--
+--   DIG is not a state: a digging round has no art of its own. The record's
+--     dig sprite indexes are zeroed (a mole or the wsv* frames would draw
+--     underneath), and the builder simply cycles the flight sheet while the
+--     nose is in the land. See `dig =` below.
 --
 -- API:
 --
@@ -17,6 +22,7 @@
 --     bits  = { sheet = "...", ... } | "inherit" | nil/false (native)
 --     is_bit = function(m) ... end,             -- optional classifier override
 --     roles  = { { name = "x", match = function(m) ... end, sheet = "..." } },
+--     dig    = true | { probe = 6, spread = 3, hold = 3, need = 2 },
 --     states = {
 --       { scope = "main" | "bit" | "any" | <role name>,
 --         sig  = 245 | { 246, 247, 248 },       -- native sprite ids that mean
@@ -27,18 +33,18 @@
 --     },
 --   })
 --
--- STATE SIGNAL: WA writes a new nonzero value to m.sprite when a missile
--- changes behaviour (homing sprite, dig frames, gas pose...). The pre phase
--- records the last nonzero value seen BEFORE this module zeroes it, so the
--- signal survives even if WA only writes it once. `sig` matches against it.
--- States are checked in order; first match wins; no match = identity art.
+-- STATE SIGNAL (legacy, `sig`): an old assumption that WA writes the
+-- behaviour's own sprite id into m.sprite. It does not -- `m.sprite` is the
+-- flight sprite and nothing else -- so new work should time the state (homing
+-- arm/time in ms) or probe for it (dig) instead of matching ids. `sig` stays
+-- only for bundles that still pass one.
 --
--- The generator should give each state a distinct sprite id in the record
--- (homing.sprite, dig.dive_sprite / sprite_1..3, roam.gas.animal_sprite,
--- sheep.flight_1/2) and use the same ids as `sig`.
---
--- Default bit test: `m.sprite ~= 0` at first sight, so write `sprite = 0` on the
--- PRIMARY's record. Pass is_bit if you cannot.
+-- Default bit test: "zero means cluster bit". WA seeds a missile's flight
+-- sprite (`m.sprite`) from its fire params, and a cluster bit's params are the
+-- *parent's* copy -- so the primary is the one carrying the record's `sprite`
+-- (zeroed while the builder owns the art) and the bits are the zero ones, the
+-- opposite of what the field's name suggests. `is_bit` overrides it; when the
+-- engine exposes the pellet flag (`m.bit`, MissileEntity+0x150) that is exact.
 --
 -- Pure data at load: `wa` is touched only inside M.flight and its callbacks.
 --
@@ -88,6 +94,73 @@ function M.spin_turn(prev_rot, vx, anim_speed)
   return (prev_rot or 0) + (anim_speed or 0.5) * 0.5 * sign(vx)
 end
 
+-- ---------------------------------------------------------------------------
+-- Digging. A digging record names no art of its own once the builder owns the
+-- flight sheet (the generator zeroes `dig.dive_sprite` and `dig.sprite_1..3`),
+-- so "digging" is only an animation: the sheet keeps tracking the heading and
+-- cycles its frames while the round is inside the land. PX's Bunker Buster
+-- tells the two apart by probing the terrain around the nose; four probes, two
+-- hits, and it is in the dirt. Coordinates are pixels, like `m.x` / `m.y`.
+-- ---------------------------------------------------------------------------
+local DIG_PROBE = 6.0   -- pixels ahead of the centre
+local DIG_SPREAD = 3.0  -- pixels either side of the heading
+local DIG_HOLD = 3      -- frames a clear nose keeps the dig animation on
+local DIG_NEED = 2      -- probes that must be solid
+local DIG_OFFSETS = { -1.0, -0.34, 0.34, 1.0 }
+
+local function dig_settings(o)
+  if o == nil or o == false then return nil end
+  local t = type(o) == "table" and o or {}
+  return {
+    probe = t.probe or DIG_PROBE,
+    spread = t.spread or DIG_SPREAD,
+    hold = t.hold or DIG_HOLD,
+    need = t.need or DIG_NEED,
+  }
+end
+
+-- Heading of the round, normalized; the last one when it is at rest.
+local function heading_of(m, last)
+  local vx, vy = m.vx or 0, m.vy or 0
+  local len = math.sqrt(vx * vx + vy * vy)
+  if len < 0.0001 then return last or { 0.0, 1.0 } end
+  return { vx / len, vy / len }
+end
+
+-- Four probes across the nose. `wa.land.solid` is WA's own terrain test.
+local function in_land(m, dir, d)
+  local x, y = m.x, m.y
+  if not x or not y then return false end
+  local px, py = -dir[2], dir[1]
+  local hits = 0
+  for i = 1, #DIG_OFFSETS do
+    local k = DIG_OFFSETS[i] * d.spread
+    if wa.land.solid(x + dir[1] * d.probe + px * k,
+                     y + dir[2] * d.probe + py * k) then
+      hits = hits + 1
+      if hits >= d.need then return true end
+    end
+  end
+  return false
+end
+
+-- One frame of dig state for a missile: true while digging.
+local function update_dig(m, d, dirs, holds)
+  local id = m.id
+  local dir = heading_of(m, dirs[id])
+  dirs[id] = dir
+  if in_land(m, dir, d) then
+    holds[id] = d.hold
+    return true
+  end
+  local left = holds[id] or 0
+  if left > 0 then
+    holds[id] = left - 1
+    return true
+  end
+  return false
+end
+
 -- Sentinel: a missile (or state) the builder leaves to WA.
 local NATIVE = {}
 
@@ -128,8 +201,10 @@ function M.flight(ctx, opts)
   local main = resolve(opts)
 
   local bit_cfg = NATIVE
+  local bit_art = false
   if type(opts.bits) == "table" then
     bit_cfg = resolve(opts.bits)
+    bit_art = true
   elseif opts.bits == "inherit" then
     bit_cfg = main
   end
@@ -161,6 +236,10 @@ function M.flight(ctx, opts)
   local follow = {}      -- [id] = { actor, cfg, gen, seen }
   local spin_ang = {}
   local cycl_phase = {}
+  local dig_dir = {}     -- [id] = last heading, for the terrain probes
+  local dig_hold = {}    -- [id] = frames left of "digging"
+  local dig = dig_settings(opts.dig)
+  local logged = {}      -- [id] = frames logged so far (opts.log)
   local gen = 0
 
   -- Identity: first sight, before this module has zeroed m.sprite.
@@ -170,9 +249,18 @@ function M.flight(ctx, opts)
     end
     local is_bit
     if opts.is_bit then
-      is_bit = opts.is_bit(m)
+      is_bit = opts.is_bit(m) and true or false
+    elseif m.bit ~= nil then
+      -- The engine's own answer (MissileEntity+0x150, `shoot_desc.pellet`).
+      is_bit = m.bit and true or false
     else
-      is_bit = (m.sprite ~= 0)
+      -- Flipped default: with a bit sheet configured, the cluster bit is the
+      -- missile whose flight sprite is zero (WA hands the primary the
+      -- record's `sprite`; a bit inherits the parent's copy of it). Without a
+      -- bit sheet there are no bits to tell apart, so everything is the
+      -- primary -- otherwise a plain weapon would classify as a bit and draw
+      -- nothing, because the bit role is NATIVE.
+      is_bit = bit_art and (m.sprite == 0)
     end
     if is_bit then return { ident = "bit", base = bit_cfg } end
     return { ident = "main", base = main }
@@ -203,6 +291,9 @@ function M.flight(ctx, opts)
       kind[id] = nil
       sig[id] = nil
       active[id] = nil
+      dig_dir[id] = nil
+      dig_hold[id] = nil
+      logged[id] = nil
       b:despawn()
     end
   end
@@ -224,6 +315,17 @@ function M.flight(ctx, opts)
     if ent == nil then
       ent = classify(m)
       kind[id] = ent
+      -- `log = true` for one line per missile's first three frames: what the
+      -- identity test actually saw. Turn it off once a convention is settled.
+      if opts.log then
+        logged[id] = (logged[id] or 0) + 1
+        wa.log(string.format("wfws: id=%s sprite=%s ident=%s",
+          tostring(m.id), tostring(m.sprite), tostring(ent.ident)))
+      end
+    elseif opts.log and (logged[id] or 0) < 3 then
+      logged[id] = (logged[id] or 0) + 1
+      wa.log(string.format("wfws: id=%s sprite=%s ident=%s phase=%s",
+        tostring(m.id), tostring(m.sprite), tostring(ent.ident), tostring(m.phase)))
     end
 
     if m.phase == "pre" then
@@ -271,27 +373,38 @@ function M.flight(ctx, opts)
     local b = f.actor
     b.x, b.y, b.vx, b.vy = m.x, m.y, 0, 0
 
-    local rot = 0
-    if cfg.turn_fn then
-      rot = cfg.turn_fn(m, spin_ang[id])
-      spin_ang[id] = rot
-    elseif cfg.anim_type == 2 then
-      rot = M.track_angle(m.vx, m.vy)
-    elseif cfg.anim_type == 3 then
-      rot = M.rotation_turn(spin_ang[id], m.vx, m.vy, cfg.spin)
-      spin_ang[id] = rot
-    elseif cfg.anim_type == 1 then
-      rot = M.spin_turn(spin_ang[id], m.vx, ANIM_SPEED[cfg.anim] or 0.5)
-      spin_ang[id] = rot
-    end
+    -- Digging: no art of its own, just the sheet cycling while the nose is in
+    -- the land. It keeps tracking the heading, so the drill points into the
+    -- hole the round is making.
+    local digging = dig and update_dig(m, dig, dig_dir, dig_hold) or false
 
+    local rot = 0
     local frame = 0
-    if cfg.frame_fn then
-      frame = cfg.frame_fn(m)
-    elseif cfg.cyclical > 0 then
-      frame, cycl_phase[id] = M.cyclical_frame(cycl_phase[id], cfg.anim_speed, cfg.cyclical)
+    if digging then
+      rot = M.track_angle(m.vx, m.vy)
+      frame, cycl_phase[id] =
+        M.cyclical_frame(cycl_phase[id], cfg.anim_speed, math.max(1, cfg.cyclical))
     else
-      cycl_phase[id] = nil
+      if cfg.turn_fn then
+        rot = cfg.turn_fn(m, spin_ang[id])
+        spin_ang[id] = rot
+      elseif cfg.anim_type == 2 then
+        rot = M.track_angle(m.vx, m.vy)
+      elseif cfg.anim_type == 3 then
+        rot = M.rotation_turn(spin_ang[id], m.vx, m.vy, cfg.spin)
+        spin_ang[id] = rot
+      elseif cfg.anim_type == 1 then
+        rot = M.spin_turn(spin_ang[id], m.vx, ANIM_SPEED[cfg.anim] or 0.5)
+        spin_ang[id] = rot
+      end
+
+      if cfg.frame_fn then
+        frame = cfg.frame_fn(m)
+      elseif cfg.cyclical > 0 then
+        frame, cycl_phase[id] = M.cyclical_frame(cycl_phase[id], cfg.anim_speed, cfg.cyclical)
+      else
+        cycl_phase[id] = nil
+      end
     end
 
     b.facing = cfg.mirror and (m.vx < 0 and -1 or 1) or 1

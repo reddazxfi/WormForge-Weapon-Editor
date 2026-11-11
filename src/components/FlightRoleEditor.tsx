@@ -32,6 +32,9 @@ interface FlightRoleEditorProps {
   /** Everything is ignored until the primary flight builder is on. */
   disabled?: boolean;
   warning?: string;
+  /** A role with no sheet of its own: it reuses the flight sheet, so only the
+   *  mode buttons apply (digging animates the round's own art). */
+  sheetless?: boolean;
 }
 
 /**
@@ -49,6 +52,7 @@ export const FlightRoleEditor: React.FC<FlightRoleEditorProps> = ({
   inheritLabel = 'Inherit',
   disabled = false,
   warning,
+  sheetless = false,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uid = useId();
@@ -138,7 +142,15 @@ export const FlightRoleEditor: React.FC<FlightRoleEditorProps> = ({
         })}
       </div>
 
-      {role.mode === 'builder' && (
+      {sheetless && role.mode !== 'native' && (
+        <p className="text-[11px] text-stone-500 dark:text-stone-400">
+          Uses the round&apos;s own flight sheet. The builder probes the terrain
+          around the nose each frame and cycles that sheet&apos;s frames while the
+          round is inside the land, so there is no digging image to upload.
+        </p>
+      )}
+
+      {role.mode === 'builder' && !sheetless && (
         <>
           <div className="flex flex-wrap items-center gap-3">
             <input
@@ -263,7 +275,7 @@ export const FlightRoleEditor: React.FC<FlightRoleEditorProps> = ({
         </>
       )}
 
-      {role.mode === 'inherit' && (
+      {role.mode === 'inherit' && !sheetless && (
         <p className="text-[11px] text-stone-500 dark:text-stone-400 flex items-center gap-1.5">
           <ShieldOff className="w-3.5 h-3.5" />
           No extra keys emitted; this role keeps the identity art.

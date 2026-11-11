@@ -57,3 +57,4 @@ tmp/
 
 # Generated test pack (tools/gen_test_pack.ts)
 test_pack/
+*.7z

@@ -32,7 +32,7 @@ export interface BehaviorArtDef {
 }
 
 /** The cluster bit's action, from the same expression the editor uses. */
-function bitActionOf(project: WeaponProject): string {
+export function bitActionOf(project: WeaponProject): string {
   const c = project.body.clustlet;
   return (
     c.bit_action ??
@@ -41,11 +41,12 @@ function bitActionOf(project: WeaponProject): string {
 }
 
 /**
- * `sig` is the last nonzero `m.sprite` the builder saw for a missile. WA writes
- * the behaviour's own sprite field into it (homing art, dig frames, the gas
- * pose), so those record fields are the sentinels. An id is only assigned when
- * the record field is 0/empty or would collide with another state; the
- * generator writes the chosen id back into the record so the signal exists.
+ * Behaviour rows and the record field each one's art comes from.
+ *
+ * Digging is listed for the UI but is not a state any more: `resolveBehaviorStates`
+ * skips it. A digging record names no art of its own (the generator zeroes
+ * `dig.dive_sprite` / `sprite_1..3`) and the builder cycles the flight sheet
+ * while its terrain probes say the nose is in the land.
  */
 export const BEHAVIOR_ART_DEFS: BehaviorArtDef[] = [
   {
@@ -66,8 +67,9 @@ export const BEHAVIOR_ART_DEFS: BehaviorArtDef[] = [
     key: 'dig',
     label: 'Digging',
     scope: (project) => (project.action === 'dig' ? 'main' : 'bit'),
-    record: 'dig.dive_sprite / sprite_1..3',
-    description: 'Art shown while the missile drills through the terrain.',
+    record: 'dig.dive_sprite / sprite_1..3 (zeroed)',
+    description:
+      'No art of its own: the record dig sprites are zeroed and the builder cycles the flight sheet while terrain probes say the round is digging.',
   },
   {
     key: 'roam_flight',
@@ -225,6 +227,10 @@ export function resolveBehaviorStates(project: WeaponProject): ResolvedBehaviorS
 
   const out: ResolvedBehaviorState[] = [];
   for (const def of availableBehaviorArt(project)) {
+    // Dig is probe-driven (the builder animates the flight sheet in the dirt),
+    // so it has no sig id and no state sheet. Keeping it here would write a
+    // sentinel id into dig.* again and point WA at a stock sprite.
+    if (def.key === 'dig') continue;
     const art = project.behaviorArt?.[def.key];
     if (!art || art.mode === 'inherit') continue;
     const sig: number[] = [];

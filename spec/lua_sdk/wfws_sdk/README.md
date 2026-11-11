@@ -63,10 +63,21 @@ sb.flight(ctx, {
 
 ### Identity
 
-The default classifier is `m.sprite ~= 0` at first sight: a **primary** keeps
-`sprite = 0`, a **cluster bit** keeps a nonzero stock id (`clustlet`). The
-generator writes `sprite = 0` on the primary unconditionally and forces a stock
-bit sprite, so both roles classify correctly even with an imported `.wep`.
+The default classifier is **"zero means cluster bit"**: a **cluster bit** is the
+missile whose `m.sprite` is 0 at first sight, and everything else is the
+primary. That reads backwards until you see how WA seeds it: a missile's flight
+sprite is copied from its fire params, and a cluster bit's params are the
+*parent's* copy, so the primary is the one carrying the record's `sprite`
+(zeroed while the builder owns the art) and the bits are the zero ones.
+
+A `bits` table must be configured for any of this to apply (`bits = "inherit"`
+or no `bits` makes every missile the primary, so a plain weapon never classifies
+as a bit and never goes invisible). `is_bit = function(m)` overrides the test,
+and if the engine ever passes `m.bit` (MissileEntity+0x150, the pellet flag)
+that is used first because it is exact.
+
+`log = true` prints the first three frames of each missile
+(`id`, `sprite`, `ident`) so the classification can be checked in the log.
 
 ### State signals
 
@@ -85,19 +96,38 @@ sprite fields:
 Each active state needs a **distinct** nonzero id. The editor assigns one when
 the record field is empty and warns about duplicates.
 
+### Digging (no state, no sheet)
+
+A digging record names no art of its own: `dig.dive_sprite` and
+`dig.sprite_1..3` are zeroed (WA's mole is 158-161, and PX's `wsvr/wsvru/wsvrd/
+wsvb` are 245-248 -- ids that would be drawn underneath our sheet). Digging is
+then only an animation: `dig = true` makes the builder probe the terrain around
+the nose every frame (four samples across the heading, two hits = digging, PX's
+Bunker Buster test) and cycle the role's own sheet frames while it is in the
+land, keeping the heading locked. Tune it with
+`dig = { probe = 6, spread = 3, hold = 3, need = 2 }`.
+
+A weapon cannot start digging later in its life: the action is fixed when the
+record is installed, so "is this missile digging" is purely terrain contact.
+
 ### Native hand-back
 
-A state with `native = true` drops the follower and restores the last signal id
-to `m.sprite`. Use it to let WA draw the dig frames or a stock homing pose while
-the rest of the weapon keeps custom art.
+A state with `native = true` drops the follower and re-applies the last signal
+id to `m.sprite`. For a *primary* that id is not the record's own art (the
+generator zeroed it to classify), so native is only safe while the record still
+names a real sprite; it is being replaced by per-feature native routes (dig:
+leave the record's indexes alone; roam: `sheep_sprites`; homing: the homing
+sprite field).
 
 ## Verify in game
 
 These are engine behaviours, not static checks:
 
 - `m.sprite` is writable in `pre`, and WA draws it again after `native = true`.
-- WA writes the behaviour sprite when it changes; one write is enough.
-- Dig: if `sprite_1..3` are written to `m.sprite` over time, list them all in
-  `sig`; if they are drawn separately, use `when = function(m) ... end`.
+- `m.sprite` is the *flight* sprite only: WA does not write homing/dig/gas
+  sprites into it, so `sig` matching is a legacy path. Time the state or probe
+  for it instead.
+- Dig: the probes find the crater walls; watch that the animation starts at the
+  first contact and that no mole or `wsv*` frame appears under the sheet.
 - A state swap despawns and respawns the follower; watch for a one-frame flicker.
 - Roaming: check the `pre` phase still runs while the animal is on the ground.

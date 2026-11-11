@@ -11,11 +11,33 @@ import {
 import { getStockPanelPosition } from '../data/stockWeapons';
 import { COLLISION_FLAGS } from '../data/recordSchema';
 import {
+  bitActionOf,
   bitBuilderMode,
   primaryBuilderOn,
   resolveBehaviorStates,
   usesWfwsBuilder,
 } from '../data/spriteBuilder';
+
+/**
+ * One `dig.*` sprite row.
+ *
+ * The builder owns the dig art once its probes say the round is in the land, so
+ * the record's indexes are zeroed: any id left there (WA's mole 158-161, PX's
+ * wsvr/wsvru/wsvrd/wsvb 245-248) would be drawn under our sheet.
+ *
+ * A `native` dig role hands the art back to WA, and then a zero is not an
+ * answer -- it would erase the donor's own mole frames. Native only writes an
+ * id the author actually set.
+ */
+function digSpriteRow(
+  value: number | undefined,
+  zeroed: boolean,
+  native: boolean
+): number | undefined {
+  if (zeroed) return 0;
+  if (native) return value !== undefined && value > 0 ? value : undefined;
+  return value;
+}
 
 export function sanitizeModFolder(id: string): string {
   const parts = id.trim().split('.');
@@ -379,6 +401,23 @@ export function generateLuaCode(project: WeaponProject): string {
   const bitMode = bitBuilderMode(project);
   const bitRoleActive = bitMode === 'builder';
   const behaviorStates = resolveBehaviorStates(project);
+  const clusterBitAction = bitActionOf(project);
+
+  // Digging has no art of its own: the builder animates the flight sheet while
+  // its terrain probes say the round is in the land. So the record's own dig
+  // sprites have to go -- a stock mole (moledive/moledig1..3) or PX's
+  // wsvr/wsvru/wsvrd/wsvb (245-248) would be drawn under our sheet, and those
+  // ids only exist because PX points `sprite_overrides` at them. `native` on
+  // the dig role keeps WA's dig art (and no `dig =` is passed to the builder).
+  const digRoleMode = project.behaviorArt?.dig?.mode ?? 'builder';
+  const digUsesBuilder = digRoleMode !== 'native';
+  const zeroMainDig = builderOn && digUsesBuilder && project.action === 'dig';
+  const zeroBitDig =
+    builderOn &&
+    digUsesBuilder &&
+    bitMode !== null &&
+    project.burst === 'clusters' &&
+    clusterBitAction === 'dig';
 
   // Which record families WA blasts at all: a gun, arrow, spray or special has
   // no explosion to decorate, and neither does an air strike. A strike's bombs
@@ -1181,33 +1220,39 @@ export function generateLuaCode(project: WeaponProject): string {
     } else if (
       action === 'dig' &&
       project.digConfig &&
-      (digTouched || (digState?.scope === 'main' && !!digState))
+      (zeroMainDig || digTouched || (digState?.scope === 'main' && !!digState))
     ) {
       const d = project.digConfig;
       const digMainState = digState?.scope === 'main' ? digState : undefined;
-      lines.push('        dig = {');
-      if (digChanged('sound')) lines.push(`          sound = ${d.sound ?? 90},`);
-      const diveSprite =
-        digMainState?.assigned.dig_dive !== undefined
-          ? digMainState.assigned.dig_dive
-          : digChanged('dive_sprite')
-            ? d.dive_sprite ?? 0
-            : undefined;
-      if (diveSprite !== undefined) {
-        lines.push(`          dive_sprite = ${diveSprite},`);
-      }
-      const digFrame = (field: 'dig_1' | 'dig_2' | 'dig_3', key: 'sprite_1' | 'sprite_2' | 'sprite_3') => {
+      const nativeDig = builderOn && !digUsesBuilder;
+      const digRows: string[] = [];
+      const digField = (
+        field: 'dig_dive' | 'dig_1' | 'dig_2' | 'dig_3',
+        key: 'dive_sprite' | 'sprite_1' | 'sprite_2' | 'sprite_3',
+        name: string
+      ) => {
         const assigned = digMainState?.assigned[field];
-        if (assigned !== undefined) return assigned;
-        return digChanged(key) ? d[key] ?? 0 : undefined;
+        const value =
+          assigned !== undefined
+            ? assigned
+            : digChanged(key)
+              ? d[key] ?? 0
+              : undefined;
+        const row = digSpriteRow(value, zeroMainDig, nativeDig);
+        if (row !== undefined) digRows.push(`          ${name} = ${row},`);
       };
-      const dig1 = digFrame('dig_1', 'sprite_1');
-      const dig2 = digFrame('dig_2', 'sprite_2');
-      const dig3 = digFrame('dig_3', 'sprite_3');
-      if (dig1 !== undefined) lines.push(`          sprite_1 = ${dig1},`);
-      if (dig2 !== undefined) lines.push(`          sprite_2 = ${dig2},`);
-      if (dig3 !== undefined) lines.push(`          sprite_3 = ${dig3},`);
-      lines.push('        },');
+      digField('dig_dive', 'dive_sprite', 'dive_sprite');
+      digField('dig_1', 'sprite_1', 'sprite_1');
+      digField('dig_2', 'sprite_2', 'sprite_2');
+      digField('dig_3', 'sprite_3', 'sprite_3');
+      if (zeroMainDig || digChanged('sound') || digRows.length > 0) {
+        lines.push('        dig = {');
+        if (zeroMainDig || digChanged('sound')) {
+          lines.push(`          sound = ${d.sound ?? 90},`);
+        }
+        lines.push(...digRows);
+        lines.push('        },');
+      }
     }
 
     // Payload Burst Selection
@@ -1707,8 +1752,9 @@ export function generateLuaCode(project: WeaponProject): string {
 
         if (
           bitAction === 'dig' &&
-          (c.dig || digState?.scope === 'bit') &&
-          (clustletChanged('bit_action') ||
+          (zeroBitDig || c.dig || digState?.scope === 'bit') &&
+          (zeroBitDig ||
+            clustletChanged('bit_action') ||
             clustletChanged('dig') ||
             digState?.scope === 'bit')
         ) {
@@ -1720,32 +1766,35 @@ export function generateLuaCode(project: WeaponProject): string {
             sprite_3: 0,
           };
           const digBitState = digState?.scope === 'bit' ? digState : undefined;
-          lines.push('          dig = {');
-          if (c.dig && bitDigChanged('sound')) lines.push(`            sound = ${d.sound ?? 90},`);
-          const bitDive =
-            digBitState?.assigned.dig_dive !== undefined
-              ? digBitState.assigned.dig_dive
-              : c.dig && bitDigChanged('dive_sprite')
-                ? d.dive_sprite ?? 0
-                : undefined;
-          if (bitDive !== undefined) {
-            lines.push(`            dive_sprite = ${bitDive},`);
-          }
-          const bitDigFrame = (
-            field: 'dig_1' | 'dig_2' | 'dig_3',
-            key: 'sprite_1' | 'sprite_2' | 'sprite_3'
+          const nativeBitDig = builderOn && !digUsesBuilder;
+          const bitRows: string[] = [];
+          const bitDigField = (
+            field: 'dig_dive' | 'dig_1' | 'dig_2' | 'dig_3',
+            key: 'dive_sprite' | 'sprite_1' | 'sprite_2' | 'sprite_3',
+            name: string
           ) => {
             const assigned = digBitState?.assigned[field];
-            if (assigned !== undefined) return assigned;
-            return c.dig && bitDigChanged(key) ? d[key] ?? 0 : undefined;
+            const value =
+              assigned !== undefined
+                ? assigned
+                : c.dig && bitDigChanged(key)
+                  ? d[key] ?? 0
+                  : undefined;
+            const row = digSpriteRow(value, zeroBitDig, nativeBitDig);
+            if (row !== undefined) bitRows.push(`            ${name} = ${row},`);
           };
-          const bitDig1 = bitDigFrame('dig_1', 'sprite_1');
-          const bitDig2 = bitDigFrame('dig_2', 'sprite_2');
-          const bitDig3 = bitDigFrame('dig_3', 'sprite_3');
-          if (bitDig1 !== undefined) lines.push(`            sprite_1 = ${bitDig1},`);
-          if (bitDig2 !== undefined) lines.push(`            sprite_2 = ${bitDig2},`);
-          if (bitDig3 !== undefined) lines.push(`            sprite_3 = ${bitDig3},`);
-          lines.push('          },');
+          bitDigField('dig_dive', 'dive_sprite', 'dive_sprite');
+          bitDigField('dig_1', 'sprite_1', 'sprite_1');
+          bitDigField('dig_2', 'sprite_2', 'sprite_2');
+          bitDigField('dig_3', 'sprite_3', 'sprite_3');
+          if (zeroBitDig || (c.dig && bitDigChanged('sound')) || bitRows.length > 0) {
+            lines.push('          dig = {');
+            if (zeroBitDig || (c.dig && bitDigChanged('sound'))) {
+              lines.push(`            sound = ${d.sound ?? 90},`);
+            }
+            lines.push(...bitRows);
+            lines.push('          },');
+          }
         }
 
         lines.push('        },');
@@ -2096,6 +2145,19 @@ export function generateLuaCode(project: WeaponProject): string {
       lines.push('      },');
     } else if (bitMode === 'inherit') {
       lines.push('      bits = "inherit",');
+    }
+
+    // Digging: no state, no sheet. The builder cycles the role's own sheet
+    // while four terrain probes around the nose are solid (PX's Bunker Buster
+    // test), so it only applies when the record's dig sprites were zeroed.
+    if (zeroMainDig || zeroBitDig) {
+      lines.push('      dig = true,');
+    }
+
+    // Identity debugging: one log line per missile's first frames, so the
+    // zero-means-bit convention can be confirmed from the game log.
+    if (m.logIdentity) {
+      lines.push('      log = true,');
     }
 
     // Per-behaviour art, only for the states the action/burst really has. The
