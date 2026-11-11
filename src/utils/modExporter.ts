@@ -2,6 +2,8 @@ import JSZip from 'jszip';
 import { WeaponProject } from '../types/weapon';
 import { WFWS_SDK_MOD_TOML, WFWS_SPRITE_BUILDER_LUA } from '../data/wfwsSdk';
 import {
+  roamSheetPath,
+  roamSheetPaths,
   generateLuaCode,
   generateModToml,
   generateProfileToml,
@@ -10,6 +12,7 @@ import {
   customSoundPath,
   missileFlightSheetPath,
   packArtPath,
+  wfwsRoleFlags,
   PACK_ART_SLOTS,
   sanitizeModFolder,
   wepBundlePath,
@@ -91,6 +94,19 @@ export async function exportModZip(project: WeaponProject): Promise<Blob> {
           );
       zip.file(`${modFolder}/${bitFlightSheetPath(project)}`, bitBlob);
     }
+    // Timed homing art (the builder's `homing` / `bits.homing` sheets).
+    const flags = wfwsRoleFlags(project);
+    for (const [owned, key] of [
+      [flags.homing, 'homing'] as const,
+      [flags.bitHoming, 'homing_bit'] as const,
+    ]) {
+      if (!owned) continue;
+      const role = project.behaviorArt?.[key];
+      const blob = role?.sheetFile
+        ? role.sheetFile
+        : await createDefaultMissileSheet(project, role?.anim || 'rotation', role?.frames ?? 1);
+      zip.file(`${modFolder}/${behaviorStateSheetPath(project, key)}`, blob);
+    }
     for (const state of resolveBehaviorStates(project)) {
       if (state.art.mode !== 'builder') continue;
       const stateBlob = state.art.sheetFile
@@ -104,6 +120,18 @@ export async function exportModZip(project: WeaponProject): Promise<Blob> {
         `${modFolder}/${behaviorStateSheetPath(project, state.def.key)}`,
         stateBlob
       );
+    }
+  }
+
+  // A roaming animal's two flying sheets (`sheep_sprites`). The engine installs
+  // exactly two, so nothing is written unless both are uploaded.
+  if (roamSheetPaths(project)) {
+    const sheets = [
+      ['flight1', project.roamSheets?.flight1?.file],
+      ['flight2', project.roamSheets?.flight2?.file],
+    ] as const;
+    for (const [which, file] of sheets) {
+      if (file) zip.file(`${modFolder}/${roamSheetPath(project, which)}`, file);
     }
   }
 
@@ -136,8 +164,11 @@ export async function exportModZip(project: WeaponProject): Promise<Blob> {
 
   // Bundle the wfws.sdk library alongside every export so the weapon's
   // `dependencies = ["wfws.sdk"]` resolves locally without an online install.
-  zip.file('wfws_sdk/mod.toml', WFWS_SDK_MOD_TOML);
-  zip.file('wfws_sdk/lib/wfws_sprite_builder.lua', WFWS_SPRITE_BUILDER_LUA);
+  // Library bundles live under `Mods/wf-lib/` next to `wf.sdk` and
+  // `effects.sdk`, so the folder goes there and the ZIP unpacks straight into
+  // `Mods/`.
+  zip.file('wf-lib/wfws_sdk/mod.toml', WFWS_SDK_MOD_TOML);
+  zip.file('wf-lib/wfws_sdk/lib/wfws_sprite_builder.lua', WFWS_SPRITE_BUILDER_LUA);
 
   return await zip.generateAsync({ type: 'blob' });
 }

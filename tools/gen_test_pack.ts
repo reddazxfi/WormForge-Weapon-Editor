@@ -29,6 +29,8 @@ import {
   bitFlightSheetPath,
   behaviorStateSheetPath,
   missileFlightSheetPath,
+  roamSheetPath,
+  roamSheetPaths,
   packArtPath,
   sanitizeModFolder,
 } from '../src/utils/luaGenerator';
@@ -362,6 +364,8 @@ function makeOp(partial: {
   roam?: Partial<typeof DEFAULTS.roam>;
   fire?: Partial<WeaponProject['fireConfig']>;
   packArt?: Partial<WeaponProject['packArt']>;
+  /** The roaming animal's two flying sheets (`sheep_sprites`). */
+  roamSheets?: WeaponProject['roamSheets'];
   defaults?: Partial<WeaponProject['defaults']>;
 }): WeaponProject {
   return {
@@ -422,6 +426,7 @@ function makeOp(partial: {
     bitFlight: { ...DEFAULT_ROLE_ART, ...partial.bitFlight },
     behaviorArt: { ...(partial.behaviorArt || {}) },
     roamConfig: { ...DEFAULTS.roam, ...partial.roam },
+    roamSheets: partial.roamSheets ?? { flight1: {}, flight2: {} },
     digConfig: { sound: 90, dive_sprite: 0, sprite_1: 0, sprite_2: 0, sprite_3: 0 },
     fireConfig: {
       spread_delay_ms: 30,
@@ -829,9 +834,12 @@ const TESTS: TestCase[] = [
         homing: { ...DEFAULT_ROLE_ART, mode: 'builder', anim: 'rotation', frames: 32, fps: 15 },
       },
     }),
-    intent: 'WFWS behaviour state art: the homing state swaps to a 32-frame sheet when WA arms it.',
-    expect: 'A static grenade flies, then starts spinning once the missile arms and homes; the art stays until the blast.',
-    watch: 'No art change (WA not writing `missile.homing.sprite`), the sprite disappearing, or a one-frame flicker on the swap.',
+    intent:
+      'Timed homing art: the flight sheet until `arm` (800 ms), then the homing sheet for `time` (6000 ms), then back.',
+    expect:
+      'Static grenade for 0.8 s, then the 32-frame sheet spins while the missile steers, and the static art returns after 6.8 s.',
+    watch:
+      'The homing sheet from launch (arm ignored), no swap at 800 ms (timing), art that never ends (time), or the pigeon sprite showing under it.',
   },
   {
     project: makeOp({
@@ -855,6 +863,25 @@ const TESTS: TestCase[] = [
       'Upright and cycling in flight; once it enters the land it turns to the heading and keeps cycling, with no mole and no Salvation-Army `wsv*` art.',
     watch:
       'The mole (dig sprites not zeroed), a `wsv*` frame, art frozen underground (probes never firing), or the sheet turning in mid-air.',
+  },
+  {
+    project: makeOp({
+      id: 'wftest.27_roam_sheets',
+      name: 'WF 27 Roam Sheets',
+      slot: 'super_sheep',
+      action: 'roam',
+      body: { sprite: 'sheep' },
+      roamSheets: {
+        flight1: { file: file(GRENADE_PNG, 'sheep_flight1.png'), fileName: 'sheep_flight1.png' },
+        flight2: { file: file(ROT_32, 'sheep_flight2.png'), fileName: 'sheep_flight2.png' },
+      },
+    }),
+    intent:
+      'Roaming art through `sheep_sprites`: two flying sheets installed as WA sprites and written to `sheep.flight_1` / `flight_2`.',
+    expect:
+      "Steer the sheep after take-off: it alternates our two poses in the air; on the ground and while farting it keeps WA's walking and gas poses.",
+    watch:
+      'Stock sheep sheets in flight (nothing installed), the same pose twice, or our art on the ground / while farting.',
   },
 ];
 
@@ -939,6 +966,21 @@ for (const test of TESTS) {
       writeFileSync(join(BUNDLE, statePath), ROT_32);
       usedSheets.add(statePath);
       spriteDecls.set(statePath, { frames: 32, fps: 15, play: 'loop' });
+    }
+  }
+
+  // A roaming animal's two flying sheets (`sheep_sprites`).
+  if (roamSheetPaths(project)) {
+    mkdirSync(join(BUNDLE, 'sprites', folder), { recursive: true });
+    for (const [which, asset] of [
+      ['flight1', project.roamSheets?.flight1],
+      ['flight2', project.roamSheets?.flight2],
+    ] as const) {
+      if (!asset?.file) continue;
+      const path = roamSheetPath(project, which);
+      writeFileSync(join(BUNDLE, path), ROT_32);
+      usedSheets.add(path);
+      spriteDecls.set(path, { frames: 1, fps: 15, play: 'loop' });
     }
   }
 

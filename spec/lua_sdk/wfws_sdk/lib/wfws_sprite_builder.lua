@@ -166,7 +166,7 @@ local NATIVE = {}
 
 local function resolve(o)
   local anim = o.anim or "none"
-  return {
+  local cfg = {
     sheet = o.sheet,
     anim = anim,
     anim_type = ANIM_TYPE[anim],
@@ -179,6 +179,29 @@ local function resolve(o)
     frame_fn = o.frame_fn,
     turn_fn = o.turn_fn,
   }
+  -- `homing = { arm = ms, time = ms, sheet = "...", ... }`: art for the
+  -- homing window, resolved once at install like every other role.
+  if type(o.homing) == "table" then
+    local h = resolve(o.homing)
+    h.arm = o.homing.arm or 0
+    h.time = o.homing.time or 0
+    cfg.homing = h
+  end
+  return cfg
+end
+
+-- Homing is timed, not detected: WA arms the missile `arm` ms after it is
+-- fired and steers it for `time` ms (0 = until it lands or blasts). The game
+-- is a 50 Hz lockstep, so a frame is exactly 20 ms on every machine.
+local MS_PER_FRAME = 20
+
+local function homing_art(cfg, ms)
+  local h = cfg and cfg.homing
+  if not h then return cfg end
+  local arm = h.arm or 0
+  if ms < arm then return cfg end
+  if (h.time or 0) > 0 and ms >= arm + h.time then return cfg end
+  return h
 end
 
 local function sigset(v)
@@ -239,6 +262,7 @@ function M.flight(ctx, opts)
   local dig_dir = {}     -- [id] = last heading, for the terrain probes
   local dig_hold = {}    -- [id] = frames left of "digging"
   local dig = dig_settings(opts.dig)
+  local age = {}         -- [id] = frames since first sight, for homing ms
   local logged = {}      -- [id] = frames logged so far (opts.log)
   local gen = 0
 
@@ -294,6 +318,7 @@ function M.flight(ctx, opts)
       dig_dir[id] = nil
       dig_hold[id] = nil
       logged[id] = nil
+      age[id] = nil
       b:despawn()
     end
   end
@@ -315,6 +340,7 @@ function M.flight(ctx, opts)
     if ent == nil then
       ent = classify(m)
       kind[id] = ent
+      age[id] = 0
       -- `log = true` for one line per missile's first three frames: what the
       -- identity test actually saw. Turn it off once a convention is settled.
       if opts.log then
@@ -342,15 +368,17 @@ function M.flight(ctx, opts)
       return
     end
 
-    local cfg = active[id]
-    if cfg == nil then
-      cfg = pick(m, ent)
-      active[id] = cfg
+    local base = active[id]
+    if base == nil then
+      base = pick(m, ent)
+      active[id] = base
     end
-    if cfg == NATIVE then
+    if base == NATIVE then
       drop_follower(id)
       return
     end
+    age[id] = (age[id] or 0) + 1
+    local cfg = homing_art(base, age[id] * MS_PER_FRAME)
 
     local f = follow[id]
     if f and f.cfg ~= cfg then            -- state changed: new art, new actor

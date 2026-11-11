@@ -202,6 +202,27 @@ export interface PackArtAsset {
  * record inherits), this is drawn by Lua from sampled positions, so its colour,
  * widths and length are free.
  */
+/**
+ * One sheet the engine installs as a WA sprite for a roaming animal. These are
+ * single poses (WA picks between the fields), not animation strips.
+ */
+export interface RoamSheetAsset {
+  file?: File;
+  fileName?: string;
+  preview?: string;
+}
+
+/**
+ * The two flying sheets a roaming animal alternates while it is steered
+ * (`sheep_sprites`, written to the record's `sheep.flight_1` / `sheep.flight_2`).
+ * WA draws the walking pose from the record body and the gas pose from
+ * `roam.gas.animal_sprite`, so those stay record fields.
+ */
+export interface RoamSheetsConfig {
+  flight1: RoamSheetAsset;
+  flight2: RoamSheetAsset;
+}
+
 export interface RibbonTrailConfig {
   enabled: boolean;
   /** Points kept behind the round (`max`). */
@@ -433,6 +454,9 @@ export interface WeaponProject {
   /** Per-behaviour art for the WFWS builder, keyed by the state it matches. */
   behaviorArt: Partial<Record<BehaviorArtKey, FlightRoleArt>>;
   roamConfig: RoamActionConfig;
+  /** The roaming animal's two flying sheets (`sheep_sprites`). Optional so an
+   *  older saved project (or a scratch script) needs no migration. */
+  roamSheets?: RoamSheetsConfig;
   digConfig: DigActionConfig;
   fireConfig: FirePayloadConfig;
   /** Effects-SDK ribbon trail for this weapon's projectile. */

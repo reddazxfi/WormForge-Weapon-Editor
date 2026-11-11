@@ -230,6 +230,27 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   selections" crash.
 - Actions (`none`, `bounce`, `homing`, `roam`, `dig`) and burst modes
   (`nothing`, `clusters`, `fire`) are exclusive.
+- **The action groups share one native slab (+0xA8..+0xD0), so switching the
+  action has to write the destination group in full** (`fullGroup`, and
+  `clustletChanged` for the bits). A stock Grenade's `bounce.sound` is 113 at
+  +0xB4, which is `homing.trail.sprite`: converting the grenade to homing left
+  113 there, and WA drew `oildrum4` frames as the homing trail (with the oil
+  drum's own particle physics). The overlaps are
+  `0xA8` bounce/roam hits + impact-particles bit, `0xAC` bounce.bounciness /
+  homing.sprite / roam.flight_hits, `0xB0` bounce.terrain_keep_speed /
+  homing.animation / roam.walk_speed / dig.sound, `0xB4` bounce.sound /
+  homing.trail.sprite / roam.step_height / dig.dive_sprite, `0xB8` bounce.
+  contact_sides / homing.trail.power / roam.edge_jump.angle / dig.sprite_1, and
+  so on through `0xD0`. Writing the group from the editor's own values (the
+  same numbers the panels show, zeros for "off") makes the slab deterministic;
+  a diff-based write of only the changed keys is what let the donor's numbers
+  leak through. An untouched `.wep` import still emits nothing (`fullGroup` is
+  `!baseline || action !== baseline.action`).
+- Stock action values can be read from PX's default scheme:
+  `python tools/px_scheme_weps.py "<WA+PX>/PXSchemes/default.pxs" OUT --all`
+  (in `WormForgeNew`) writes one `.wep` per slot; e.g. Homing Missile has
+  `homing.trail.sprite = 131, power 50, speed 100, bubbles 50, animation 2`,
+  and the Grenade's 0xB4 is 113.
 - Clustlets carry `clusters.bit.action` (`impact`/`bounce`/`homing`/`roam`/
   `dig`). The groups share native slots, so decode/emit only the active group.
 - `dependencies = ["wf.sdk"]` is added for hold art (it exports
@@ -273,13 +294,23 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
     an author-set nonzero id is written, never a zero) and passes no `dig`.
     `dig.dive_sprite` is not art to upload: the flight sheet is the dig
     animation.
-  - `states = { { scope, sig, sheet/native, … } }` remains for homing/roam/gas,
-    but `sig` is a **legacy** path: `m.sprite` is the flight sprite only and WA
-    does not write behaviour sprites into it. New states must be timed (homing
-    `arm`/`time` in ms, 50 Hz → 20 ms/frame) or probed (dig), not matched by id.
-    `native = true` hands the state back to WA, but on a primary it restores the
-    last signal id, not the record's own art (which the builder zeroed), so it
-    is only safe while the record still names a real sprite.
+  - **Homing is timed, not detected.** The generator passes the record's own
+    numbers as `homing = { arm, time, sheet, anim, … }` (primary) or
+    `bits.homing = { … }` (cluster bits) and zeroes `missile.homing.sprite`
+    (0xAC) / `clusters.bit.homing.sprite` (0x170) while the builder owns that
+    art; the builder swaps to the sheet while `arm <= age*20 < arm+time` (50 Hz,
+    so one frame is 20 ms; `time = 0` runs until the round lands/blasts).
+  - **Roaming is not a state at all.** WA draws the walking pose from the record
+    `sprite`, the two flying sheets from `sheep.flight_1/2` and the gas pose from
+    `roam.gas.animal_sprite`, so the editor emits `sheep_sprites = { a, b }` for
+    two uploaded poses (the engine installs them and writes the two fields after
+    the record tables, which is why a numeric `sheep.flight_*` row is skipped
+    when both are present). The gas pose stays the numeric record field.
+  - `states = { { scope, sig, sheet/native, … } }` is **legacy**: `sig` assumed
+    WA writes behaviour sprites into `m.sprite`, which it does not (that field is
+    the flight sprite only). Nothing in the editor emits a state any more —
+    `resolveBehaviorStates` skips every role (dig, homing, homing_bit) — and the
+    builder keeps the key only for bundles that pass one by hand.
   - The primary sheet, `bit_flight.png` and `state_<key>.png` are listed in the
     claim `sprites` and declared in `mod.toml`; the exporter writes the uploaded
     file or the default missile art, so a declared path always exists.
@@ -429,12 +460,15 @@ never declare it without writing the file.
 - `sprites/<mod>/missile.png` whenever custom flight art is enabled: uploaded
   sheet, otherwise the default art.
 - `sprites/<mod>/bit_flight.png` when the WFWS bit role is set to Builder, and
-  `sprites/<mod>/state_<key>.png` for every behaviour role set to Builder
-  (`homing`, `homing_bit`, `dig`, `roam_flight`, `gas`). Uploaded sheet if
-  present, otherwise the default missile art.
+  `sprites/<mod>/state_homing.png` / `state_homing_bit.png` when the homing role
+  is set to Builder (`wfwsRoleFlags`). Uploaded sheet if present, otherwise the
+  default missile art. Digging and roaming write no state sheet (the flight
+  sheet is the dig animation, and roaming uses `sheep_sprites`).
+- `sprites/<mod>/sheep_flight1.png` / `sheep_flight2.png` when both roaming
+  poses are uploaded (`sheep_sprites` needs exactly two).
 - Any `customSprites` entries are written at their declared paths.
 - `mod.toml` declares `[sprites."sprites/<mod>/missile.png"]` for custom flight
-  art, the bit and state sheets above, and
+  art, the bit, homing-state and roaming-sheep sheets above, and
   `[sprites."sprites/<mod>/hold.png"]` when the hold sheet has more than one
   frame (`frames`, `fps`, `play = "loop"`).
 - Profile name sanitizes `\\ / : * ? " < > |`.
@@ -448,8 +482,14 @@ never declare it without writing the file.
 - `mod.toml` `dependencies` merges the features' own entries (`wf.sdk` for
   holds, `wfws.sdk` for the flight builder, `effects.sdk` for effects) with
   `project.extraDependencies` (deduped). The Bundle Code page's
-  `BundleDependencies` panel edits that list; no SDK files are copied because
-  WormForge resolves ids from `Mods/` at load.
+  `BundleDependencies` panel edits that list; other bundles are resolved from
+  `Mods/` at load.
+- The one exception is the editor's own `wfws.sdk`: every export also ships it at
+  `wf-lib/wfws_sdk/` (`mod.toml` + `lib/wfws_sprite_builder.lua`), the folder
+  library bundles live in next to `wf-lib/sdk` and `wf-lib/effects_sdk`, so a ZIP
+  unpacked into `Mods/` already has it. Both files are imported from
+  `spec/lua_sdk/wfws_sdk/` with Vite's `?raw`, so there is no copy to keep in
+  sync.
 
 ---
 
@@ -475,6 +515,15 @@ test carries its intent, expected result and failure symptom in
 `test_pack/README.md`; the profile places them on distinct stock slots with
 infinite ammo. Tests 21/22 cover the explosion burst in `blast` mode (a
 bazooka) and `effect` overlay mode (a mine).
+
+Stock record values (PX's default scheme, from `WormForgeNew`):
+
+```powershell
+python tools/px_scheme_weps.py "I:/Games/WA 3.6.31.0 + Project X by 0rang3/PXSchemes/default.pxs" OUT --all
+```
+
+Each slot's `.wep` is the record that slot plays with; the action slab is at
++0xA8..+0xD0 (`crates/weapons/src/record.rs`).
 
 Compiler check (lives in the code-editor repo):
 
@@ -551,7 +600,21 @@ that `vite preview` at `/` hides).
 6. **`animate` is not an engine key.** It was removed from the generated Lua.
 7. **PX `anim` ≠ native `animation`.** Keep them separate.
 8. **`.wep` and `copy_from` cannot coexist.** Branch on `wepBundlePath`.
-9. **Zero is a value.** Use `??` when reading/writing record numbers.
+9a. **A record sprite field takes a stock *name* or an id, never free text.**
+    The engine resolves names from WA's sprite table (`crates/gfx/src/
+    stock_ids.rs`, vendored as `src/data/stockSprites.ts`) and treats anything
+    else as a bundle path, so a made-up name fails the whole install
+    ("sprites entry 'smoke' must be a pack PNG/GIF or frame folder"). The trail
+    presets used to write `smoke`/`sparks`/`fire_smoke`; they now write
+    `smklt25`/`firehit`/`smkdrk20`, the export falls back to `smklt25` for an
+    unknown value, and the field shows the resolved name and id (`113` =
+    `oildrum4`, which is how a wrong "particle" id turns into oil-drum frames).
+9. **Zero is a value.** Use `??` when reading/writing record numbers — and
+   never `||` in a controlled numeric input. `value={body.homing_arm_ms || 1000}`
+   displayed 1000 while the project stored 0, so exports silently carried
+   `arm = 0, time = 0`; a zero `homing.time` leaves the missile unguided (no
+   stock homing record has one: arms are 0-1500 ms, times 2000-5000). The same
+   trap hid the builder's homing window, which starts at `arm`.
 10. **Diff against `wepBaseline`.** Untouched imports must emit no tables.
 11. **`base: './'` means no absolute asset URLs.** Use `assetUrl()`.
 12. **The old copies are stale.** Only edit this repository.

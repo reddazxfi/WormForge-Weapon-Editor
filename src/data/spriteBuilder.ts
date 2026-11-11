@@ -71,21 +71,13 @@ export const BEHAVIOR_ART_DEFS: BehaviorArtDef[] = [
     description:
       'No art of its own: the record dig sprites are zeroed and the builder cycles the flight sheet while terrain probes say the round is digging.',
   },
-  {
-    key: 'roam_flight',
-    label: 'Roaming flight',
-    scope: () => 'main',
-    record: 'sheep.flight_1 / flight_2',
-    description: 'Art used while a roaming animal is airborne, before it walks.',
-  },
-  {
-    key: 'gas',
-    label: 'Gas pose',
-    scope: () => 'main',
-    record: 'roam.gas.animal_sprite',
-    description: 'Art used once a roaming animal settles and releases gas.',
-  },
 ];
+
+// A roaming animal is not a state role: WA draws its walking pose (record
+// `sprite`), its two flying sheets (`sheep_sprites` -> `sheep.flight_1/2`) and
+// its gas pose (`roam.gas.animal_sprite`) from separate fields, so the Hold
+// page's roam card uploads the two flying sheets instead of swapping art on a
+// signal. See `roamSheetPaths` in luaGenerator.
 
 /** The behaviour rows that make sense for the current action and payload. */
 export function availableBehaviorArt(project: WeaponProject): BehaviorArtDef[] {
@@ -99,9 +91,6 @@ export function availableBehaviorArt(project: WeaponProject): BehaviorArtDef[] {
         return clusters && bitAction === 'homing';
       case 'dig':
         return project.action === 'dig' || (clusters && bitAction === 'dig');
-      case 'roam_flight':
-      case 'gas':
-        return project.action === 'roam';
       default:
         return false;
     }
@@ -227,10 +216,11 @@ export function resolveBehaviorStates(project: WeaponProject): ResolvedBehaviorS
 
   const out: ResolvedBehaviorState[] = [];
   for (const def of availableBehaviorArt(project)) {
-    // Dig is probe-driven (the builder animates the flight sheet in the dirt),
-    // so it has no sig id and no state sheet. Keeping it here would write a
-    // sentinel id into dig.* again and point WA at a stock sprite.
-    if (def.key === 'dig') continue;
+    // These roles have their own route now, so none of them is a `sig` state:
+    // dig is probe-driven (the builder animates the flight sheet in the dirt),
+    // and homing is timed (`arm`/`time` ms). Keeping them here would write a
+    // sentinel id into a record sprite field again.
+    if (def.key === 'dig' || def.key === 'homing' || def.key === 'homing_bit') continue;
     const art = project.behaviorArt?.[def.key];
     if (!art || art.mode === 'inherit') continue;
     const sig: number[] = [];

@@ -44,8 +44,11 @@ const INITIAL_PROJECT: WeaponProject = {
     fuse_time_ms: 3000,
     countdown_ms: 3000,
     homing: 'off',
-    homing_arm_ms: 0,
-    homing_time_ms: 0,
+    // WA's own homing records use arm 0-1500 ms and time 2000-5000; 0/0 is what
+    // a project used to carry by accident (the fields displayed 1000/8000
+    // regardless), and a zero duration means no guidance at all.
+    homing_arm_ms: 1000,
+    homing_time_ms: 8000,
     cluster: true,
     custom_cluster: false,
     custom_site: 'explode',
@@ -116,6 +119,7 @@ const INITIAL_PROJECT: WeaponProject = {
     hits: { land: true, worms: true, mines: true, crates: true, water: true },
     flight_hits: { land: true, worms: true, mines: true, crates: true, water: true },
   },
+  roamSheets: { flight1: {}, flight2: {} },
   digConfig: {
     sound: 90,
     dive_sprite: 0,

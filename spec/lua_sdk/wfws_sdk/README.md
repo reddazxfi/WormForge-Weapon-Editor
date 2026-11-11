@@ -17,10 +17,11 @@ working and `sb.PX_POSTURE` / `sb.PX_HANDS` are still available.
 
 ## Install
 
-Copy the `wfws_sdk` folder into `WormForge/Mods/` (any folder name works; the
-dependency id is what matters). The editor's exported bundles declare
-`wfws.sdk`, so it only needs to be installed once next to `wf.sdk` and
-`effects.sdk`.
+Copy the `wfws_sdk` folder into `WormForge/Mods/wf-lib/` (any folder name works;
+the dependency id is what matters), next to `wf-lib/sdk` (`wf.sdk`) and
+`wf-lib/effects_sdk` (`effects.sdk`). The editor's exported bundles declare
+`wfws.sdk` and ship this folder at `wf-lib/wfws_sdk/`, so unpacking a ZIP into
+`Mods/` puts it in the right place; it only needs to be installed once.
 
 ## Why it exists
 
@@ -109,6 +110,41 @@ land, keeping the heading locked. Tune it with
 
 A weapon cannot start digging later in its life: the action is fixed when the
 record is installed, so "is this missile digging" is purely terrain contact.
+
+### Homing (timed)
+
+Homing is a window, not a sprite id: WA arms the missile `arm` ms after it is
+fired and steers it for `time` ms (`0` = until it lands or blasts). Pass the
+record's own numbers with the art and the builder draws it only in that window:
+
+```lua
+sb.flight(ctx, {
+  weapon = ctx.id, sheet = "sprites/<mod>/missile.png",
+  homing = { arm = 800, time = 6000,
+             sheet = "sprites/<mod>/state_homing.png", anim = "rotation" },
+  bits = { sheet = "sprites/<mod>/bit_flight.png",
+           homing = { arm = 400, time = 3000, sheet = "sprites/<mod>/state_homing_bit.png" } },
+})
+```
+
+The game is a 50 Hz lockstep, so one frame is exactly 20 ms on every machine —
+no guessing and no desync. The generator zeroes `missile.homing.sprite` /
+`clusters.bit.homing.sprite` while the builder owns the art, so WA's own homing
+sprite cannot draw underneath.
+
+### Roaming (record fields, not builder art)
+
+A roaming animal is not a state role. WA draws its walking pose from the record
+`sprite`, alternates `sheep.flight_1` / `sheep.flight_2` while it is steered, and
+switches to `roam.gas.animal_sprite` to fart. Use the claim key for the two
+flying sheets (the engine installs them and writes both fields):
+
+```lua
+sheep_sprites = { "sprites/<mod>/sheep_flight1.png", "sprites/<mod>/sheep_flight2.png" }
+```
+
+Exactly two are required, one pose each (WA alternates the pair). The walking and
+gas poses stay record fields.
 
 ### Native hand-back
 

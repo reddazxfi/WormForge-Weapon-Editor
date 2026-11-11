@@ -5,11 +5,13 @@ import {
   MissileAnimType,
   BehaviorArtKey,
   FlightRoleArt,
+  RoamSheetAsset,
 } from '../types/weapon';
 import {
   sanitizeModFolder,
   bitFlightSheetPath,
   behaviorStateSheetPath,
+  roamSheetPath,
 } from '../utils/luaGenerator';
 import { assetUrl } from '../utils/assetUrl';
 import { defaultArtFor } from '../utils/defaultArt';
@@ -43,6 +45,77 @@ interface HoldPreviewProps {
   project: WeaponProject;
   onChange: (updated: Partial<WeaponProject>) => void;
 }
+
+/**
+ * One of a roaming animal's two flying sheets (`sheep_sprites`). WA installs
+ * each as a single sprite and alternates the pair while the animal is steered,
+ * so there are no frames to configure -- just the pose.
+ */
+const RoamSheetField: React.FC<{
+  id: string;
+  label: string;
+  asset?: RoamSheetAsset;
+  path: string;
+  onChange: (asset: RoamSheetAsset) => void;
+}> = ({ id, label, asset, path, onChange }) => {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="text-[11px] font-semibold text-stone-700 dark:text-stone-300">
+        {label}
+      </label>
+      <div className="flex items-center gap-2">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded border border-stone-300 bg-white dark:border-stone-700 dark:bg-stone-900">
+          {asset?.preview ? (
+            <img
+              src={asset.preview}
+              alt=""
+              className="h-8 w-8 object-contain"
+              style={{ imageRendering: 'pixelated' }}
+            />
+          ) : (
+            <span className="text-[10px] text-stone-400">none</span>
+          )}
+        </div>
+        <input
+          ref={inputRef}
+          id={id}
+          type="file"
+          accept="image/png,image/gif"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            if (asset?.preview) URL.revokeObjectURL(asset.preview);
+            onChange({ file, fileName: file.name, preview: URL.createObjectURL(file) });
+          }}
+          className="hidden"
+        />
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="px-2.5 py-1.5 text-[11px] font-semibold bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-700"
+        >
+          {asset?.file ? 'Change' : 'Upload'}
+        </button>
+        {asset?.file && (
+          <button
+            type="button"
+            onClick={() => {
+              if (asset.preview) URL.revokeObjectURL(asset.preview);
+              onChange({});
+            }}
+            className="text-[11px] text-rose-500 hover:text-rose-600 font-medium"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      <p className="font-mono text-[10px] text-stone-400 truncate" title={path}>
+        {path}
+      </p>
+    </div>
+  );
+};
 
 const WORM_AIM_SRC = assetUrl('assets/worm/aim.png');
 const HAND_MID_SRC = assetUrl('assets/worm/hand_rad.png');
@@ -1609,7 +1682,16 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                   <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-400">
                     Behaviour art
                   </div>
-                  {behaviorDefs.map((def) => (
+                  {behaviorDefs.map((def) => {
+                    const homingArmMs =
+                      (def.key === 'homing'
+                        ? project.body.homing_arm_ms
+                        : project.body.clustlet.homing_arm_ms) ?? 0;
+                    const homingTimeMs =
+                      (def.key === 'homing'
+                        ? project.body.homing_time_ms
+                        : project.body.clustlet.homing_time_ms) ?? 0;
+                    return (
                     <FlightRoleEditor
                       key={def.key}
                       role={behaviorArt[def.key] ?? defaultBehaviorRole}
@@ -1618,7 +1700,9 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                       description={
                         def.key === 'dig'
                           ? 'Terrain-probed animation. Native keeps the record dig frames; anything else zeroes them and cycles the flight sheet.'
-                          : `${def.description} Signal: ${def.record}.`
+                          : def.key === 'homing' || def.key === 'homing_bit'
+                            ? `Timed from the record: art from ${homingArmMs} ms ${homingTimeMs > 0 ? `to ${homingArmMs + homingTimeMs} ms` : 'until it lands or blasts'}. The builder swaps to this sheet inside that window and zeroes WA's homing sprite.`
+                            : `${def.description} Signal: ${def.record}.`
                       }
                       path={behaviorStateSheetPath(project, def.key)}
                       sig={behaviorSigs.get(def.key)}
@@ -1626,7 +1710,54 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                       disabled={!builderOn}
                       sheetless={def.key === 'dig'}
                     />
-                  ))}
+                    );
+                  })}
+                </div>
+              )}
+
+              {project.action === 'roam' && (
+                <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 space-y-3">
+                  <div>
+                    <div className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
+                      Roaming animal sheets (`sheep_sprites`)
+                    </div>
+                    <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
+                      WA alternates these two sheets while you steer the animal
+                      (written to `sheep.flight_1` / `sheep.flight_2`, one pose each).
+                      The walking pose is the record body and the gas pose is
+                      `roam.gas.animal_sprite`, both record fields.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <RoamSheetField
+                      id="roam-sheet-1"
+                      label="Flying sheet 1 (`flight_1`)"
+                      asset={project.roamSheets?.flight1}
+                      path={roamSheetPath(project, 'flight1')}
+                      onChange={(asset) =>
+                        onChange({
+                          roamSheets: { ...project.roamSheets, flight1: asset, flight2: project.roamSheets?.flight2 ?? {} },
+                        })
+                      }
+                    />
+                    <RoamSheetField
+                      id="roam-sheet-2"
+                      label="Flying sheet 2 (`flight_2`)"
+                      asset={project.roamSheets?.flight2}
+                      path={roamSheetPath(project, 'flight2')}
+                      onChange={(asset) =>
+                        onChange({
+                          roamSheets: { ...project.roamSheets, flight2: asset, flight1: project.roamSheets?.flight1 ?? {} },
+                        })
+                      }
+                    />
+                  </div>
+                  {!!project.roamSheets?.flight1?.file !== !!project.roamSheets?.flight2?.file && (
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                      Both sheets are needed: the engine takes exactly two for
+                      `sheep_sprites`, so nothing is emitted until the second is uploaded.
+                    </p>
+                  )}
                 </div>
               )}
             </div>

@@ -993,6 +993,8 @@ only terrain contact changing the animation.
 `src/data/wfwsSdk.ts` was a hand copy of the SDK files that the ZIP shipped, so
 edits to `spec/lua_sdk/wfws_sdk/` never reached an export. It now imports both
 files with Vite's `?raw`, one source of truth.
+- The ZIP writes the library to `wf-lib/wfws_sdk/` (where `wf.sdk` and
+  `effects.sdk` live) instead of a folder at the archive root.
 
 ### Validation
 
@@ -1002,3 +1004,118 @@ files with Vite's `?raw`, one source of truth.
 - Generated Lua checked for all three shapes: dig + builder (four zeros, `dig =
   true`, no `states`), dig + native role (no zero rows, no `dig = true`), cluster
   bits with dig (bit indexes zeroed, `dig = true`).
+
+## 2026-11-11 — WFWS fix pass 2: timed homing, roaming fields, `wf-lib` install
+
+### Homing is a window, not a signal
+
+WA arms a missile `arm` ms after it is fired and steers it for `time` ms (`0`
+runs until it lands or blasts), both straight from the record (`homing.arm`
+0xC8, `homing.time` 0xCC). The game is a 50 Hz lockstep, so the builder counts
+its own frames (`age * 20 ms`) and swaps to the homing sheet inside that window:
+
+```lua
+homing = { arm = 800, time = 6000, sheet = "…/state_homing.png", anim = "rotation" }
+bits = { sheet = "…/bit_flight.png", homing = { arm = 400, time = 3000, sheet = "…" } }
+```
+
+The generator zeroes `missile.homing.sprite` (0xAC) / `clusters.bit.homing.sprite`
+(0x170) while the builder owns that art, so WA's own homing sprite cannot draw
+under the sheet. `wfwsRoleFlags` is the single source for which roles are owned,
+used by the Lua, `mod.toml` and the exporter — the three cannot disagree about a
+sheet. `resolveBehaviorStates` no longer produces homing/homing-bit states.
+
+### Roaming is record fields, not state art
+
+WA draws a roaming animal from three separate places: the walking pose from the
+record `sprite`, `sheep.flight_1`/`flight_2` while it is steered, and
+`roam.gas.animal_sprite` while it farts. The old `roam_flight`/`gas` state rows
+were removed; in their place the Hold page uploads the two flying poses and the
+generator emits `sheep_sprites = { a, b }` (the engine installs both as WA
+sprites and writes the record fields after the record tables, so the numeric
+`sheep.flight_*` rows are skipped when both are present). `roamSheetPaths`
+returns null unless *both* poses exist, because the engine requires exactly two.
+
+### `wfws.sdk` ships under `wf-lib/`
+
+Library bundles live in `Mods/wf-lib/` (`wf-lib/sdk` = `wf.sdk`,
+`wf-lib/effects_sdk` = `effects.sdk`), so the export writes
+`wf-lib/wfws_sdk/mod.toml` and `wf-lib/wfws_sdk/lib/wfws_sprite_builder.lua`
+instead of a folder at the ZIP root. Unpacking into `Mods/` now lands the bundle
+where the dependency resolver looks.
+
+### Validation
+
+- `bun run lint`, `bun run build`.
+- `wfcheck --format pretty spec/lua_sdk/wfws_sdk` and the regenerated 27-weapon
+  test pack (**WF 27 Roam Sheets** added): no findings.
+- Generated Lua checked for homing builder / homing native / bit homing (arm and
+  time from the record, `homing.sprite = 0`, sheet claimed and declared) and for
+  roam with both poses / one pose (`sheep_sprites` + declarations, or nothing).
+
+### Homing window fix: the values were 0, not 1000
+
+A homing weapon showed the homing sheet from launch and never steered. The
+generated Lua had `homing = { arm = 0, time = 0 }`: the primary homing inputs
+were `value={body.homing_arm_ms || 1000}` / `homing_time_ms || 8000`, and the
+initial project stored 0/0, so the fields *displayed* 1000/8000 while the
+project (and the export) carried zero. `arm = 0` starts the builder's window at
+launch, and WA's `time = 0` leaves the missile unguided (no stock homing record
+has one — `myre`'s 15 homing records use arm 0-1500 ms, time 2000-5000).
+
+Fixed: the `App.tsx` defaults are 1000/8000, the inputs read `?? 1000` / `?? 8000`
+so a real 0 is visible, and the duration field says what 0 means. Test 25's
+expectation now describes the timed swap (flight art → homing art at 800 ms →
+back at 6800 ms).
+
+### Trail sprite: names must be real stock sprites
+
+`missile.trail.sprite = "smoke"` broke the install:
+`sprites entry 'smoke' must be a pack PNG/GIF or frame folder`. The engine's
+`trail_image_spec` keeps a value only when it is a *stock* sprite name
+(`gfx::stock_sprite_id`); everything else is read as a bundle path and loaded.
+The editor's own trail defaults and presets were the source — `smoke`, `sparks`,
+`fire_smoke` — and one was written as soon as the trail was enabled.
+
+- WA's sprite table is now vendored as `src/data/stockSprites.ts` (694 entries
+  from `crates/gfx/src/stock_ids.rs`) with `stockSpriteId`, `stockSpriteName`,
+  `resolveStockSprite` and a short `TRAIL_SPRITES` picker list.
+- Presets/enable default: `smklt25` (WA's own trail sprite, 609), `firehit`
+  (sparks), `smkdrk20` (dark smoke). The sprite field has a datalist and shows
+  the resolved `name (#id)`; an unknown value gets a red note and the export
+  falls back to `smklt25` instead of emitting a name the engine would treat as a
+  path (the same fallback protects `clusters.bit.trail.sprite`).
+- The "weird, gravity-free particles" were this: a wrong id (`113`) in the trail
+  field is `oildrum4`, WA's oil-drum frame, emitted as trail puffs. The field
+  now names the id it resolved.
+
+### Action switching wrote only half a group
+
+The action groups sit in one shared native slab (+0xA8..+0xD0). Converting the
+stock Grenade (action bounce) to homing wrote `homing = { kind, arm, time,
+sprite }` and left the rest of the group to the donor, so:
+
+| offset | grenade (bounce) | homing reads it as |
+|---|---|---|
+| 0xAC | bounciness 0 | homing.sprite |
+| 0xB0 | terrain_keep_speed 100 | homing.animation |
+| 0xB4 | **sound 113** | **homing.trail.sprite** |
+| 0xB8 | contact_sides 8 | homing.trail.power |
+| 0xBC | extra_reverse 0 | homing.trail.speed |
+| 0xC0 | explosion.bias 0 | homing.trail.bubbles |
+| 0xC4 | explosion.push 0 | homing.kind |
+| 0xC8 | explosion.power 0 | homing.arm |
+| 0xCC | explosion.variation 0 | homing.time |
+
+`113` is `oildrum4`, so the homing missile trailed oil-drum frames with the oil
+drum's particle physics. Values taken from PX's `default.pxs` with
+`WormForgeNew/tools/px_scheme_weps.py`.
+
+Fix: `fullGroup` (`!baseline || action !== baseline.action`) makes every field of
+the active group be written from the editor's own values, with the panel's
+defaults where a field is unset (`bounce.terrain_keep_speed_pct` 75, everything
+else 0), and `clustletChanged` includes a bit action switch for the cluster-bit
+groups. Untouched `.wep` imports still emit nothing. A `dig` role also writes its
+sound on a switch (0xB0 is `homing.animation` there), and bounce writes
+`hits = {}` so a donor's mask does not come along (the mask write preserves the
+`impact_particles` bit that shares 0xA8).

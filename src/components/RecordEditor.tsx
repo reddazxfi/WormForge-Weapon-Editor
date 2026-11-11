@@ -10,6 +10,12 @@ import {
   DigActionConfig,
 } from '../types/weapon';
 import { COLLISION_FLAGS, MISSILE_ANIM_HINT, MISSILE_ANIM_TYPES } from '../data/recordSchema';
+import {
+  TRAIL_SPRITES,
+  resolveStockSprite,
+  stockSpriteId,
+  stockSpriteName,
+} from '../data/stockSprites';
 
 type CollisionTargetKey = Exclude<keyof CollisionMask, 'extra_bits'>;
 
@@ -1022,7 +1028,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                       type="number"
                       min={0}
                       step={250}
-                      value={body.homing_arm_ms || 1000}
+                      value={body.homing_arm_ms ?? 1000}
                       onChange={(e) => updateBody({ homing_arm_ms: Number(e.target.value) })}
                       className="w-full text-xs font-mono px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
                     />
@@ -1038,13 +1044,16 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                       type="number"
                       min={0}
                       step={500}
-                      value={body.homing_time_ms || 8000}
+                      value={body.homing_time_ms ?? 8000}
                       onChange={(e) => updateBody({ homing_time_ms: Number(e.target.value) })}
                       className="w-full text-xs font-mono px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
                     />
                     <span className="absolute right-3 top-2 text-xs text-stone-400">ms</span>
                   </div>
-                  <p className="text-[10px] text-stone-400">Total propelled guidance duration.</p>
+                  <p className="text-[10px] text-stone-400">
+                    Total propelled guidance duration. WA's records use 2000-5000;
+                    0 leaves the missile unguided.
+                  </p>
                 </div>
               </div>
             </div>
@@ -2018,7 +2027,10 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                           ? {
                               'missile.trail.power': 25,
                               'missile.trail.speed': 250,
-                              'missile.trail.sprite': 'smoke',
+                              // A stock sprite *name*: the engine resolves it.
+                              // (`smoke` is not one -- it reads as a bundle
+                              // path and fails the install.)
+                              'missile.trail.sprite': 'smklt25',
                             }
                           : {}),
                       });
@@ -2039,7 +2051,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   onClick={() =>
                     updateOverrides({
                       'missile.trail.enabled': true,
-                      'missile.trail.sprite': 'smoke',
+                      'missile.trail.sprite': 'smklt25',
                       'missile.trail.power': 25,
                       'missile.trail.speed': 250,
                     })
@@ -2053,7 +2065,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   onClick={() =>
                     updateOverrides({
                       'missile.trail.enabled': true,
-                      'missile.trail.sprite': 'sparks',
+                      'missile.trail.sprite': 'firehit',
                       'missile.trail.power': 40,
                       'missile.trail.speed': 180,
                     })
@@ -2067,7 +2079,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   onClick={() =>
                     updateOverrides({
                       'missile.trail.enabled': true,
-                      'missile.trail.sprite': 'fire_smoke',
+                      'missile.trail.sprite': 'smkdrk20',
                       'missile.trail.power': 50,
                       'missile.trail.speed': 320,
                     })
@@ -2125,17 +2137,48 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">
                     Particle Sprite Identifier (`sprite`)
                   </label>
-                  <input
-                    type="text"
-                    value={project.recordOverrides['missile.trail.sprite'] ?? 'smoke'}
-                    onChange={(e) => updateOverride('missile.trail.sprite', e.target.value)}
-                    disabled={!project.recordOverrides['missile.trail.enabled']}
-                    className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white disabled:opacity-50"
-                  />
-                  <p className="text-[10px] text-stone-400">
-                    Stock name (smoke, sparks) or numeric id. An uploaded pack sheet
-                    replaces it.
-                  </p>
+                  {(() => {
+                    const raw = project.recordOverrides['missile.trail.sprite'] ?? 'smklt25';
+                    const resolved = resolveStockSprite(raw);
+                    return (
+                      <>
+                        <input
+                          type="text"
+                          list="wf-trail-sprites"
+                          value={raw}
+                          onChange={(e) => updateOverride('missile.trail.sprite', e.target.value)}
+                          disabled={!project.recordOverrides['missile.trail.enabled']}
+                          className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white disabled:opacity-50"
+                        />
+                        <datalist id="wf-trail-sprites">
+                          {TRAIL_SPRITES.map((sprite) => (
+                            <option key={sprite.name} value={sprite.name}>
+                              {sprite.label}
+                            </option>
+                          ))}
+                        </datalist>
+                        <p className="text-[10px] text-stone-400">
+                          Stock sprite name or id; an uploaded pack sheet replaces
+                          it. `0` disables the trail.
+                        </p>
+                        {resolved === null ? (
+                          <p className="text-[10px] text-rose-600 dark:text-rose-400">
+                            Not a WA stock sprite: the engine would read
+                            &quot;{String(raw)}&quot; as a bundle path and fail the
+                            install, so the export uses `smklt25` instead. Pick one
+                            from the list (or an id) to choose the particles.
+                          </p>
+                        ) : (
+                          <p className="text-[10px] text-stone-500">
+                            →{' '}
+                            {typeof resolved === 'number'
+                              ? `${stockSpriteName(resolved) ?? 'unknown'} (#${resolved})`
+                              : `${resolved} (#${stockSpriteId(resolved) ?? '?'})`}
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
 
                 <div className="space-y-1">

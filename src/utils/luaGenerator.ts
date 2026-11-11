@@ -9,6 +9,7 @@ import {
   WeaponProject,
 } from '../types/weapon';
 import { getStockPanelPosition } from '../data/stockWeapons';
+import { resolveStockSprite } from '../data/stockSprites';
 import { COLLISION_FLAGS } from '../data/recordSchema';
 import {
   bitActionOf,
@@ -180,12 +181,45 @@ export function bitFlightSheetPath(project: WeaponProject): string {
   return `sprites/${sanitizeModFolder(project.id)}/bit_flight.png`;
 }
 
+/** Bundle path of one of a roaming animal's two flying sheets. */
+export function roamSheetPath(project: WeaponProject, which: 'flight1' | 'flight2'): string {
+  return `sprites/${sanitizeModFolder(project.id)}/sheep_${which}.png`;
+}
+
+/**
+ * The two paths `sheep_sprites` needs, or null. The engine takes exactly two
+ * sheets (they are written to the record's `sheep.flight_1` / `sheep.flight_2`
+ * and alternated while the animal is steered), so one upload alone emits none.
+ */
+export function roamSheetPaths(
+  project: WeaponProject
+): { first: string; second: string } | null {
+  const first = project.roamSheets?.flight1?.file;
+  const second = project.roamSheets?.flight2?.file;
+  if (!first || !second) return null;
+  return { first: roamSheetPath(project, 'flight1'), second: roamSheetPath(project, 'flight2') };
+}
+
 /** Bundle path of one behaviour-state sheet. */
 export function behaviorStateSheetPath(
   project: WeaponProject,
   key: BehaviorArtKey,
 ): string {
   return `sprites/${sanitizeModFolder(project.id)}/state_${key}.png`;
+}
+
+/** `arm` / `time` in ms for `sb.flight`'s homing art, from the record's own
+ *  homing numbers (the primary and the cluster bit use the same field names). */
+function homingWindowRow(
+  cfg: { homing_arm_ms?: number; homing_time_ms?: number },
+  indent: string
+): string {
+  // Same fallbacks as the record emission below (`?? 1000` / `?? 8000`), so the
+  // builder's window and the record's own numbers can never disagree. A stored 0
+  // is kept: `arm = 0` is valid (WA's Cheap Shot homes from launch).
+  const arm = Math.max(0, Math.round(cfg.homing_arm_ms ?? 1000));
+  const time = Math.max(0, Math.round(cfg.homing_time_ms ?? 8000));
+  return `${indent}arm = ${arm}, time = ${time},`;
 }
 
 /** The `sb.flight` keys shared by the primary, bit and state roles. */
@@ -210,6 +244,46 @@ function roleArtRows(cfg: FlightRoleArt, indent: string): string[] {
 
 /** `require("wf-lib/wfws_sprite_builder")`, the bundle this editor ships. */
 export const WFWS_BUILDER_MODULE = 'wf-lib/wfws_sprite_builder';
+
+/**
+ * Which WFWS art roles the builder owns: one source for the generator, the
+ * exporter and `mod.toml`, so the three cannot disagree about a sheet.
+ *
+ * - `homing` / `bitHoming`: timed art. WA arms the missile `arm` ms after it is
+ *   fired and steers it for `time` ms, so the builder swaps to the homing sheet
+ *   in that window. The record's own homing sprite is zeroed while the builder
+ *   owns it (0xAC / 0x170 are safe to zero; they are art only).
+ * - `zeroMainDig` / `zeroBitDig`: digging names no art. The four dig sprite
+ *   indexes are zeroed and the builder probes the terrain and cycles the flight
+ *   sheet; `native` on the dig role leaves them alone.
+ * - Roaming art is not here: WA draws the walking, two flying and gas poses from
+ *   separate record fields, so it goes through `sheep_sprites` and the record.
+ */
+export function wfwsRoleFlags(project: WeaponProject) {
+  const builderOn = primaryBuilderOn(project);
+  const bitMode = bitBuilderMode(project);
+  const clusters = project.burst === 'clusters';
+  const bitAction = bitActionOf(project);
+  const mode = (key: BehaviorArtKey) => project.behaviorArt?.[key]?.mode;
+  const digUsesBuilder = (mode('dig') ?? 'builder') !== 'native';
+  return {
+    builderOn,
+    bitMode,
+    clusters,
+    bitAction,
+    digUsesBuilder,
+    homing: builderOn && project.action === 'homing' && mode('homing') === 'builder',
+    bitHoming:
+      builderOn &&
+      bitMode !== null &&
+      clusters &&
+      bitAction === 'homing' &&
+      mode('homing_bit') === 'builder',
+    zeroMainDig: builderOn && digUsesBuilder && project.action === 'dig',
+    zeroBitDig:
+      builderOn && digUsesBuilder && bitMode !== null && clusters && bitAction === 'dig',
+  };
+}
 
 /**
  * Safe, high-performance O(N) parser to extract `on_explode` from custom Lua snippets.
@@ -403,21 +477,22 @@ export function generateLuaCode(project: WeaponProject): string {
   const behaviorStates = resolveBehaviorStates(project);
   const clusterBitAction = bitActionOf(project);
 
+  // Which art roles the builder owns (homing timing, dig probes), shared with
+  // `generateModToml` and the exporter so every sheet is declared and written.
+  //
   // Digging has no art of its own: the builder animates the flight sheet while
-  // its terrain probes say the round is in the land. So the record's own dig
+  // its terrain probes say the round is in the land, so the record's own dig
   // sprites have to go -- a stock mole (moledive/moledig1..3) or PX's
   // wsvr/wsvru/wsvrd/wsvb (245-248) would be drawn under our sheet, and those
   // ids only exist because PX points `sprite_overrides` at them. `native` on
   // the dig role keeps WA's dig art (and no `dig =` is passed to the builder).
-  const digRoleMode = project.behaviorArt?.dig?.mode ?? 'builder';
-  const digUsesBuilder = digRoleMode !== 'native';
-  const zeroMainDig = builderOn && digUsesBuilder && project.action === 'dig';
-  const zeroBitDig =
-    builderOn &&
-    digUsesBuilder &&
-    bitMode !== null &&
-    project.burst === 'clusters' &&
-    clusterBitAction === 'dig';
+  const {
+    digUsesBuilder,
+    homing: homingBuilder,
+    bitHoming: bitHomingBuilder,
+    zeroMainDig,
+    zeroBitDig,
+  } = wfwsRoleFlags(project);
 
   // Which record families WA blasts at all: a gun, arrow, spray or special has
   // no explosion to decorate, and neither does an air strike. A strike's bombs
@@ -556,6 +631,15 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push(`      cluster = { ${clusterArt.join(', ')} },`);
   }
 
+  // A roaming animal's two flying sheets. `sheep_sprites` installs them as WA
+  // sprites and writes `sheep.flight_1` / `sheep.flight_2`, which WA alternates
+  // while the animal is steered -- the walking pose stays the record body and
+  // the gas pose `roam.gas.animal_sprite`.
+  const roamSheets = roamSheetPaths(project);
+  if (roamSheets) {
+    lines.push(`      sheep_sprites = { ${luaQuote(roamSheets.first)}, ${luaQuote(roamSheets.second)} },`);
+  }
+
   // The weapon's own body sheet. For an air strike this is the only art path:
   // the sprite builder follows a placed weapon's missile, and `missile.sprite`
   // in a record takes stock ids only. `retarget_strike_sprite_id` writes the
@@ -582,6 +666,11 @@ export function generateLuaCode(project: WeaponProject): string {
       if (state.art.mode === 'builder') {
         packSprites.push(luaQuote(behaviorStateSheetPath(project, state.def.key)));
       }
+    }
+    // Timed homing sheets are not `states` any more, so they are claimed here.
+    if (homingBuilder) packSprites.push(luaQuote(behaviorStateSheetPath(project, 'homing')));
+    if (bitHomingBuilder) {
+      packSprites.push(luaQuote(behaviorStateSheetPath(project, 'homing_bit')));
     }
   }
   if (usesRibbonTrail) {
@@ -618,11 +707,15 @@ export function generateLuaCode(project: WeaponProject): string {
   const bodyChanged = <K extends keyof BodyConfig>(key: K) =>
     !baseline || !same(body[key], baseBody?.[key]);
   const clustletChanged = <K extends keyof ClustletConfig>(key: K) =>
-    !baseline || !same(body.clustlet[key], baseBody?.clustlet[key]);
+    bitActionChangedEarly || !baseline || !same(body.clustlet[key], baseBody?.clustlet[key]);
+  // `fullGroup` (an action switch, or a fresh donor) forces every field of the
+  // active group to be written: they share one native slab, so an inherited
+  // value belongs to the previous action (the grenade's bounce sound 113 is the
+  // homing trail's sprite).
   const roamChanged = <K extends keyof RoamActionConfig>(key: K) =>
-    !baseline || !same(project.roamConfig?.[key], baseline.roamConfig?.[key]);
+    fullGroup || !baseline || !same(project.roamConfig?.[key], baseline.roamConfig?.[key]);
   const digChanged = <K extends keyof DigActionConfig>(key: K) =>
-    !baseline || !same(project.digConfig?.[key], baseline.digConfig?.[key]);
+    fullGroup || !baseline || !same(project.digConfig?.[key], baseline.digConfig?.[key]);
   const override = (key: string): any => {
     const value = project.recordOverrides[key];
     if (value === undefined) return undefined;
@@ -632,6 +725,26 @@ export function generateLuaCode(project: WeaponProject): string {
   const overrideTouched = (...keys: string[]) => keys.some((key) => override(key) !== undefined);
   const action = project.action || (body.bounce_pct > 0 ? 'bounce' : body.homing !== 'off' ? 'homing' : 'none');
   const actionChanged = !baseline || action !== baseline.action;
+  // The action groups share one native slab (+0xA8..+0xD0): a bounce sound at
+  // 0xB4 is the homing trail's sprite, a dig sound at 0xB0 is the homing
+  // animation, and so on. Switching the action (or starting from a donor whose
+  // own action is not ours) therefore has to write the *whole* destination
+  // group, or the donor's leftovers come back as another feature's value -- a
+  // stock grenade's bounce sound 113 turned into a homing trail drawing
+  // `oildrum4`. `fullGroup` also covers a fresh `copy_from`, where the donor's
+  // slab is simply unknown.
+  const fullGroup = actionChanged;
+  // The cluster bits' action groups share a slab of their own, so their fields
+  // get the same treatment (`clustletChanged` includes this).
+  const clustletAction = (c: {
+    bit_action?: string;
+    homing?: string;
+    contact?: string;
+  }): string =>
+    c.bit_action ?? (c.homing !== 'off' ? 'homing' : c.contact === 'bounce' ? 'bounce' : 'none');
+  const bitActionChangedEarly =
+    !baseline ||
+    clustletAction(project.body.clustlet) !== clustletAction(baseline.body.clustlet);
   const burst = project.burst || (body.cluster ? 'clusters' : 'nothing');
   const burstChanged = !baseline || burst !== baseline.burst;
   const clustletTouched = (Object.keys(body.clustlet) as (keyof ClustletConfig)[]).some(clustletChanged);
@@ -961,11 +1074,18 @@ export function generateLuaCode(project: WeaponProject): string {
       lines.push('        trail = { sprite = 0 },');
     } else if (overrideTouched(...trailKeys) && trailEnabled) {
       lines.push('        trail = {');
-      const trSprite = project.recordOverrides['missile.trail.sprite'] ?? 'smoke';
-      if (!isNaN(Number(trSprite))) {
-        lines.push(`          sprite = ${Number(trSprite)},`);
+      // A name must be a *stock* sprite (`smklt25`, ...). The engine resolves
+      // stock names and treats anything else as a bundle path, so an unknown
+      // name fails the whole install ("sprites entry 'smoke' must be a pack
+      // PNG/GIF or frame folder"). Fall back to WA's own trail sprite rather
+      // than emit a broken one; the editor flags the value in the UI.
+      const trSprite =
+        resolveStockSprite(project.recordOverrides['missile.trail.sprite'] ?? 'smklt25') ??
+        'smklt25';
+      if (typeof trSprite === 'number') {
+        lines.push(`          sprite = ${trSprite},`);
       } else {
-        lines.push(`          sprite = ${luaQuote(String(trSprite))},`);
+        lines.push(`          sprite = ${luaQuote(trSprite)},`);
       }
       lines.push(`          power = ${project.recordOverrides['missile.trail.power'] ?? 25},`);
       lines.push(`          speed = ${project.recordOverrides['missile.trail.speed'] ?? 250},`);
@@ -1010,62 +1130,67 @@ export function generateLuaCode(project: WeaponProject): string {
       );
     if (action === 'bounce' && bounceTouched) {
       lines.push('        bounce = {');
-      if (actionChanged || bodyChanged('bounce_pct')) {
+      if (fullGroup || bodyChanged('bounce_pct')) {
         lines.push(`          bounciness = ${body.bounce_pct ?? 0},`);
       }
-      const keepSpeed = override('missile.bounce.terrain_keep_speed_pct');
-      if (keepSpeed !== undefined) {
-        lines.push(`          terrain_keep_speed_pct = ${keepSpeed},`);
-      }
-      const maxBounces = override('missile.bounce.max_bounces');
-      if (maxBounces !== undefined) lines.push(`          max_bounces = ${maxBounces},`);
-      const bounceSound = override('missile.bounce.sound');
-      if (bounceSound !== undefined) lines.push(`          sound = ${bounceSound},`);
-      const contactSides = override('missile.bounce.contact_sides');
-      if (contactSides !== undefined) {
-        lines.push(`          contact_sides = ${contactSides},`);
-      }
-      const extraReverse = override('missile.bounce.extra_reverse_chance_pct');
-      if (extraReverse !== undefined) {
-        lines.push(`          extra_reverse_chance_pct = ${extraReverse},`);
-      }
+      // Every other field of the group is written in full on an action change:
+      // each one shares its slot with the previous action's field (see
+      // `fullGroup`).
+      const groupInt = (key: string, name: string, fallback = 0) => {
+        const v = override(key);
+        if (v === undefined && !fullGroup) return;
+        lines.push(`          ${name} = ${v ?? fallback},`);
+      };
+      // Fallbacks match what the bounce panel shows when a field is unset
+      // (terrain keep-speed is 75 there, not 0).
+      groupInt('missile.bounce.terrain_keep_speed_pct', 'terrain_keep_speed_pct', 75);
+      groupInt('missile.bounce.max_bounces', 'max_bounces');
+      // 0xB4: bounce sound / homing trail sprite / dig dive sprite / roam step.
+      groupInt('missile.bounce.sound', 'sound');
+      groupInt('missile.bounce.contact_sides', 'contact_sides');
+      groupInt('missile.bounce.extra_reverse_chance_pct', 'extra_reverse_chance_pct');
 
       const bounceExplosionBias = override('missile.bounce.explosion.bias');
       const bounceExplosionPush = override('missile.bounce.explosion.push_pct');
       const bounceExplosionPower = override('missile.bounce.explosion.power');
       const bounceExplosionVariation = override('missile.bounce.explosion.variation');
       if (
+        fullGroup ||
         bounceExplosionBias !== undefined ||
         bounceExplosionPush !== undefined ||
         bounceExplosionPower !== undefined ||
         bounceExplosionVariation !== undefined
       ) {
         lines.push('          explosion = {');
-        if (bounceExplosionBias !== undefined) {
-          lines.push(`            bias = ${bounceExplosionBias},`);
+        if (fullGroup || bounceExplosionBias !== undefined) {
+          lines.push(`            bias = ${bounceExplosionBias ?? 0},`);
         }
-        if (bounceExplosionPush !== undefined) {
-          lines.push(`            push_pct = ${bounceExplosionPush},`);
+        if (fullGroup || bounceExplosionPush !== undefined) {
+          lines.push(`            push_pct = ${bounceExplosionPush ?? 0},`);
         }
-        if (bounceExplosionPower !== undefined) {
-          lines.push(`            power = ${bounceExplosionPower},`);
+        if (fullGroup || bounceExplosionPower !== undefined) {
+          lines.push(`            power = ${bounceExplosionPower ?? 0},`);
         }
-        if (bounceExplosionVariation !== undefined) {
-          lines.push(`            variation = ${bounceExplosionVariation},`);
+        if (fullGroup || bounceExplosionVariation !== undefined) {
+          lines.push(`            variation = ${bounceExplosionVariation ?? 0},`);
         }
         lines.push('          },');
       }
 
       // `bounce.hits` is the bounce action's own target selection. It is added
-      // to `ends_on_contact`, never a replacement for it.
+      // to `ends_on_contact`, never a replacement for it. The mask leaves the
+      // `impact_particles` bit alone (it shares this dword).
       const bounceHits = luaMaskTable(override('missile.bounce.hits'));
       if (bounceHits !== null) {
         lines.push(`          hits = ${bounceHits},`);
+      } else if (fullGroup) {
+        lines.push('          hits = {},');
       }
       lines.push('        },');
     } else if (
       action === 'homing' &&
       (!!homingState ||
+        homingBuilder ||
         actionChanged ||
         bodyChanged('homing') ||
         bodyChanged('homing_arm_ms') ||
@@ -1084,10 +1209,15 @@ export function generateLuaCode(project: WeaponProject): string {
       lines.push(`          arm = ${body.homing_arm_ms ?? 1000},`);
       lines.push(`          time = ${body.homing_time_ms ?? 8000},`);
 
-      const homingSprite =
-        homingState?.assigned.homing_sprite !== undefined
+      // The builder draws the homing sheet in the arm/time window, so WA's own
+      // homing sprite has to go or it draws under ours (0xAC is art only).
+      const homingSprite = homingBuilder
+        ? 0
+        : homingState?.assigned.homing_sprite !== undefined
           ? homingState.assigned.homing_sprite
-          : override('missile.homing.sprite');
+          : fullGroup
+            ? (override('missile.homing.sprite') ?? 0)
+            : override('missile.homing.sprite');
       if (homingSprite !== undefined) {
         if (homingSprite === 0 || homingSprite === '0' || homingSprite === '') {
           lines.push('          sprite = 0,');
@@ -1098,22 +1228,28 @@ export function generateLuaCode(project: WeaponProject): string {
         }
       }
       const homingAnimation = override('missile.homing.animation');
-      if (homingAnimation !== undefined) {
-        lines.push(`          animation = ${homingAnimation},`);
+      if (fullGroup || homingAnimation !== undefined) {
+        lines.push(`          animation = ${homingAnimation ?? 0},`);
       }
 
       const homingTrailSprite = override('missile.homing.trail.sprite');
       const homingTrailPower = override('missile.homing.trail.power');
       const homingTrailSpeed = override('missile.homing.trail.speed');
       const homingTrailBubbles = override('missile.homing.trail.bubbles_per_second');
+      // Written in full on an action switch: 0xB4 is also the bounce sound, so
+      // a donor's leftover (the grenade's 113) would be drawn as the homing
+      // trail's sprite -- `oildrum4` with its own odd particle gravity.
       if (
+        fullGroup ||
         homingTrailSprite !== undefined ||
         homingTrailPower !== undefined ||
         homingTrailSpeed !== undefined ||
         homingTrailBubbles !== undefined
       ) {
         lines.push('          trail = {');
-        if (homingTrailSprite !== undefined) {
+        if (fullGroup) {
+          lines.push('            sprite = 0,');
+        } else if (homingTrailSprite !== undefined) {
           if (homingTrailSprite === 0 || homingTrailSprite === '0' || homingTrailSprite === '') {
             lines.push('            sprite = 0,');
           } else if (!isNaN(Number(homingTrailSprite))) {
@@ -1122,14 +1258,14 @@ export function generateLuaCode(project: WeaponProject): string {
             lines.push(`            sprite = ${luaQuote(String(homingTrailSprite))},`);
           }
         }
-        if (homingTrailPower !== undefined) {
-          lines.push(`            power = ${homingTrailPower},`);
+        if (fullGroup || homingTrailPower !== undefined) {
+          lines.push(`            power = ${homingTrailPower ?? 0},`);
         }
-        if (homingTrailSpeed !== undefined) {
-          lines.push(`            speed = ${homingTrailSpeed},`);
+        if (fullGroup || homingTrailSpeed !== undefined) {
+          lines.push(`            speed = ${homingTrailSpeed ?? 0},`);
         }
-        if (homingTrailBubbles !== undefined) {
-          lines.push(`            bubbles_per_second = ${homingTrailBubbles},`);
+        if (fullGroup || homingTrailBubbles !== undefined) {
+          lines.push(`            bubbles_per_second = ${homingTrailBubbles ?? 0},`);
         }
         lines.push('          },');
       }
@@ -1247,7 +1383,9 @@ export function generateLuaCode(project: WeaponProject): string {
       digField('dig_3', 'sprite_3', 'sprite_3');
       if (zeroMainDig || digChanged('sound') || digRows.length > 0) {
         lines.push('        dig = {');
-        if (zeroMainDig || digChanged('sound')) {
+        // 0xB0 is also `homing.animation` and the bounce keep-speed: on an
+        // action switch the donor's number would be played as the dig sound.
+        if (zeroMainDig || fullGroup || digChanged('sound')) {
           lines.push(`          sound = ${d.sound ?? 90},`);
         }
         lines.push(...digRows);
@@ -1293,9 +1431,14 @@ export function generateLuaCode(project: WeaponProject): string {
           flight_2: baseline.roamConfig?.flight_2,
         }
       );
+    // `sheep_sprites` installs both sheets and writes these two fields itself
+    // after the record tables are applied, so numbering them here would only be
+    // overwritten (and a 0 would look like it did something).
+    const roamSheetsOwnFlight = !!roamSheetPaths(project);
     if (
       action === 'roam' &&
       project.roamConfig &&
+      !roamSheetsOwnFlight &&
       (sheepTouched || !!roamFlightState)
     ) {
       lines.push('      sheep = {');
@@ -1340,18 +1483,12 @@ export function generateLuaCode(project: WeaponProject): string {
       const bitAction =
         c.bit_action ??
         (c.homing !== 'off' ? 'homing' : c.contact === 'bounce' ? 'bounce' : 'none');
-      const baseBitAction =
-        baseCluster?.bit_action ??
-        (baseCluster?.homing !== 'off'
-          ? 'homing'
-          : baseCluster?.contact === 'bounce'
-            ? 'bounce'
-            : 'none');
-      const bitActionChanged = !baseline || bitAction !== baseBitAction;
+      // `clustletChanged` already covers a bit action switch (it is the same
+      // shared-slab problem as the primary's `fullGroup`).
       const bitRoamChanged = (key: keyof RoamActionConfig) =>
-        clustletChanged('bit_action') || !same(c.roam?.[key], baseCluster?.roam?.[key]);
+        bitActionChangedEarly || !same(c.roam?.[key], baseCluster?.roam?.[key]);
       const bitDigChanged = (key: keyof DigActionConfig) =>
-        clustletChanged('bit_action') || !same(c.dig?.[key], baseCluster?.dig?.[key]);
+        bitActionChangedEarly || !same(c.dig?.[key], baseCluster?.dig?.[key]);
 
       const bitTouched = [
         'bit_action',
@@ -1405,14 +1542,14 @@ export function generateLuaCode(project: WeaponProject): string {
 
       if (
         bitTouched ||
-        bitActionChanged ||
+        bitActionChangedEarly ||
         clusterBitTrailArt ||
         bitRoleActive ||
         !!homingBitState ||
         digState?.scope === 'bit'
       ) {
         lines.push('        bit = {');
-        if (bitActionChanged) lines.push(`          action = ${luaQuote(bitAction)},`);
+        if (bitActionChangedEarly) lines.push(`          action = ${luaQuote(bitAction)},`);
 
         if (bitRoleActive) {
           // The builder's classifier reads `m.sprite` at first sight; a zero
@@ -1456,10 +1593,15 @@ export function generateLuaCode(project: WeaponProject): string {
             lines.push(`            sprite = ${luaQuote(clusterBitTrailArt)},`);
           } else if (!t || t === 'none' || t === '0') {
             lines.push('            sprite = 0,');
-          } else if (!isNaN(Number(t))) {
-            lines.push(`            sprite = ${Number(t)},`);
           } else {
-            lines.push(`            sprite = ${luaQuote(t)},`);
+            // Same rule as the primary's trail: an unknown name would be read
+            // as a bundle path and break the install.
+            const bitTrailSprite = resolveStockSprite(t);
+            if (typeof bitTrailSprite === 'number') {
+              lines.push(`            sprite = ${bitTrailSprite},`);
+            } else if (typeof bitTrailSprite === 'string') {
+              lines.push(`            sprite = ${luaQuote(bitTrailSprite)},`);
+            }
           }
           if (clustletChanged('trail_power')) {
             lines.push(`            power = ${c.trail_power ?? 0},`);
@@ -1616,6 +1758,7 @@ export function generateLuaCode(project: WeaponProject): string {
         if (
           bitAction === 'homing' &&
           (!!homingBitState ||
+            bitHomingBuilder ||
             clustletChanged('homing') ||
             clustletChanged('homing_arm_ms') ||
             clustletChanged('homing_time_ms') ||
@@ -1630,8 +1773,9 @@ export function generateLuaCode(project: WeaponProject): string {
           if (clustletChanged('homing')) {
             lines.push(`            kind = ${luaQuote(c.homing)},`);
           }
-          const bitHomingSprite =
-            homingBitState?.assigned.bit_homing_sprite !== undefined
+          const bitHomingSprite = bitHomingBuilder
+            ? 0
+            : homingBitState?.assigned.bit_homing_sprite !== undefined
               ? homingBitState.assigned.bit_homing_sprite
               : clustletChanged('homing_sprite')
                 ? c.homing_sprite ?? 0
@@ -2142,9 +2286,31 @@ export function generateLuaCode(project: WeaponProject): string {
       lines.push('      bits = {');
       lines.push(`        sheet = ${luaQuote(bitFlightSheetPath(project))},`);
       for (const row of roleArtRows(project.bitFlight, '        ')) lines.push(row);
+      if (bitHomingBuilder) {
+        lines.push('        homing = {');
+        lines.push(
+          `          sheet = ${luaQuote(behaviorStateSheetPath(project, 'homing_bit'))},`,
+        );
+        lines.push(homingWindowRow(project.body.clustlet, '          '));
+        for (const row of roleArtRows(project.behaviorArt!.homing_bit!, '          ')) {
+          lines.push(row);
+        }
+        lines.push('        },');
+      }
       lines.push('      },');
     } else if (bitMode === 'inherit') {
       lines.push('      bits = "inherit",');
+    }
+
+    // Homing art for the primary: WA arms the missile after `arm` ms and steers
+    // it for `time` ms (0 = until it lands), so the builder swaps sheets in
+    // that window instead of guessing from a sprite id.
+    if (homingBuilder) {
+      lines.push('      homing = {');
+      lines.push(`        sheet = ${luaQuote(behaviorStateSheetPath(project, 'homing'))},`);
+      lines.push(homingWindowRow(project.body, '        '));
+      for (const row of roleArtRows(project.behaviorArt!.homing!, '        ')) lines.push(row);
+      lines.push('      },');
     }
 
     // Digging: no state, no sheet. The builder cycles the role's own sheet
@@ -2277,6 +2443,36 @@ export function generateModToml(project: WeaponProject): string {
       lines.push(`fps = ${project.bitFlight.fps || 15}`);
       lines.push('play = "loop"');
     }
+  }
+  // A roaming animal's two flying sheets (`sheep_sprites`).
+  const roamSheets = roamSheetPaths(project);
+  if (roamSheets) {
+    for (const path of [roamSheets.first, roamSheets.second]) {
+      if (emitted.has(path)) continue;
+      emitted.add(path);
+      lines.push('');
+      lines.push(`[sprites.${luaQuote(path)}]`);
+      lines.push('fps = 15');
+      lines.push('play = "loop"');
+    }
+  }
+
+  // Timed homing sheets (`homing` / `bits.homing` art).
+  const tomlFlags = wfwsRoleFlags(project);
+  for (const [owned, key] of [
+    [tomlFlags.homing, 'homing'] as const,
+    [tomlFlags.bitHoming, 'homing_bit'] as const,
+  ]) {
+    if (!owned) continue;
+    const statePath = behaviorStateSheetPath(project, key);
+    if (emitted.has(statePath)) continue;
+    emitted.add(statePath);
+    const role = project.behaviorArt![key]!;
+    lines.push('');
+    lines.push(`[sprites.${luaQuote(statePath)}]`);
+    if (role.frames > 1) lines.push(`frames = ${role.frames}`);
+    lines.push(`fps = ${role.fps || 15}`);
+    lines.push('play = "loop"');
   }
   for (const state of behaviorStates) {
     if (state.art.mode !== 'builder') continue;
