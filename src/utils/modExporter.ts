@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import { WeaponProject } from '../types/weapon';
+import { WFWS_SDK_MOD_TOML, WFWS_SPRITE_BUILDER_LUA } from '../data/wfwsSdk';
 import {
   generateLuaCode,
   generateModToml,
@@ -132,6 +133,11 @@ export async function exportModZip(project: WeaponProject): Promise<Blob> {
       zip.file(`${modFolder}/${cs.path}`, cs.file);
     }
   }
+
+  // Bundle the wfws.sdk library alongside every export so the weapon's
+  // `dependencies = ["wfws.sdk"]` resolves locally without an online install.
+  zip.file('wfws_sdk/mod.toml', WFWS_SDK_MOD_TOML);
+  zip.file('wfws_sdk/lib/wfws_sprite_builder.lua', WFWS_SPRITE_BUILDER_LUA);
 
   return await zip.generateAsync({ type: 'blob' });
 }
