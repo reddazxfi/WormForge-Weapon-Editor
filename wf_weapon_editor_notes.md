@@ -850,3 +850,94 @@ C is `wapx-scipts/utils_red/px_effects.c` (`DrawExplosion`, `DrawEllipse`,
   `power = 0` and `fx.install`; effect mode emits `fx.burst{` and `fx.SMOKE`;
   the dependency panel lists `effects.sdk` automatically, accepts `px.electric`,
   and `mod.toml` contains both. The mobile picker lists Effects.
+
+## 2026-11-11 — WFWS flight builder: our own bundle, bit and behaviour art
+
+PX's `px_sprite_builder` draws exactly one sheet for the primary missile. What
+the weapon editor needed was more: cluster bits with their own art, and art that
+changes when a missile starts homing, digging, roaming or gassing. That is now a
+bundle of our own, `spec/lua_sdk/wfws_sdk/` (id `wfws.sdk`), exporting
+`wf-lib/wfws_sprite_builder`. It is a library (no components), depends on
+`wf.sdk` for `wf-lib/holds`, and keeps `sb.PX_POSTURE` / `sb.PX_HANDS`.
+
+### The two gates in the builder
+
+- **Identity**, decided on a missile's first sight and cached per id: `is_bit`
+  (default `m.sprite ~= 0`), an optional `roles` list, otherwise the primary.
+- **State**, re-evaluated every `pre` phase: `states = { { scope, sig | when,
+  sheet …, native = true } }`. `sig` is matched against the last nonzero
+  `m.sprite` seen *before* the module zeroes it, so a one-off write by WA still
+  signals the state. First match wins; no match falls back to the identity art.
+- `native = true` hands the missile back (and restores the last signal id if our
+  earlier zero stuck). A state swap despawns the follower and spawns a new one,
+  which is where the documented one-frame flicker comes from.
+
+### Generator contract
+
+- `require("wf-lib/wfws_sprite_builder")` whenever the primary builder is on.
+  Air strikes are excluded: their munitions come from the strike's own record
+  copy and have no placed missile to follow.
+- `sprite = 0` is **unconditional** on the primary while the builder is on — it
+  is the classifier, not a cosmetic toggle. A `.wep` baseline or a
+  `missile.sprite` override must not survive. With an untouched `.wep` import
+  and the builder off, the emitted Lua is still just `wep = "weps/<file>.wep"`;
+  turning the builder on adds exactly `missile.sprite = 0`, the `sprites` claim
+  entry and the `sb.flight` call.
+- `bits = { sheet, anim, cyclical, anim_speed, spin, scale, mirror, z }` for the
+  bit role, `bits = "inherit"` to give the bits the primary art, no key at all
+  for native WA bits. While the bit builder owns the bits the generator forces
+  `clusters.bit.sprite = "clustlet"` when the field is 0/empty and writes
+  `sprite_count = 1` (ids, not frames), and it **skips** the claim
+  `cluster = { sprite, homing_sprite }` declaration: the builder hides the
+  installed sheet anyway.
+- `states` carries `scope` (`main`/`bit`), `sig` (a number or a list) and either
+  a `sheet` with the shared flight keys or `native = true`. Only behaviours the
+  current action/burst really has are offered (`homing`, `homing_bit`, `dig`,
+  `roam_flight`, `gas`); `inherit` emits nothing.
+- The sentinel ids live in the record's own sprite fields:
+  `missile.homing.sprite`, `clusters.bit.homing.sprite`, `dig.dive_sprite` +
+  `sprite_1..3`, `sheep.flight_1/2`, `roam.gas.animal_sprite`. `resolveBehaviorStates`
+  reuses an existing nonzero, non-colliding id and otherwise assigns the next
+  free one from 245 up (stock bodies and the bit marker are reserved), then the
+  generator writes that id into the record. Digest: WA may write *any* of the
+  four dig fields into `m.sprite`, so all four become signals.
+- `mod.toml` gains `wfws.sdk` and `[sprites."sprites/<mod>/bit_flight.png"]` /
+  `state_<key>.png` declarations; the exporter writes the uploaded sheet or the
+  default missile art, so a declared path always exists.
+
+### Why not poll Space/Enter
+
+The alternative on the table was to read the fire key and a 3-of-4 terrain ray
+test from Lua. Not needed: WA already writes the behaviour's sprite id into
+`m.sprite`, for the primary and for each bit separately. Using that signal
+means no per-frame input polling and no timers, and the art follows the engine's
+own state machine. The one gap is dig, where WA may draw `sprite_1..3` without
+writing them into `m.sprite`; if in-game testing shows that, a `when` callback
+(or the spacebar timing) is the fallback — the builder already accepts `when`.
+
+### UI
+
+`HoldPreview.tsx` gains **WFWS role art**: a cluster-bit card (native / builder /
+inherit primary) and one card per available behaviour, each with upload,
+animation type, frames/FPS/anim speed/spin/scale/depth, mirror, and the resolved
+`sig` chip. The cards are disabled until the primary builder is on (they are
+emitted inside that call). `FlightRoleEditor.tsx` is the shared card. The
+"Hide Stock Sprite" checkbox became a static note, since the zero is forced.
+`RecordEditor`'s claim sheets warn when the bit builder hides them, and the
+Bundle Code dependency panel adds `wfws.sdk` automatically.
+
+### Validation
+
+- `bun run lint`, `bun run build`.
+- `spec/lua_sdk/wfws_sdk` and the generated pack: `wfcheck --format pretty`
+  reports no findings (25 components).
+- Test pack gained **24 Builder Bits** (builder bit sheet, claim cluster sheet
+  skipped) and **25 Builder State** (homing state sheet), and now writes
+  `bit_flight.png` / `state_*.png` next to `missile.png`.
+- Exported bundle (moon grenade, bit + homing-state roles): `mod.toml` declares
+  all three sheets, the ZIP contains them, `wfcheck` clean.
+- Playwright: role cards render, the resolved `sig` id appears, and the Bundle
+  Code Lua contains the require, `sprite = 0`, `bits = {` and `states = {`.
+- Still to verify in game: `m.sprite` writable/restorable from `pre`; whether WA
+  writes behaviour sprites once or every frame; dig; the swap flicker; roam
+  `pre` while grounded.

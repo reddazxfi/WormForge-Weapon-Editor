@@ -304,6 +304,36 @@ export interface ExplosionEffectConfig {
 
 export type MissileAnimType = 'track' | 'rotation' | 'slow' | 'medium' | 'fast' | 'none';
 
+/**
+ * One extra role the WFWS builder draws. The primary round keeps its own
+ * `MissileSpriteConfig` (it also owns the preview canvas); cluster bits and
+ * per-behaviour art use this smaller shape.
+ *
+ * `native` hands the missile back to WA, `builder` draws this sheet, and
+ * `inherit` reuses the identity art already in force (the parent round for a
+ * bit, the identity art for a behaviour).
+ */
+export interface FlightRoleArt {
+  mode: 'native' | 'builder' | 'inherit';
+  sheetFile?: File;
+  sheetPreview?: string;
+  anim: MissileAnimType;
+  frames: number;
+  fps: number;
+  animSpeed: number;
+  spinRate: number;
+  scale: number;
+  mirror: boolean;
+  z: number;
+}
+
+/**
+ * Flight states a missile moves in and out of. `homing` and `homing_bit` are
+ * separate so a bit can get its own art; `dig`, `roam_flight` and `gas` read
+ * their sentinel ids from the record's own sprite fields.
+ */
+export type BehaviorArtKey = 'homing' | 'homing_bit' | 'dig' | 'roam_flight' | 'gas';
+
 export interface MissileSpriteConfig {
   enabled: boolean;
   mode: 'stock' | 'custom';
@@ -395,6 +425,10 @@ export interface WeaponProject {
   action: MissileAction; // Single mutually exclusive missile action: none | bounce | homing | roam | dig
   burst: BurstPayload; // Single payload: nothing | clusters | fire
   missileSprite: MissileSpriteConfig;
+  /** Cluster-bit art: native WA sheet, the WFWS builder, or the primary art. */
+  bitFlight: FlightRoleArt;
+  /** Per-behaviour art for the WFWS builder, keyed by the state it matches. */
+  behaviorArt: Partial<Record<BehaviorArtKey, FlightRoleArt>>;
   roamConfig: RoamActionConfig;
   digConfig: DigActionConfig;
   fireConfig: FirePayloadConfig;

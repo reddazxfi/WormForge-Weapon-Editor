@@ -21,6 +21,7 @@ bun-debug.log*
 wep_Formatting/
 example_mods_spritebuilder/
 example_mods_normal/
+reqs/
 
 # Environment and secrets
 .env

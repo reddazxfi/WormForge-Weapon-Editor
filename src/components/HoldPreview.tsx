@@ -1,8 +1,26 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { WeaponProject, HandType, MissileAnimType } from '../types/weapon';
-import { sanitizeModFolder } from '../utils/luaGenerator';
+import {
+  WeaponProject,
+  HandType,
+  MissileAnimType,
+  BehaviorArtKey,
+  FlightRoleArt,
+} from '../types/weapon';
+import {
+  sanitizeModFolder,
+  bitFlightSheetPath,
+  behaviorStateSheetPath,
+} from '../utils/luaGenerator';
 import { assetUrl } from '../utils/assetUrl';
 import { defaultArtFor } from '../utils/defaultArt';
+import { FlightRoleEditor } from './FlightRoleEditor';
+import {
+  DEFAULT_ROLE_ART,
+  availableBehaviorArt,
+  bitBuilderMode,
+  primaryBuilderOn,
+  resolveBehaviorStates,
+} from '../data/spriteBuilder';
 import mapBackgroundSrc from '../../spec/pre_weapon_preview.png';
 import {
   Upload,
@@ -127,6 +145,33 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       },
     });
   };
+
+  // WFWS roles: cluster bits and per-behaviour states share the same call.
+  const bitFlight = project.bitFlight ?? DEFAULT_ROLE_ART;
+  const updateBitFlight = (patch: Partial<typeof bitFlight>) => {
+    onChange({ bitFlight: { ...bitFlight, ...patch } });
+  };
+  const behaviorArt = project.behaviorArt ?? {};
+  // A behaviour row with no stored entry is inactive (inherit): the identity
+  // art already covers the missile, so nothing is emitted. Native is an
+  // explicit choice that hands the state back to WA.
+  const defaultBehaviorRole: FlightRoleArt = { ...DEFAULT_ROLE_ART, mode: 'inherit' };
+  const updateBehaviorArt = (
+    key: BehaviorArtKey,
+    patch: Partial<FlightRoleArt>
+  ) => {
+    onChange({
+      behaviorArt: {
+        ...behaviorArt,
+        [key]: { ...(behaviorArt[key] ?? DEFAULT_ROLE_ART), ...patch },
+      },
+    });
+  };
+  const builderOn = primaryBuilderOn(project);
+  const behaviorDefs = availableBehaviorArt(project);
+  const behaviorSigs = new Map(
+    resolveBehaviorStates(project).map((state) => [state.def.key, state.sig])
+  );
 
   // Missile interactive simulation state
   const [isMissilePlaying, setIsMissilePlaying] = useState(true);
@@ -828,6 +873,24 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     if (missileFileInputRef.current) missileFileInputRef.current.value = '';
   };
 
+  // Just the extra `sb.flight` keys the roles add, for the code preview.
+  const previewRoles = builderOn
+    ? [
+        project.burst === 'clusters' && bitFlight.mode === 'builder'
+          ? `  bits = { sheet = "sprites/${sanitizeModFolder(project.id)}/bit_flight.png", anim = "${bitFlight.anim}" },`
+          : project.burst === 'clusters' && bitFlight.mode === 'inherit'
+            ? '  bits = "inherit",'
+            : '',
+        behaviorDefs.some(
+          (def) => (behaviorArt[def.key]?.mode ?? 'native') !== 'inherit'
+        )
+          ? '  states = { ... }  -- behaviour art (see the roles above)'
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : '';
+
   return (
     <div className="space-y-8">
       {/* ======================================================================= */}
@@ -1284,11 +1347,11 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                 <span>Missile & Projectile Flight Sprite Builder</span>
               </h2>
               <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-forge-50 dark:bg-forge-950/60 text-forge-600 dark:text-forge-400 font-semibold border border-forge-200 dark:border-forge-800/60">
-                px_sprite_builder.lua · sb.flight
+                wfws_sprite_builder.lua · sb.flight
               </span>
             </div>
             <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
-              Follow flying projectiles with custom PNG sheets, animation types (<code className="font-mono text-forge-600 dark:text-forge-400">track</code>, <code className="font-mono text-forge-600 dark:text-forge-400">rotation</code>, <code className="font-mono text-forge-600 dark:text-forge-400">slow/med/fast</code>), cyclical frame playback, and <code className="font-mono text-stone-600 dark:text-stone-300">m.sprite = 0</code> native sprite hiding.
+              Follow flying projectiles with custom PNG sheets, animation types (<code className="font-mono text-forge-600 dark:text-forge-400">track</code>, <code className="font-mono text-forge-600 dark:text-forge-400">rotation</code>, <code className="font-mono text-forge-600 dark:text-forge-400">slow/med/fast</code>), cyclical frame playback, and <code className="font-mono text-stone-600 dark:text-stone-300">m.sprite = 0</code> native sprite hiding. Cluster bits can use their own sheet, and behaviour states (homing, dig, roam, gas) can swap art mid-flight.
             </p>
           </div>
 
@@ -1296,7 +1359,15 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
             <input
               type="checkbox"
               checked={missile.enabled}
-              onChange={(e) => updateMissile({ enabled: e.target.checked })}
+              onChange={(e) =>
+                updateMissile({
+                  enabled: e.target.checked,
+                  // Choosing the builder is what "enabled" means: with no
+                  // upload the exporter falls back to the default missile art,
+                  // but the mode still has to be custom for the generator.
+                  ...(e.target.checked ? { mode: 'custom' } : {}),
+                })
+              }
               className="rounded text-forge-600 focus:ring-forge-500"
             />
             <span className="text-xs font-semibold text-stone-900 dark:text-stone-100">
@@ -1491,6 +1562,70 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
 
             </div>
 
+            {/* 1b. WFWS extra roles: cluster bits and behaviour states */}
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
+                    WFWS role art
+                  </div>
+                  <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
+                    Cluster bits and behaviour states are drawn by the same
+                    <code className="font-mono"> sb.flight </code> call. Each role can keep WA&apos;s
+                    sprite, draw your own sheet, or inherit the primary art.
+                  </p>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-forge-50 dark:bg-forge-950/60 text-forge-600 dark:text-forge-400 font-semibold border border-forge-200 dark:border-forge-800/60">
+                  wf-lib/wfws_sprite_builder
+                </span>
+              </div>
+
+              {!builderOn && (
+                <p className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg px-2.5 py-1.5">
+                  Enable <strong>Missile Flight Sprite</strong> above first. Bits and behaviour states
+                  are emitted inside that builder call; until then these rows are saved but ignored.
+                </p>
+              )}
+
+              {project.burst === 'clusters' && (
+                <FlightRoleEditor
+                  role={bitFlight}
+                  onChange={updateBitFlight}
+                  title="Cluster bit art"
+                  description="The child missiles after the burst. Native keeps WA's clustlet sheet; Builder draws this sheet; Inherit reuses the primary round's art."
+                  path={bitFlightSheetPath(project)}
+                  inheritLabel="Inherit primary"
+                  disabled={!builderOn}
+                  warning={
+                    bitBuilderMode(project) === 'builder' && project.packArt?.cluster_sprite
+                      ? 'The native `cluster.sprite` upload in Burst Payload is skipped while the bit builder owns the bits; use this sheet instead.'
+                      : undefined
+                  }
+                />
+              )}
+
+              {behaviorDefs.length > 0 && (
+                <div className="space-y-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+                    Behaviour art
+                  </div>
+                  {behaviorDefs.map((def) => (
+                    <FlightRoleEditor
+                      key={def.key}
+                      role={behaviorArt[def.key] ?? defaultBehaviorRole}
+                      onChange={(patch) => updateBehaviorArt(def.key, patch)}
+                      title={def.label}
+                      description={`${def.description} Signal: ${def.record}.`}
+                      path={behaviorStateSheetPath(project, def.key)}
+                      sig={behaviorSigs.get(def.key)}
+                      inheritLabel="Inherit"
+                      disabled={!builderOn}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* 2. Animation Type Selector (`ANIM_TYPE` from px_sprite_builder.lua) */}
             <div className="space-y-2">
               <label className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-1.5">
@@ -1645,22 +1780,18 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                   </div>
                 </label>
 
-                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={missile.hideStock ?? true}
-                    onChange={(e) => updateMissile({ hideStock: e.target.checked })}
-                    className="rounded text-forge-600 focus:ring-forge-500 mt-0.5"
-                  />
+                <div className="flex items-start gap-2.5 p-2.5 rounded-lg border border-forge-200 dark:border-forge-900/60 bg-forge-50/40 dark:bg-forge-950/20">
+                  <CheckCircle2 className="w-4 h-4 text-forge-600 dark:text-forge-400 mt-0.5 shrink-0" aria-hidden="true" />
                   <div>
                     <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">
-                      Hide Stock Sprite (`m.sprite = 0`)
+                      Stock Sprite Hidden (`sprite = 0`)
                     </div>
                     <div className="text-[11px] text-stone-500">
-                      Prevents native WA missile graphic from rendering underneath.
+                      Always written while the builder is on: it is how the builder
+                      recognises the primary round (a bit reports a nonzero `m.sprite`).
                     </div>
                   </div>
-                </label>
+                </div>
               </div>
             </div>
 
@@ -1674,10 +1805,15 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
 sb.flight(ctx, {
   weapon = ctx.id,
   sheet = "sprites/${sanitizeModFolder(project.id)}/missile.png",
-  anim = "${missile.anim || 'rotation'}",${(missile.frames || 1) > 1 ? `\n  cyclical = ${missile.frames},` : ''}
-  anim_speed = ${missile.animSpeed || 1.0},
-  spin = ${missile.spinRate || 1.0},
-  scale = ${missile.scale || 1.0},${missile.mirror !== false ? '' : '\n  mirror = false,'}
+  anim = "${missile.anim || 'rotation'}",${(missile.frames || 1) > 1 ? `\n  cyclical = ${missile.frames},` : ''}${
+    missile.animSpeed && missile.animSpeed !== 1 ? `\n  anim_speed = ${missile.animSpeed},` : ''
+  }${
+    missile.spinRate && missile.spinRate !== 1 ? `\n  spin = ${missile.spinRate},` : ''
+  }${
+    missile.scale && missile.scale !== 1 ? `\n  scale = ${missile.scale},` : ''
+  }${missile.z !== undefined && missile.z !== 5 ? `\n  z = ${missile.z},` : ''}${
+    missile.mirror !== false ? '' : '\n  mirror = false,'
+  }${previewRoles ? `\n${previewRoles}` : ''}
 })`}
               </pre>
             </div>

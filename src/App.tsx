@@ -11,6 +11,7 @@ import { exportModZip, downloadBlob } from './utils/modExporter';
 import { sanitizeModFolder } from './utils/luaGenerator';
 import { DEFAULT_EXPLOSION_EFFECT } from './data/explosionPresets';
 import { DEFAULT_CUSTOM_SOUNDS } from './data/soundPresets';
+import { DEFAULT_ROLE_ART } from './data/spriteBuilder';
 import type { RecordTabId } from './data/recordTabs';
 import { CheckCircle2 } from 'lucide-react';
 
@@ -95,6 +96,8 @@ const INITIAL_PROJECT: WeaponProject = {
     spin: true,
     hideStock: true,
   },
+  bitFlight: { ...DEFAULT_ROLE_ART },
+  behaviorArt: {},
   roamConfig: {
     walk_speed: 2,
     step_height: 4,

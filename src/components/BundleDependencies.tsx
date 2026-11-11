@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { WeaponProject } from '../types/weapon';
 import { Boxes, Plus, X } from 'lucide-react';
+import { usesWfwsBuilder } from '../data/spriteBuilder';
 
 interface BundleDependenciesProps {
   project: WeaponProject;
@@ -20,8 +21,8 @@ export function BundleDependencies({ project, onChange }: BundleDependenciesProp
   if (project.hold?.enabled) {
     auto.push({ id: 'wf.sdk', reason: 'hold art builder' });
   }
-  if (project.missileSprite?.enabled && project.missileSprite.mode === 'custom') {
-    auto.push({ id: 'wf.sdk', reason: 'flight sprite builder' });
+  if (usesWfwsBuilder(project)) {
+    auto.push({ id: 'wfws.sdk', reason: 'flight sprite builder' });
   }
   const customOnExplode =
     !!project.enableCustomLua &&
@@ -177,7 +178,8 @@ export function BundleDependencies({ project, onChange }: BundleDependenciesProp
           <span className="text-[10px] text-stone-400 uppercase tracking-wide">Known:</span>
           {[
             { id: 'effects.sdk', hint: 'Project X effects (trail, bursts, emitters)' },
-            { id: 'wf.sdk', hint: 'WormForge SDK (holds, sprite builder)' },
+            { id: 'wf.sdk', hint: 'WormForge SDK (holds, shared sprites)' },
+            { id: 'wfws.sdk', hint: 'WFWS flight sprite builder (primary, bits, states)' },
           ].map((entry) => (
             <button
               key={entry.id}

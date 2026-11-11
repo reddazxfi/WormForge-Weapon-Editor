@@ -41,6 +41,7 @@ different project. Do not modify it from this repository.
 │  │  ├─ WeaponSettings.tsx    # identity / donor / slot / icon / defaults
 │  │  ├─ RecordEditor.tsx      # the record sections
 │  │  ├─ HoldPreview.tsx       # hold + flight art builders (canvas)
+│  │  ├─ FlightRoleEditor.tsx  # WFWS bit / behaviour-state role cards
 │  │  ├─ PackSpriteUpload.tsx  # upload for trail / cluster-bit pack art
 │  │  ├─ EffectsCards.tsx      # ribbon trail + explosion burst cards
 │  │  ├─ ExplosionPreview.tsx  # 50 Hz px_effects burst preview (canvas)
@@ -52,6 +53,7 @@ different project. Do not modify it from this repository.
 │  │  ├─ recordTabs.tsx        # section ids/labels/icons shared by nav
 │  │  ├─ recordSchema.ts       # field tables used by the editor
 │  │  ├─ explosionPresets.ts   # PX electric / pyro / ember burst presets
+│  │  ├─ spriteBuilder.ts      # WFWS role defaults, state ids, availability
 │  │  └─ stockWeapons.ts       # stock donors, slots, panel positions
 │  ├─ types/weapon.ts          # WeaponProject and all record types
 │  ├─ utils/
@@ -64,6 +66,7 @@ different project. Do not modify it from this repository.
 │  └─ index.css                # Tailwind v4 theme tokens, focus, scrollbars
 ├─ public/assets/              # logo, mark, worm sheets, default sprites
 ├─ spec/                       # source art: banner, backdrop, default_*.png
+│  └─ lua_sdk/                 # SDK sources: effects_sdk, wfws_sdk (WFWS builder)
 ├─ src-tauri/                  # Tauri v2 desktop project
 ├─ example_mods_*/, wep_Formatting/  # reference bundles and .wep samples
 ├─ lua-weapons.md, weapon-records.md # engine docs snapshots
@@ -166,7 +169,7 @@ version = "0.1.0"
 author = "..."
 api_version = 4
 format_version = 2
-dependencies = ["wf.sdk"]   # only when holds / sb.flight are used
+dependencies = ["wf.sdk", "wfws.sdk"]   # holds + flight builder, as needed
 
 [[components]]
 id = "author.weapon"
@@ -229,9 +232,48 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   (`nothing`, `clusters`, `fire`) are exclusive.
 - Clustlets carry `clusters.bit.action` (`impact`/`bounce`/`homing`/`roam`/
   `dig`). The groups share native slots, so decode/emit only the active group.
-- `dependencies = ["wf.sdk"]` is added when hold art or the PX flight builder is
-  used; `effects.sdk` is added for the ribbon trail (it exports
-  `wf-lib/effects/trail` and its beam/glow sheets).
+- `dependencies = ["wf.sdk"]` is added for hold art (it exports
+  `wf-lib/holds`), and `wfws.sdk` for the flight builder; `effects.sdk` is added
+  for the ribbon trail (it exports `wf-lib/effects/trail` and its beam/glow
+  sheets).
+- **WFWS flight builder (`project.missileSprite`, `bitFlight`, `behaviorArt`).**
+  The editor ships its own builder bundle, `spec/lua_sdk/wfws_sdk/` (id
+  `wfws.sdk`), exporting `wf-lib/wfws_sprite_builder`; it depends on `wf.sdk`
+  for `wf-lib/holds`. Emission:
+  - `require("wf-lib/wfws_sprite_builder")` whenever the primary builder is on
+    (air strikes are excluded: their munitions have no placed missile).
+  - **`sprite = 0` is unconditional on the primary** while the builder is on.
+    The builder classifies a missile as the primary only when `m.sprite` is zero
+    at first sight; a `.wep` baseline or a `missile.sprite` override must not
+    survive, or the primary would classify as a bit and draw bit art.
+  - `bits = { sheet, anim, cyclical, anim_speed, spin, scale, mirror, z }` for
+    the bit role, `bits = "inherit"` for the primary art, and no `bits` key for
+    native WA bits. When the bit builder owns the bits, the generator forces
+    `clusters.bit.sprite` to a stock id (`clustlet`) if it was 0/empty and writes
+    `sprite_count = 1`, and it **skips** the claim `cluster = { sprite, … }`
+    declaration (the builder hides that sheet anyway).
+  - `states = { { scope, sig, sheet/native, … } }` for the configured behaviours.
+    The signal ids are written into the record's own sprite fields:
+    `missile.homing.sprite` (245+), `clusters.bit.homing.sprite`,
+    `dig.dive_sprite` + `sprite_1..3`, `sheep.flight_1/2` and
+    `roam.gas.animal_sprite`. WA writes one of those into `m.sprite` when the
+    behaviour changes; the builder records the last nonzero value before
+    zeroing and matches `sig` against it. `native = true` hands the state back
+    to WA. Only the behaviours the current action/burst actually has are
+    offered; `inherit` emits no state.
+  - The primary sheet, `bit_flight.png` and `state_<key>.png` are listed in the
+    claim `sprites` and declared in `mod.toml`; the exporter writes the uploaded
+    file or the default missile art, so a declared path always exists.
+  - The editor UI is `HoldPreview.tsx` → **WFWS role art** (`FlightRoleEditor`
+    cards): bit mode and one row per available behaviour, each with native /
+    builder / inherit, upload, animation, frames/FPS/anim speed/spin/scale/depth,
+    and the resolved `sig` ids.
+  - Behaviour art requires the primary builder; with it off the rows are stored
+    but not emitted. Strikes have no builder path at all.
+  - Known limits: a state does not automatically revert when WA stops writing
+    its sprite (the last signal wins); dig relies on WA writing the dig sprite
+    ids (otherwise a `when` callback is the fallback); a state swap respawns the
+    follower, so a one-frame flicker is possible.
 - **Ribbon trail (`project.ribbonTrail`).** The effects SDK samples the round on
   game frames and draws a tapering ribbon, so colour (`r,g,b` from a hex UI
   colour), `core_w`/`glow_w`, `max`, `every` and `vanish` are free. Emission:
@@ -314,10 +356,11 @@ The hold preview mirrors `worm_hold.rs`:
   `0x65/0x66` retreat and `0x6A/0x6B` fire poses; `thrown` skips put-away;
 - the scene is composed at 60×60 and drawn at 2× on the landscape.
 
-The flight preview runs at a fixed 50 Hz, uses `ANIM_TYPE` tables from
-`px_sprite_builder.lua`, mirrors when `vx < 0`, and draws the sprite at the
-weapon pivot. The retired `ProjectileSimulation.tsx` had a terrain/collision
-loop that could lock the renderer; leave it unused.
+The flight preview runs at a fixed 50 Hz, uses the `ANIM_TYPE` tables the
+builder itself uses, mirrors when `vx < 0`, and draws the sprite at the weapon
+pivot. The bit and behaviour role cards below it share the same flight keys.
+The retired `ProjectileSimulation.tsx` had a terrain/collision loop that could
+lock the renderer; leave it unused.
 
 **Default art:** when no PNG is uploaded, `defaultArtFor(project)` picks
 `spec/default_grenade.png` or `spec/default_blue_zook.png` from the donor/slot
@@ -365,10 +408,15 @@ never declare it without writing the file.
   present, otherwise the default art (never a dangling path).
 - `sprites/<mod>/missile.png` whenever custom flight art is enabled: uploaded
   sheet, otherwise the default art.
+- `sprites/<mod>/bit_flight.png` when the WFWS bit role is set to Builder, and
+  `sprites/<mod>/state_<key>.png` for every behaviour role set to Builder
+  (`homing`, `homing_bit`, `dig`, `roam_flight`, `gas`). Uploaded sheet if
+  present, otherwise the default missile art.
 - Any `customSprites` entries are written at their declared paths.
 - `mod.toml` declares `[sprites."sprites/<mod>/missile.png"]` for custom flight
-  art and `[sprites."sprites/<mod>/hold.png"]` when the hold sheet has more than
-  one frame (`frames`, `fps`, `play = "loop"`).
+  art, the bit and state sheets above, and
+  `[sprites."sprites/<mod>/hold.png"]` when the hold sheet has more than one
+  frame (`frames`, `fps`, `play = "loop"`).
 - Profile name sanitizes `\\ / : * ? " < > |`.
 - Uploaded pack art (`project.packArt`) is written as
   `sprites/<mod>/trail.png`, `bit.png`, `bit_homing.png`, `bit_trail.png` and
@@ -377,10 +425,11 @@ never declare it without writing the file.
   weapon id on every export (`packArtPath`), so renaming cannot leave a stale
   folder. `packArtPath` returns null for `cluster_homing_sprite` on a strike
   (see `packArtSlotApplies`).
-- `mod.toml` `dependencies` merges the features' own entries (`wf.sdk`,
-  `effects.sdk`) with `project.extraDependencies` (deduped). The Bundle Code
-  page's `BundleDependencies` panel edits that list; no SDK files are copied
-  because WormForge resolves ids from `Mods/` at load.
+- `mod.toml` `dependencies` merges the features' own entries (`wf.sdk` for
+  holds, `wfws.sdk` for the flight builder, `effects.sdk` for effects) with
+  `project.extraDependencies` (deduped). The Bundle Code page's
+  `BundleDependencies` panel edits that list; no SDK files are copied because
+  WormForge resolves ids from `Mods/` at load.
 
 ---
 
@@ -524,6 +573,18 @@ that `vite preview` at `/` hides).
     mapped to their slot by `missile_boom::weapon_of`; an air strike builds its
     bombs from the strike's own record copy, so the hook never fires for them.
     Do not offer effects on a `cursor` (strike) record.
+21. **The primary's `sprite = 0` is a classifier, not a cosmetic toggle.** The
+    WFWS builder calls any missile with a nonzero `m.sprite` at first sight a
+    cluster bit. A `.wep` baseline or a `missile.sprite` override must not keep
+    the native sprite when the builder is on, or the primary draws bit art.
+22. **A bit needs a nonzero stock sprite.** If `clusters.bit.sprite` is 0/empty,
+    every bit classifies as the primary. The generator forces `clustlet` and
+    `sprite_count = 1`; `sprite_count` counts sprite ids, not frames.
+23. **Behaviour state ids must be distinct and real.** They are written into
+    `missile.homing.sprite`, `clusters.bit.homing.sprite`, `dig.dive_sprite` /
+    `sprite_1..3`, `sheep.flight_1/2` and `roam.gas.animal_sprite`, and matched
+    against the last nonzero `m.sprite`. Assign 245+, avoid the bit marker and
+    stock bodies, and never use a negative id (record dwords are signed).
 
 ---
 
@@ -557,10 +618,17 @@ Done and validated:
 - Effects tab: ribbon trail (moved from Indices & Trail) and the effects-SDK
   explosion burst with a 50 Hz preview; Bundle Code page lists auto and manual
   `mod.toml` dependencies.
+- WFWS flight builder: its own `wfws.sdk` library bundle, primary + cluster-bit
+  roles, and per-behaviour state art (homing, homing bit, dig, roam flight, gas)
+  with record signal ids, exporter sheets and `mod.toml` declarations.
 - GitHub Pages workflow, `.gitignore`, Pages-subpath smoke test.
 
 Likely next steps:
 
+- Task 3 in `reqs/wfws_builder_findings.md`: harden `gen_test_pack.ts`
+  (generated `mod.toml`/profile, distinct art per state, golden snapshots, new
+  builder cases).
+- Task 4: `fire_seq` integration.
 - Add the GitHub remote and publish Pages.
 - Keep `wf_weapon_editor_notes.md` updated with any engine behaviour discovered.
 - If a field is added, update: type → parser → generator → editor UI → notes.

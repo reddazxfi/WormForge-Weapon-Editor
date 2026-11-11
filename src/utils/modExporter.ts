@@ -4,12 +4,20 @@ import {
   generateLuaCode,
   generateModToml,
   generateProfileToml,
+  bitFlightSheetPath,
+  behaviorStateSheetPath,
   customSoundPath,
+  missileFlightSheetPath,
   packArtPath,
   PACK_ART_SLOTS,
   sanitizeModFolder,
   wepBundlePath,
 } from './luaGenerator';
+import {
+  bitBuilderMode,
+  primaryBuilderOn,
+  resolveBehaviorStates,
+} from '../data/spriteBuilder';
 import {
   createDefaultHoldSheet,
   createDefaultMissileSheet,
@@ -55,11 +63,7 @@ export async function exportModZip(project: WeaponProject): Promise<Blob> {
   }
 
   // Missile/Projectile Sprite Sheet (custom mode always declares the sheet).
-  if (
-    project.missileSprite &&
-    project.missileSprite.enabled &&
-    project.missileSprite.mode === 'custom'
-  ) {
+  if (primaryBuilderOn(project)) {
     const missileBlob = project.missileSprite.sheetFile
       ? project.missileSprite.sheetFile
       : await createDefaultMissileSheet(
@@ -67,7 +71,39 @@ export async function exportModZip(project: WeaponProject): Promise<Blob> {
           project.missileSprite.anim || 'rotation',
           project.missileSprite.frames
         );
-    zip.file(`${modFolder}/sprites/${modFolder}/missile.png`, missileBlob);
+    zip.file(
+      `${modFolder}/${missileFlightSheetPath(project)}`,
+      missileBlob
+    );
+  }
+
+  // WFWS builder roles. A builder row without an upload ships the same default
+  // art as the primary, so a declared path never points at a missing file.
+  if (primaryBuilderOn(project)) {
+    if (bitBuilderMode(project) === 'builder') {
+      const bitBlob = project.bitFlight.sheetFile
+        ? project.bitFlight.sheetFile
+        : await createDefaultMissileSheet(
+            project,
+            project.bitFlight.anim || 'rotation',
+            project.bitFlight.frames
+          );
+      zip.file(`${modFolder}/${bitFlightSheetPath(project)}`, bitBlob);
+    }
+    for (const state of resolveBehaviorStates(project)) {
+      if (state.art.mode !== 'builder') continue;
+      const stateBlob = state.art.sheetFile
+        ? state.art.sheetFile
+        : await createDefaultMissileSheet(
+            project,
+            state.art.anim || 'rotation',
+            state.art.frames
+          );
+      zip.file(
+        `${modFolder}/${behaviorStateSheetPath(project, state.def.key)}`,
+        stateBlob
+      );
+    }
   }
 
   // Uploaded record art (trails, cluster bit sheets). The Lua and mod.toml

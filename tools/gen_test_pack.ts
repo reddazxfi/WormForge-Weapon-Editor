@@ -24,9 +24,21 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync, inflateSync } from 'node:zlib';
 import { WeaponProject, PackArtSlot } from '../src/types/weapon';
-import { generateLuaCode, packArtPath, sanitizeModFolder } from '../src/utils/luaGenerator';
+import {
+  generateLuaCode,
+  bitFlightSheetPath,
+  behaviorStateSheetPath,
+  missileFlightSheetPath,
+  packArtPath,
+  sanitizeModFolder,
+} from '../src/utils/luaGenerator';
 import { DEFAULT_EXPLOSION_EFFECT, EXPLOSION_PRESETS } from '../src/data/explosionPresets';
 import { DEFAULT_CUSTOM_SOUNDS } from '../src/data/soundPresets';
+import {
+  DEFAULT_ROLE_ART,
+  bitBuilderMode,
+  resolveBehaviorStates,
+} from '../src/data/spriteBuilder';
 import { getStockPanelPosition } from '../src/data/stockWeapons';
 
 // ---------------------------------------------------------------------------
@@ -342,6 +354,8 @@ function makeOp(partial: {
   burst?: WeaponProject['burst'];
   overrides?: Record<string, any>;
   missileSprite?: Partial<WeaponProject['missileSprite']>;
+  bitFlight?: Partial<WeaponProject['bitFlight']>;
+  behaviorArt?: WeaponProject['behaviorArt'];
   trailer?: Partial<typeof DEFAULTS.ribbon>;
   explosion?: Partial<WeaponProject['explosionEffect']>;
   customSounds?: Partial<WeaponProject['customSounds']>;
@@ -405,6 +419,8 @@ function makeOp(partial: {
       hideStock: true,
       ...partial.missileSprite,
     },
+    bitFlight: { ...DEFAULT_ROLE_ART, ...partial.bitFlight },
+    behaviorArt: { ...(partial.behaviorArt || {}) },
     roamConfig: { ...DEFAULTS.roam, ...partial.roam },
     digConfig: { sound: 90, dive_sprite: 0, sprite_1: 0, sprite_2: 0, sprite_3: 0 },
     fireConfig: {
@@ -786,6 +802,37 @@ const TESTS: TestCase[] = [
     expect: 'A short low tone at the blast and four high ticks, the first half a second after the throw, then silence.',
     watch: 'Silence (a path not declared in `sounds`), a stock WA sound instead, or ticks that never stop.',
   },
+  {
+    project: makeOp({
+      id: 'wftest.24_builder_bits',
+      name: 'WF 24 Builder Bits',
+      slot: 'cluster_bomb',
+      burst: 'clusters',
+      clustlet: { count: 5, sprite_count: 1, bit_action: 'none', animation: 0 },
+      missileSprite: { enabled: true, mode: 'custom', anim: 'rotation', hideStock: true },
+      bitFlight: { mode: 'builder', anim: 'rotation', frames: 16, fps: 15 },
+      packArt: { cluster_sprite: art('cluster_sprite', ROT_32, 32) },
+    }),
+    intent: 'WFWS builder owns the cluster bits: a 16-frame sheet, the claim `cluster.sprite` skipped.',
+    expect: 'The parent is the static grenade; the five bits are our 16-frame sheet spinning as they fly.',
+    watch: 'Bits drawing the claim 32-frame sheet (builder not owning the bits), the bits vanishing, or stock clustlets.',
+  },
+  {
+    project: makeOp({
+      id: 'wftest.25_builder_state',
+      name: 'WF 25 Builder State',
+      slot: 'homing_pigeon',
+      action: 'homing',
+      body: { homing: 'lock', homing_arm_ms: 800, homing_time_ms: 6000 },
+      missileSprite: { enabled: true, mode: 'custom', anim: 'rotation', hideStock: true },
+      behaviorArt: {
+        homing: { ...DEFAULT_ROLE_ART, mode: 'builder', anim: 'rotation', frames: 32, fps: 15 },
+      },
+    }),
+    intent: 'WFWS behaviour state art: the homing state swaps to a 32-frame sheet when WA arms it.',
+    expect: 'A static grenade flies, then starts spinning once the missile arms and homes; the art stays until the blast.',
+    watch: 'No art change (WA not writing `missile.homing.sprite`), the sprite disappearing, or a one-frame flicker on the swap.',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -842,9 +889,25 @@ for (const test of TESTS) {
   if (project.missileSprite.enabled && project.missileSprite.mode === 'custom') {
     usesBuilders = true;
     mkdirSync(join(BUNDLE, 'sprites', folder), { recursive: true });
-    const path = `sprites/${folder}/missile.png`;
+    const path = missileFlightSheetPath(project);
     writeFileSync(join(BUNDLE, path), GRENADE_PNG);
     usedSheets.add(path);
+
+    // WFWS extra roles. The exporter writes the uploaded sheet or the default
+    // missile art, so a declared path always exists.
+    if (bitBuilderMode(project) === 'builder') {
+      const bitPath = bitFlightSheetPath(project);
+      writeFileSync(join(BUNDLE, bitPath), ROT_16);
+      usedSheets.add(bitPath);
+      spriteDecls.set(bitPath, { frames: 16, fps: 15, play: 'loop' });
+    }
+    for (const state of resolveBehaviorStates(project)) {
+      if (state.art.mode !== 'builder') continue;
+      const statePath = behaviorStateSheetPath(project, state.def.key);
+      writeFileSync(join(BUNDLE, statePath), ROT_32);
+      usedSheets.add(statePath);
+      spriteDecls.set(statePath, { frames: 32, fps: 15, play: 'loop' });
+    }
   }
 
   // Custom WAVs the claim declares in `sounds`. The editor writes these bytes
@@ -884,7 +947,8 @@ for (const test of TESTS) {
 
 // mod.toml
 const dependencies: string[] = [];
-if (usesBuilders) dependencies.push('wf.sdk');
+// The WFWS builder is its own bundle; `wf.sdk` is only needed for holds.
+if (usesBuilders) dependencies.push('wfws.sdk');
 if (usesRibbon || usesExplosion) dependencies.push('effects.sdk');
 
 const toml: string[] = [

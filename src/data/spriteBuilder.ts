@@ -1,0 +1,271 @@
+import type {
+  BehaviorArtKey,
+  FlightRoleArt,
+  WeaponProject,
+} from '../types/weapon';
+
+/**
+ * Defaults for the extra WFWS builder roles. The primary round keeps its own
+ * `MissileSpriteConfig` because it owns the preview canvas; bits and behaviour
+ * states only need the flight fields.
+ */
+export const DEFAULT_ROLE_ART: FlightRoleArt = {
+  mode: 'native',
+  anim: 'rotation',
+  frames: 1,
+  fps: 15,
+  animSpeed: 1,
+  spinRate: 1,
+  scale: 1,
+  mirror: true,
+  z: 5,
+};
+
+export interface BehaviorArtDef {
+  key: BehaviorArtKey;
+  label: string;
+  /** Which identity layer the state applies to. */
+  scope: (project: WeaponProject) => 'main' | 'bit';
+  /** The record field(s) whose sprite id is the state signal. */
+  record: string;
+  description: string;
+}
+
+/** The cluster bit's action, from the same expression the editor uses. */
+function bitActionOf(project: WeaponProject): string {
+  const c = project.body.clustlet;
+  return (
+    c.bit_action ??
+    (c.homing !== 'off' ? 'homing' : c.contact === 'bounce' ? 'bounce' : 'none')
+  );
+}
+
+/**
+ * `sig` is the last nonzero `m.sprite` the builder saw for a missile. WA writes
+ * the behaviour's own sprite field into it (homing art, dig frames, the gas
+ * pose), so those record fields are the sentinels. An id is only assigned when
+ * the record field is 0/empty or would collide with another state; the
+ * generator writes the chosen id back into the record so the signal exists.
+ */
+export const BEHAVIOR_ART_DEFS: BehaviorArtDef[] = [
+  {
+    key: 'homing',
+    label: 'Homing flight',
+    scope: () => 'main',
+    record: 'missile.homing.sprite',
+    description: 'Art used once the primary round starts steering towards a target.',
+  },
+  {
+    key: 'homing_bit',
+    label: 'Homing cluster bit',
+    scope: () => 'bit',
+    record: 'clusters.bit.homing.sprite',
+    description: 'Art used by a cluster bit after it arms and starts steering.',
+  },
+  {
+    key: 'dig',
+    label: 'Digging',
+    scope: (project) => (project.action === 'dig' ? 'main' : 'bit'),
+    record: 'dig.dive_sprite / sprite_1..3',
+    description: 'Art shown while the missile drills through the terrain.',
+  },
+  {
+    key: 'roam_flight',
+    label: 'Roaming flight',
+    scope: () => 'main',
+    record: 'sheep.flight_1 / flight_2',
+    description: 'Art used while a roaming animal is airborne, before it walks.',
+  },
+  {
+    key: 'gas',
+    label: 'Gas pose',
+    scope: () => 'main',
+    record: 'roam.gas.animal_sprite',
+    description: 'Art used once a roaming animal settles and releases gas.',
+  },
+];
+
+/** The behaviour rows that make sense for the current action and payload. */
+export function availableBehaviorArt(project: WeaponProject): BehaviorArtDef[] {
+  const bitAction = bitActionOf(project);
+  const clusters = project.burst === 'clusters';
+  return BEHAVIOR_ART_DEFS.filter((def) => {
+    switch (def.key) {
+      case 'homing':
+        return project.action === 'homing';
+      case 'homing_bit':
+        return clusters && bitAction === 'homing';
+      case 'dig':
+        return project.action === 'dig' || (clusters && bitAction === 'dig');
+      case 'roam_flight':
+      case 'gas':
+        return project.action === 'roam';
+      default:
+        return false;
+    }
+  });
+}
+
+/** Stock names the bit classifier and collision check need to know as ids. */
+const STOCK_SPRITE_IDS: Record<string, number> = {
+  mine: 45,
+  missile: 48,
+  bazooka: 48,
+  grenade: 50,
+  banana: 51,
+  mortar: 52,
+  cluster: 53,
+  clustlet: 54,
+  homing: 58,
+  dynamite: 78,
+  pigeon: 175,
+  sheep: 653,
+};
+
+/** The sprite id a cluster bit reports at first sight (the bit marker). */
+export function bitMarkerId(project: WeaponProject): number {
+  const raw = project.body?.clustlet?.sprite;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric > 0) return Math.round(numeric);
+  return STOCK_SPRITE_IDS[String(raw || '').toLowerCase()] ?? 54;
+}
+
+export type AssignedField =
+  | 'homing_sprite'
+  | 'bit_homing_sprite'
+  | 'dig_dive'
+  | 'dig_1'
+  | 'dig_2'
+  | 'dig_3'
+  | 'roam_flight_1'
+  | 'roam_flight_2'
+  | 'gas_sprite';
+
+export interface ResolvedBehaviorState {
+  def: BehaviorArtDef;
+  art: FlightRoleArt;
+  scope: 'main' | 'bit';
+  /** Ids matched against the last nonzero `m.sprite`. */
+  sig: number[];
+  /** Record ids the generator has to write (empty when the record already has them). */
+  assigned: Partial<Record<AssignedField, number>>;
+}
+
+/** The record sprite fields that carry a behaviour's `m.sprite` signal. */
+interface SignalField {
+  field: AssignedField;
+  value: number;
+}
+
+function signalFields(project: WeaponProject, def: BehaviorArtDef): SignalField[] {
+  const num = (value: unknown): number => {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+  };
+  switch (def.key) {
+    case 'homing':
+      return [
+        {
+          field: 'homing_sprite',
+          value: num(project.recordOverrides?.['missile.homing.sprite']),
+        },
+      ];
+    case 'homing_bit':
+      return [
+        { field: 'bit_homing_sprite', value: num(project.body?.clustlet?.homing_sprite) },
+      ];
+    case 'dig': {
+      const bit = def.scope(project) === 'bit';
+      const dig = bit ? project.body?.clustlet?.dig : project.digConfig;
+      // WA may write any of the four dig frames into m.sprite, so all of them
+      // are signals and each needs a distinct id.
+      return [
+        { field: 'dig_dive', value: num(dig?.dive_sprite) },
+        { field: 'dig_1', value: num(dig?.sprite_1) },
+        { field: 'dig_2', value: num(dig?.sprite_2) },
+        { field: 'dig_3', value: num(dig?.sprite_3) },
+      ];
+    }
+    case 'roam_flight':
+      return [
+        { field: 'roam_flight_1', value: num(project.roamConfig?.flight_1) },
+        { field: 'roam_flight_2', value: num(project.roamConfig?.flight_2) },
+      ];
+    case 'gas':
+      return [
+        { field: 'gas_sprite', value: num(project.roamConfig?.gas_animal_sprite) },
+      ];
+    default:
+      return [];
+  }
+}
+
+/**
+ * Resolve the configured behaviour states and assign a distinct id to every
+ * record field that has none (or would collide with another state). The
+ * builder only needs nonzero, unique signals; the ids are real Gfx.dir ids in
+ * the 245+ range, away from the stock bodies and the bit marker.
+ */
+export function resolveBehaviorStates(project: WeaponProject): ResolvedBehaviorState[] {
+  // States are drawn by the same `sb.flight` call as the primary sheet; without
+  // the primary builder there is no call to hang them on.
+  if (!primaryBuilderOn(project)) return [];
+  const used = new Set<number>([bitMarkerId(project)]);
+  // Reserve the stock bodies so a forced id can never look like a bit.
+  for (const id of Object.values(STOCK_SPRITE_IDS)) used.add(id);
+
+  let nextId = 245;
+  const takeId = (): number => {
+    while (used.has(nextId)) nextId += 1;
+    const id = nextId;
+    used.add(id);
+    nextId += 1;
+    return id;
+  };
+
+  const out: ResolvedBehaviorState[] = [];
+  for (const def of availableBehaviorArt(project)) {
+    const art = project.behaviorArt?.[def.key];
+    if (!art || art.mode === 'inherit') continue;
+    const sig: number[] = [];
+    const assigned: Partial<Record<AssignedField, number>> = {};
+    for (const signal of signalFields(project, def)) {
+      if (signal.value > 0 && !used.has(signal.value)) {
+        used.add(signal.value);
+        sig.push(signal.value);
+      } else {
+        const id = takeId();
+        assigned[signal.field] = id;
+        sig.push(id);
+      }
+    }
+    if (sig.length === 0) sig.push(takeId());
+    out.push({ def, art, scope: def.scope(project), sig, assigned });
+  }
+  return out;
+}
+
+/** True when the primary flight builder is on (bits and states hang off it). */
+export function primaryBuilderOn(project: WeaponProject): boolean {
+  // An air strike has no placed missile for the builder to follow: its
+  // munitions are built from the strike's own record copy. Keep the native
+  // 32-frame route there.
+  if (project.fireType === 'cursor' && !project.teleport) return false;
+  return !!project.missileSprite?.enabled && project.missileSprite.mode === 'custom';
+}
+
+/** The bit role, or null when the builder should leave WA's bits alone. */
+export function bitBuilderMode(project: WeaponProject): 'builder' | 'inherit' | null {
+  if (!primaryBuilderOn(project) || project.burst !== 'clusters') return null;
+  const mode = project.bitFlight?.mode;
+  return mode === 'builder' || mode === 'inherit' ? mode : null;
+}
+
+/** True when the WFWS builder has anything to do. */
+export function usesWfwsBuilder(project: WeaponProject): boolean {
+  return (
+    primaryBuilderOn(project) ||
+    bitBuilderMode(project) === 'builder' ||
+    resolveBehaviorStates(project).length > 0
+  );
+}

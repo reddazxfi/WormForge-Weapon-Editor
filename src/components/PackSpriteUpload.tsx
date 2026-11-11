@@ -22,6 +22,8 @@ interface PackSpriteUploadProps {
     /** Record edits that pair with a rotation sheet (the native anim type). */
     onRotate: (frames: number) => void;
   };
+  /** Shown when another feature makes this slot's art redundant. */
+  warning?: string;
 }
 
 const DEFAULT_ASSET: PackArtAsset = { frames: 1, fps: 15, play: 'loop' };
@@ -41,6 +43,7 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
   hint,
   onUpload,
   rotate,
+  warning,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const asset = project.packArt?.[slot];
@@ -143,6 +146,12 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
           </button>
         )}
       </div>
+
+      {warning && (
+        <p className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-md px-2 py-1.5">
+          {warning}
+        </p>
+      )}
 
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded border border-stone-300 dark:border-stone-700 bg-stone-100 dark:bg-stone-800 flex items-center justify-center overflow-hidden shrink-0">

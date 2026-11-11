@@ -96,6 +96,7 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { bitActionOf, type RecordTabId } from '../data/recordTabs';
+import { bitBuilderMode } from '../data/spriteBuilder';
 import { PackSpriteUpload } from './PackSpriteUpload';
 import {
   CustomSoundsCard,
@@ -1482,6 +1483,11 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     slot="cluster_sprite"
                     label="Bit Sprite Sheet (`cluster.sprite`)"
                     hint="Loaded as this weapon's cluster bit art and written to `clusters.bit.sprite` at install; the record field itself only takes stock ids."
+                    warning={
+                      bitBuilderMode(project) === 'builder'
+                        ? 'The WFWS bit builder owns the cluster bits: this sheet is skipped and the bit art comes from Hold & Preview → Cluster bit art.'
+                        : undefined
+                    }
                     onUpload={() => {
                       // One pack sheet is installed as a single sprite id. The
                       // engine gives bit i `sprite + (i-1) % sprite_count`, so any
@@ -1680,6 +1686,11 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                         slot="cluster_homing_sprite"
                         label="Homing Bit Sheet (`cluster.homing_sprite`)"
                         hint="Drawn by homing bits while they home (their render timer), scoped to this weapon."
+                        warning={
+                          bitBuilderMode(project) === 'builder'
+                            ? 'The WFWS bit builder owns the bits: this claim sheet is skipped. Use Hold & Preview → Homing cluster bit art for the homing pose.'
+                            : undefined
+                        }
                       />
                     )}
                   </div>

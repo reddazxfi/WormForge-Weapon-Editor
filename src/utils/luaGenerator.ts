@@ -1,13 +1,21 @@
 import {
   BodyConfig,
+  BehaviorArtKey,
   ClustletConfig,
   DigActionConfig,
+  FlightRoleArt,
   PackArtSlot,
   RoamActionConfig,
   WeaponProject,
 } from '../types/weapon';
 import { getStockPanelPosition } from '../data/stockWeapons';
 import { COLLISION_FLAGS } from '../data/recordSchema';
+import {
+  bitBuilderMode,
+  primaryBuilderOn,
+  resolveBehaviorStates,
+  usesWfwsBuilder,
+} from '../data/spriteBuilder';
 
 export function sanitizeModFolder(id: string): string {
   const parts = id.trim().split('.');
@@ -139,6 +147,47 @@ export function packArtPath(project: WeaponProject, slot: PackArtSlot): string |
   const extension = fileName.toLowerCase().endsWith('.gif') ? 'gif' : 'png';
   return `sprites/${sanitizeModFolder(project.id)}/${PACK_ART_STEM[slot]}.${extension}`;
 }
+
+/** Bundle path of the primary WFWS flight sheet. */
+export function missileFlightSheetPath(project: WeaponProject): string {
+  return `sprites/${sanitizeModFolder(project.id)}/missile.png`;
+}
+
+/** Bundle path of the cluster-bit WFWS flight sheet. */
+export function bitFlightSheetPath(project: WeaponProject): string {
+  return `sprites/${sanitizeModFolder(project.id)}/bit_flight.png`;
+}
+
+/** Bundle path of one behaviour-state sheet. */
+export function behaviorStateSheetPath(
+  project: WeaponProject,
+  key: BehaviorArtKey,
+): string {
+  return `sprites/${sanitizeModFolder(project.id)}/state_${key}.png`;
+}
+
+/** The `sb.flight` keys shared by the primary, bit and state roles. */
+function roleArtRows(cfg: FlightRoleArt, indent: string): string[] {
+  const rows = [`${indent}anim = ${luaQuote(cfg.anim || 'rotation')},`];
+  if (cfg.frames > 1) rows.push(`${indent}cyclical = ${cfg.frames},`);
+  if (cfg.animSpeed && cfg.animSpeed !== 1) {
+    rows.push(`${indent}anim_speed = ${formatNumber(cfg.animSpeed)},`);
+  }
+  if (cfg.spinRate && cfg.spinRate !== 1) {
+    rows.push(`${indent}spin = ${formatNumber(cfg.spinRate)},`);
+  }
+  if (cfg.scale && cfg.scale !== 1) {
+    rows.push(`${indent}scale = ${formatNumber(cfg.scale)},`);
+  }
+  if (cfg.mirror === false) rows.push(`${indent}mirror = false,`);
+  if (cfg.z !== undefined && cfg.z !== 5) {
+    rows.push(`${indent}z = ${formatNumber(cfg.z)},`);
+  }
+  return rows;
+}
+
+/** `require("wf-lib/wfws_sprite_builder")`, the bundle this editor ships. */
+export const WFWS_BUILDER_MODULE = 'wf-lib/wfws_sprite_builder';
 
 /**
  * Safe, high-performance O(N) parser to extract `on_explode` from custom Lua snippets.
@@ -323,7 +372,13 @@ export function generateLuaCode(project: WeaponProject): string {
 
   const usesHold = project.hold && project.hold.enabled;
   const missileSpriteEnabled = !!project.missileSprite?.enabled;
-  const usesMissileSprite = missileSpriteEnabled && project.missileSprite.mode === 'custom';
+  // The primary WFWS builder. Bits and behaviour states are drawn by the same
+  // `sb.flight` call, so they only exist while it is on.
+  const builderOn = primaryBuilderOn(project);
+  const usesMissileSprite = builderOn;
+  const bitMode = bitBuilderMode(project);
+  const bitRoleActive = bitMode === 'builder';
+  const behaviorStates = resolveBehaviorStates(project);
 
   // Which record families WA blasts at all: a gun, arrow, spray or special has
   // no explosion to decorate, and neither does an air strike. A strike's bombs
@@ -368,7 +423,8 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push('local holds = require("wf-lib/holds")');
   }
   if (usesMissileSprite) {
-    lines.push('local sb = require("wf-lib/px_sprite_builder")');
+    // WFWS's fork: primary + cluster-bit + per-behaviour art in one call.
+    lines.push(`local sb = require(${luaQuote(WFWS_BUILDER_MODULE)})`);
   }
   if (usesRibbonTrail) {
     lines.push('local trail = require("wf-lib/effects/trail")');
@@ -443,12 +499,19 @@ export function generateLuaCode(project: WeaponProject): string {
   // cluster sprite) / the cluster render timer. A pack path cannot go into the
   // record tables themselves; those take stock names or numeric ids.
   const clusterArt: string[] = [];
-  if (clusterBitArt) clusterArt.push(`sprite = ${luaQuote(clusterBitArt)}`);
-  // `cluster.homing_sprite` is applied with `set_cluster_render_timer`, which
-  // writes entry+0x170 with no strike shift. `packArtPath` refuses it on a fire
-  // type 3 record (see `packArtSlotApplies`), so this is safe for every family.
-  if (clusterBitHomingArt) {
-    clusterArt.push(`homing_sprite = ${luaQuote(clusterBitHomingArt)}`);
+  // While the bit builder owns the bits, `clusters.bit.sprite` must stay a
+  // stock id: it is the classification marker (`m.sprite ~= 0`) and the sheet
+  // the claim would install is hidden by the builder anyway. The same applies
+  // to the homing render timer: a state's own sheet replaces it.
+  if (!bitRoleActive) {
+    if (clusterBitArt) clusterArt.push(`sprite = ${luaQuote(clusterBitArt)}`);
+    // `cluster.homing_sprite` is applied with `set_cluster_render_timer`, which
+    // writes entry+0x170 with no strike shift. `packArtPath` refuses it on a
+    // fire type 3 record (see `packArtSlotApplies`), so this is safe for every
+    // family.
+    if (clusterBitHomingArt) {
+      clusterArt.push(`homing_sprite = ${luaQuote(clusterBitHomingArt)}`);
+    }
   }
   if (clusterArt.length > 0) {
     lines.push(`      cluster = { ${clusterArt.join(', ')} },`);
@@ -472,7 +535,15 @@ export function generateLuaCode(project: WeaponProject): string {
     packSprites.push(luaQuote(holdSheetPath(project)));
   }
   if (usesMissileSprite) {
-    packSprites.push(luaQuote(`sprites/${modFolder}/missile.png`));
+    packSprites.push(luaQuote(missileFlightSheetPath(project)));
+    if (bitMode === 'builder') {
+      packSprites.push(luaQuote(bitFlightSheetPath(project)));
+    }
+    for (const state of behaviorStates) {
+      if (state.art.mode === 'builder') {
+        packSprites.push(luaQuote(behaviorStateSheetPath(project, state.def.key)));
+      }
+    }
   }
   if (usesRibbonTrail) {
     packSprites.push('trail.BEAM', 'trail.GLOW');
@@ -528,6 +599,14 @@ export function generateLuaCode(project: WeaponProject): string {
   const fireTouched = !baseline || !same(project.fireConfig, baseline.fireConfig);
   const roamTouched = !baseline || !same(project.roamConfig, baseline.roamConfig);
   const digTouched = !baseline || !same(project.digConfig, baseline.digConfig);
+  // Behaviour states write their sentinel sprite ids into the record so the
+  // builder always has a nonzero `m.sprite` to match. One lookup per group.
+  const stateByKey = new Map(behaviorStates.map((state) => [state.def.key, state]));
+  const homingState = stateByKey.get('homing');
+  const homingBitState = stateByKey.get('homing_bit');
+  const digState = stateByKey.get('dig');
+  const roamFlightState = stateByKey.get('roam_flight');
+  const gasState = stateByKey.get('gas');
 
   // Handling is shared by every family. Only fields present (or changed since
   // the .wep import) are written; the rest stay inherited.
@@ -753,7 +832,13 @@ export function generateLuaCode(project: WeaponProject): string {
     // ANIM_TYPE (`track`, `rotation`, `slow`, ...) must NOT be written to the
     // record's `animation`: that field is WA's native selector (0..5).
     const spriteOverride = override('missile.sprite');
-    if (spriteOverride !== undefined) {
+    if (builderOn) {
+      // The builder classifies a missile as the primary only when `m.sprite` is
+      // zero at first sight. This write is unconditional: an imported `.wep`
+      // baseline or a `missile.sprite` override must not leave WA's sprite in
+      // place, or the primary would classify as a cluster bit.
+      lines.push('        sprite = 0,');
+    } else if (spriteOverride !== undefined) {
       if (spriteOverride === 0 || spriteOverride === '0') {
         lines.push('        sprite = 0,');
       } else if (!isNaN(Number(spriteOverride))) {
@@ -941,7 +1026,8 @@ export function generateLuaCode(project: WeaponProject): string {
       lines.push('        },');
     } else if (
       action === 'homing' &&
-      (actionChanged ||
+      (!!homingState ||
+        actionChanged ||
         bodyChanged('homing') ||
         bodyChanged('homing_arm_ms') ||
         bodyChanged('homing_time_ms') ||
@@ -959,7 +1045,10 @@ export function generateLuaCode(project: WeaponProject): string {
       lines.push(`          arm = ${body.homing_arm_ms ?? 1000},`);
       lines.push(`          time = ${body.homing_time_ms ?? 8000},`);
 
-      const homingSprite = override('missile.homing.sprite');
+      const homingSprite =
+        homingState?.assigned.homing_sprite !== undefined
+          ? homingState.assigned.homing_sprite
+          : override('missile.homing.sprite');
       if (homingSprite !== undefined) {
         if (homingSprite === 0 || homingSprite === '0' || homingSprite === '') {
           lines.push('          sprite = 0,');
@@ -1006,7 +1095,11 @@ export function generateLuaCode(project: WeaponProject): string {
         lines.push('          },');
       }
       lines.push('        },');
-    } else if (action === 'roam' && project.roamConfig && roamTouched) {
+    } else if (
+      action === 'roam' &&
+      project.roamConfig &&
+      (roamTouched || !!roamFlightState || !!gasState)
+    ) {
       const r = project.roamConfig;
       lines.push('        roam = {');
       if (roamChanged('walk_speed')) {
@@ -1061,6 +1154,7 @@ export function generateLuaCode(project: WeaponProject): string {
         lines.push('          },');
       }
       if (
+        !!gasState ||
         roamChanged('gas_start_delay_ms') ||
         roamChanged('gas_poison_power') ||
         roamChanged('gas_animal_sprite')
@@ -1072,22 +1166,47 @@ export function generateLuaCode(project: WeaponProject): string {
         if (roamChanged('gas_poison_power')) {
           lines.push(`            poison_power = ${r.gas_poison_power ?? 0},`);
         }
-        if (roamChanged('gas_animal_sprite')) {
-          lines.push(`            animal_sprite = ${r.gas_animal_sprite ?? 0},`);
+        const gasSprite =
+          gasState?.assigned.gas_sprite !== undefined
+            ? gasState.assigned.gas_sprite
+            : roamChanged('gas_animal_sprite')
+              ? r.gas_animal_sprite ?? 0
+              : undefined;
+        if (gasSprite !== undefined) {
+          lines.push(`            animal_sprite = ${gasSprite},`);
         }
         lines.push('          },');
       }
       lines.push('        },');
-    } else if (action === 'dig' && project.digConfig && digTouched) {
+    } else if (
+      action === 'dig' &&
+      project.digConfig &&
+      (digTouched || (digState?.scope === 'main' && !!digState))
+    ) {
       const d = project.digConfig;
+      const digMainState = digState?.scope === 'main' ? digState : undefined;
       lines.push('        dig = {');
       if (digChanged('sound')) lines.push(`          sound = ${d.sound ?? 90},`);
-      if (digChanged('dive_sprite')) {
-        lines.push(`          dive_sprite = ${d.dive_sprite ?? 0},`);
+      const diveSprite =
+        digMainState?.assigned.dig_dive !== undefined
+          ? digMainState.assigned.dig_dive
+          : digChanged('dive_sprite')
+            ? d.dive_sprite ?? 0
+            : undefined;
+      if (diveSprite !== undefined) {
+        lines.push(`          dive_sprite = ${diveSprite},`);
       }
-      if (digChanged('sprite_1')) lines.push(`          sprite_1 = ${d.sprite_1 ?? 0},`);
-      if (digChanged('sprite_2')) lines.push(`          sprite_2 = ${d.sprite_2 ?? 0},`);
-      if (digChanged('sprite_3')) lines.push(`          sprite_3 = ${d.sprite_3 ?? 0},`);
+      const digFrame = (field: 'dig_1' | 'dig_2' | 'dig_3', key: 'sprite_1' | 'sprite_2' | 'sprite_3') => {
+        const assigned = digMainState?.assigned[field];
+        if (assigned !== undefined) return assigned;
+        return digChanged(key) ? d[key] ?? 0 : undefined;
+      };
+      const dig1 = digFrame('dig_1', 'sprite_1');
+      const dig2 = digFrame('dig_2', 'sprite_2');
+      const dig3 = digFrame('dig_3', 'sprite_3');
+      if (dig1 !== undefined) lines.push(`          sprite_1 = ${dig1},`);
+      if (dig2 !== undefined) lines.push(`          sprite_2 = ${dig2},`);
+      if (dig3 !== undefined) lines.push(`          sprite_3 = ${dig3},`);
       lines.push('        },');
     }
 
@@ -1129,17 +1248,37 @@ export function generateLuaCode(project: WeaponProject): string {
           flight_2: baseline.roamConfig?.flight_2,
         }
       );
-    if (action === 'roam' && project.roamConfig && sheepTouched) {
+    if (
+      action === 'roam' &&
+      project.roamConfig &&
+      (sheepTouched || !!roamFlightState)
+    ) {
       lines.push('      sheep = {');
-      lines.push(`        flight_1 = ${project.roamConfig.flight_1 ?? 0},`);
-      lines.push(`        flight_2 = ${project.roamConfig.flight_2 ?? 0},`);
+      const flightOne =
+        roamFlightState?.assigned.roam_flight_1 !== undefined
+          ? roamFlightState.assigned.roam_flight_1
+          : project.roamConfig.flight_1 ?? 0;
+      const flightTwo =
+        roamFlightState?.assigned.roam_flight_2 !== undefined
+          ? roamFlightState.assigned.roam_flight_2
+          : project.roamConfig.flight_2 ?? 0;
+      lines.push(`        flight_1 = ${flightOne},`);
+      lines.push(`        flight_2 = ${flightTwo},`);
       lines.push('      },');
     }
 
     // Clusters block. `clusters.bit` is the child missile body, so it takes
     // the same action groups as `missile` (bounce/homing), not just a damage
     // number. The `.wep` importer decodes the child action at 0x168.
-    if (burst === 'clusters' && (burstTouched || clustletTouched || clusterBitTrailArt)) {
+    if (
+      burst === 'clusters' &&
+      (burstTouched ||
+        clustletTouched ||
+        clusterBitTrailArt ||
+        bitRoleActive ||
+        !!homingBitState ||
+        digState?.scope === 'bit')
+    ) {
       const c = body.clustlet;
       const baseCluster = baseBody?.clustlet;
       lines.push('      clusters = {');
@@ -1219,17 +1358,37 @@ export function generateLuaCode(project: WeaponProject): string {
         'bounce_explosion_variation',
       ].some((key) => clustletChanged(key as keyof ClustletConfig));
 
-      if (bitTouched || bitActionChanged || clusterBitTrailArt) {
+      if (
+        bitTouched ||
+        bitActionChanged ||
+        clusterBitTrailArt ||
+        bitRoleActive ||
+        !!homingBitState ||
+        digState?.scope === 'bit'
+      ) {
         lines.push('        bit = {');
         if (bitActionChanged) lines.push(`          action = ${luaQuote(bitAction)},`);
 
-        if (clustletChanged('sprite')) {
+        if (bitRoleActive) {
+          // The builder's classifier reads `m.sprite` at first sight; a zero
+          // bit sprite would classify as the primary. Keep a real stock id and
+          // one sheet id (`sprite_count` counts ids, not frames).
+          const raw = String(c.sprite ?? '');
+          const numeric = Number(raw);
+          const unusable =
+            !raw ||
+            raw === '0' ||
+            raw.includes('/') ||
+            (Number.isFinite(numeric) && numeric === 0);
+          if (unusable) lines.push('          sprite = "clustlet",');
+          lines.push('          sprite_count = 1,');
+        } else if (clustletChanged('sprite')) {
           const s = c.sprite;
           if (s === '' || s === '0') lines.push('          sprite = 0,');
           else if (!isNaN(Number(s))) lines.push(`          sprite = ${Number(s)},`);
           else lines.push(`          sprite = ${luaQuote(String(s))},`);
         }
-        if (clustletChanged('sprite_count')) {
+        if (!bitRoleActive && clustletChanged('sprite_count')) {
           lines.push(`          sprite_count = ${c.sprite_count ?? 0},`);
         }
         if (clustletChanged('animation')) {
@@ -1411,7 +1570,8 @@ export function generateLuaCode(project: WeaponProject): string {
 
         if (
           bitAction === 'homing' &&
-          (clustletChanged('homing') ||
+          (!!homingBitState ||
+            clustletChanged('homing') ||
             clustletChanged('homing_arm_ms') ||
             clustletChanged('homing_time_ms') ||
             clustletChanged('homing_sprite') ||
@@ -1425,8 +1585,14 @@ export function generateLuaCode(project: WeaponProject): string {
           if (clustletChanged('homing')) {
             lines.push(`            kind = ${luaQuote(c.homing)},`);
           }
-          if (clustletChanged('homing_sprite')) {
-            lines.push(`            sprite = ${c.homing_sprite ?? 0},`);
+          const bitHomingSprite =
+            homingBitState?.assigned.bit_homing_sprite !== undefined
+              ? homingBitState.assigned.bit_homing_sprite
+              : clustletChanged('homing_sprite')
+                ? c.homing_sprite ?? 0
+                : undefined;
+          if (bitHomingSprite !== undefined) {
+            lines.push(`            sprite = ${bitHomingSprite},`);
           }
           if (clustletChanged('homing_animation')) {
             lines.push(`            animation = ${c.homing_animation ?? 0},`);
@@ -1541,24 +1707,44 @@ export function generateLuaCode(project: WeaponProject): string {
 
         if (
           bitAction === 'dig' &&
-          c.dig &&
-          (clustletChanged('bit_action') || clustletChanged('dig'))
+          (c.dig || digState?.scope === 'bit') &&
+          (clustletChanged('bit_action') ||
+            clustletChanged('dig') ||
+            digState?.scope === 'bit')
         ) {
-          const d = c.dig;
+          const d = c.dig ?? {
+            sound: 90,
+            dive_sprite: 0,
+            sprite_1: 0,
+            sprite_2: 0,
+            sprite_3: 0,
+          };
+          const digBitState = digState?.scope === 'bit' ? digState : undefined;
           lines.push('          dig = {');
-          if (bitDigChanged('sound')) lines.push(`            sound = ${d.sound ?? 90},`);
-          if (bitDigChanged('dive_sprite')) {
-            lines.push(`            dive_sprite = ${d.dive_sprite ?? 0},`);
+          if (c.dig && bitDigChanged('sound')) lines.push(`            sound = ${d.sound ?? 90},`);
+          const bitDive =
+            digBitState?.assigned.dig_dive !== undefined
+              ? digBitState.assigned.dig_dive
+              : c.dig && bitDigChanged('dive_sprite')
+                ? d.dive_sprite ?? 0
+                : undefined;
+          if (bitDive !== undefined) {
+            lines.push(`            dive_sprite = ${bitDive},`);
           }
-          if (bitDigChanged('sprite_1')) {
-            lines.push(`            sprite_1 = ${d.sprite_1 ?? 0},`);
-          }
-          if (bitDigChanged('sprite_2')) {
-            lines.push(`            sprite_2 = ${d.sprite_2 ?? 0},`);
-          }
-          if (bitDigChanged('sprite_3')) {
-            lines.push(`            sprite_3 = ${d.sprite_3 ?? 0},`);
-          }
+          const bitDigFrame = (
+            field: 'dig_1' | 'dig_2' | 'dig_3',
+            key: 'sprite_1' | 'sprite_2' | 'sprite_3'
+          ) => {
+            const assigned = digBitState?.assigned[field];
+            if (assigned !== undefined) return assigned;
+            return c.dig && bitDigChanged(key) ? d[key] ?? 0 : undefined;
+          };
+          const bitDig1 = bitDigFrame('dig_1', 'sprite_1');
+          const bitDig2 = bitDigFrame('dig_2', 'sprite_2');
+          const bitDig3 = bitDigFrame('dig_3', 'sprite_3');
+          if (bitDig1 !== undefined) lines.push(`            sprite_1 = ${bitDig1},`);
+          if (bitDig2 !== undefined) lines.push(`            sprite_2 = ${bitDig2},`);
+          if (bitDig3 !== undefined) lines.push(`            sprite_3 = ${bitDig3},`);
           lines.push('          },');
         }
 
@@ -1880,7 +2066,7 @@ export function generateLuaCode(project: WeaponProject): string {
     const m = project.missileSprite!;
     lines.push('    sb.flight(ctx, {');
     lines.push('      weapon = ctx.id,');
-    lines.push(`      sheet = ${luaQuote(`sprites/${modFolder}/missile.png`)},`);
+    lines.push(`      sheet = ${luaQuote(missileFlightSheetPath(project))},`);
     lines.push(`      anim = ${luaQuote(m.anim || 'rotation')},`);
     if (m.frames > 1) {
       lines.push(`      cyclical = ${m.frames},`);
@@ -1900,6 +2086,42 @@ export function generateLuaCode(project: WeaponProject): string {
     if (m.z !== undefined && m.z !== 5.0) {
       lines.push(`      z = ${m.z},`);
     }
+
+    // Cluster-bit art. `inherit` gives the bits the primary sheet; a builder
+    // role gets its own. Anything else leaves WA's bit sprite alone.
+    if (bitMode === 'builder') {
+      lines.push('      bits = {');
+      lines.push(`        sheet = ${luaQuote(bitFlightSheetPath(project))},`);
+      for (const row of roleArtRows(project.bitFlight, '        ')) lines.push(row);
+      lines.push('      },');
+    } else if (bitMode === 'inherit') {
+      lines.push('      bits = "inherit",');
+    }
+
+    // Per-behaviour art, only for the states the action/burst really has. The
+    // `sig` ids are the same ones written into the record above.
+    if (behaviorStates.length > 0) {
+      lines.push('      states = {');
+      for (const state of behaviorStates) {
+        lines.push('        {');
+        lines.push(`          scope = ${luaQuote(state.scope)},`);
+        lines.push(
+          `          sig = ${
+            state.sig.length === 1 ? state.sig[0] : `{ ${state.sig.join(', ')} }`
+          },`,
+        );
+        if (state.art.mode === 'native') {
+          lines.push('          native = true,');
+        } else {
+          lines.push(
+            `          sheet = ${luaQuote(behaviorStateSheetPath(project, state.def.key))},`,
+          );
+          for (const row of roleArtRows(state.art, '          ')) lines.push(row);
+        }
+        lines.push('        },');
+      }
+      lines.push('      },');
+    }
     lines.push('    })');
   }
 
@@ -1915,9 +2137,11 @@ export function generateModToml(project: WeaponProject): string {
   const pos = getStockPanelPosition(project.slot);
   const icon = project.customIconFile ? `sprites/${modFolder}/icon.png` : (project.panel_icon || project.slot);
   const usesHold = project.hold && project.hold.enabled;
-  const usesMissileSprite =
-    !!project.missileSprite?.enabled && project.missileSprite.mode === 'custom';
-  const usesSdk = usesHold || usesMissileSprite;
+  // The primary, bit and state roles all come from the WFWS builder, which is
+  // its own library bundle (`wfws.sdk`). It depends on `wf.sdk` for `holds`.
+  const usesWfws = usesWfwsBuilder(project);
+  const bitMode = bitBuilderMode(project);
+  const behaviorStates = resolveBehaviorStates(project);
   // The ribbon trail lives in its own library bundle (`effects.sdk`), which
   // exports `wf-lib/effects/trail` and the beam/glow sheets.
   const usesRibbonTrail =
@@ -1940,7 +2164,8 @@ export function generateModToml(project: WeaponProject): string {
   ];
 
   const dependencies: string[] = [];
-  if (usesSdk) dependencies.push('wf.sdk');
+  if (usesHold) dependencies.push('wf.sdk');
+  if (usesWfws) dependencies.push('wfws.sdk');
   if (usesRibbonTrail || usesExplosionEffect) dependencies.push('effects.sdk');
   // Extra library bundles the author asked for (they may be used from the
   // custom Lua snippet, or by a component this editor does not model).
@@ -1970,12 +2195,36 @@ export function generateModToml(project: WeaponProject): string {
   // Sprites declarations
   const emitted = new Set<string>();
   if (project.missileSprite?.enabled && project.missileSprite.mode === 'custom') {
-    const missilePath = `sprites/${modFolder}/missile.png`;
+    const missilePath = missileFlightSheetPath(project);
     emitted.add(missilePath);
     lines.push('');
     lines.push(`[sprites.${luaQuote(missilePath)}]`);
     if (project.missileSprite.frames > 1) lines.push(`frames = ${project.missileSprite.frames}`);
     lines.push(`fps = ${project.missileSprite.fps || 15}`);
+    lines.push('play = "loop"');
+  }
+
+  // Cluster-bit and behaviour-state sheets drawn by the WFWS builder.
+  if (bitMode === 'builder') {
+    const bitPath = bitFlightSheetPath(project);
+    if (!emitted.has(bitPath)) {
+      emitted.add(bitPath);
+      lines.push('');
+      lines.push(`[sprites.${luaQuote(bitPath)}]`);
+      if (project.bitFlight.frames > 1) lines.push(`frames = ${project.bitFlight.frames}`);
+      lines.push(`fps = ${project.bitFlight.fps || 15}`);
+      lines.push('play = "loop"');
+    }
+  }
+  for (const state of behaviorStates) {
+    if (state.art.mode !== 'builder') continue;
+    const statePath = behaviorStateSheetPath(project, state.def.key);
+    if (emitted.has(statePath)) continue;
+    emitted.add(statePath);
+    lines.push('');
+    lines.push(`[sprites.${luaQuote(statePath)}]`);
+    if (state.art.frames > 1) lines.push(`frames = ${state.art.frames}`);
+    lines.push(`fps = ${state.art.fps || 15}`);
     lines.push('play = "loop"');
   }
 

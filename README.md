@@ -12,7 +12,7 @@ Maintenance and hand-off notes live in [AGENTS.md](AGENTS.md).
 - **Current WormForge bundle format**:
   - Automatically exports modern `wa.weapons.replace{ ... }` component specifications.
   - Generates complete bundle layout with `mod.toml`, `weapons/<mod_name>.lua`, and `profiles/<Profile Name>.toml`.
-  - Automatically declares `dependencies = ["wf.sdk"]` when using `holds.PX_POSTURE`.
+  - Automatically declares `dependencies = ["wf.sdk"]` for holds and `["wfws.sdk"]` for the flight sprite builder.
 - **Project X `.wep` Binary Importer**:
   - Parses binary header `[0x06, 0xDD, 0xBB, 0x5A]`, Latin-1 name strings at `0x1E4`, and 0x1D0 bytes weapon record slabs.
   - Computes minimal diffs against stock templates (`stock.<slot>`) to prevent boilerplate noise.
@@ -23,7 +23,8 @@ Maintenance and hand-off notes live in [AGENTS.md](AGENTS.md).
   - Hold geometry is the engine's `worm_hold.rs` math verbatim: aim 0 is down, 31 is up, `weap_radius`/`weap_rotation`/`weap_radial_rotation` and the hand offsets, plus the put-away swing and shrink.
   - The `spec/pre_weapon_preview.png` landscape is the preview backdrop, with 1x–5x pixelated zoom and a true left/right facing flip.
 - **50 Hz Missile Flight Sprite Preview**:
-  - Reimplements `px_sprite_builder.lua`'s `sb.flight` animation at a fixed 50 Hz game frame: `track`, `rotation`, `slow`/`medium`/`fast`, `none`, `cyclical` frames, `anim_speed`, `spin`, `mirror` and `scale`.
+  - Reimplements the WFWS builder's `sb.flight` animation at a fixed 50 Hz game frame: `track`, `rotation`, `slow`/`medium`/`fast`, `none`, `cyclical` frames, `anim_speed`, `spin`, `mirror` and `scale`.
+  - **WFWS role art**: the primary round, the cluster bits and each behaviour state (homing, homing bit, dig, roam flight, gas) can keep WA's sprite, draw an uploaded sheet, or inherit the parent art. State art is signalled by the record's own sprite ids (`homing.sprite`, `dig.dive_sprite`/`sprite_1..3`, `sheep.flight_1/2`, `roam.gas.animal_sprite`), so art can swap mid-flight.
   - No terrain or collision simulation: the old Launch Simulator tab was retired because its collision loop could lock the renderer.
 - **Modern Asset Workflow**:
   - 32×32 PNG icon importer and exporter (saved to `sprites/<mod_name>/icon.png`).
