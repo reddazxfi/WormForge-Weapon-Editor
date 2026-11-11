@@ -31,6 +31,8 @@ Maintenance and hand-off notes live in [AGENTS.md](AGENTS.md).
   - Pack art for the record sprite fields the engine accepts an image in: the primary trail (`missile.trail.sprite`), the cluster bit sheet (`cluster.sprite`), the homing bit sheet (`cluster.homing_sprite`), the cluster bit trail (`clusters.bit.trail.sprite`) and the weapon's own body sheet (`sprite`) — the last one is the only way to give an **air strike** its munition art, since the sprite builder has no primary missile to follow. Uploaded PNG/GIF files are written into `sprites/<mod_name>/` and declared in `mod.toml`.
   - Rotation sheets: bake a single projectile frame into a full 360° direction strip (16/32/64 frames, frame 0 pointing up and turning clockwise, WA's airmisl order) with the record's native animation set to follow the flight direction.
   - Effects-SDK ribbon trail for the main projectile: colour, core/glow width, length, sample rate and fade, emitted as `wf-lib/effects/trail` (`dependencies = ["effects.sdk"]`), with the choice of trailing only the main round or a whole cluster burst.
+  - Effects-SDK explosion burst: Project X's electric-style ring + squashed lens (`wf-lib/effects/px_effects`), either drawn on top of WA's blast or replacing it with the SDK's damage/push/crater/sound (`custom_explosion`), with a 50 Hz preview.
+  - Bundle Code page lists the `mod.toml` dependencies the features add automatically and lets you add extra SDK/mod ids (`effects.sdk`, `wf.sdk`, or your own).
 - **Desktop Application (Tauri v2)**:
   - Native Windows desktop application with system menus, file dialogs, and native performance.
 
@@ -53,7 +55,7 @@ bun run dev
 # 3. Build for production (web / dist)
 bun run build
 
-# 4. Dev only: generate the in-game behaviour test pack (20 weapons + profile)
+# 4. Dev only: generate the in-game behaviour test pack (22 weapons + profile)
 bun run tools/gen_test_pack.ts
 ```
 

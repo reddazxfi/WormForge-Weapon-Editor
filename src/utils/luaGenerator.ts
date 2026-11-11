@@ -140,6 +140,159 @@ export function packArtPath(project: WeaponProject, slot: PackArtSlot): string |
   return `sprites/${sanitizeModFolder(project.id)}/${PACK_ART_STEM[slot]}.${extension}`;
 }
 
+/**
+ * Safe, high-performance O(N) parser to extract `on_explode` from custom Lua snippets.
+ * Guaranteed never to stall or hang the main thread (zero ReDoS, bounded iterations).
+ */
+export interface ParsedCustomLua {
+  paramName: string;
+  onExplodeBody: string;
+  remainingSnippet: string;
+  hasOnExplode: boolean;
+}
+
+export function parseCustomLua(snippet: string): ParsedCustomLua {
+  if (!snippet || !snippet.trim() || snippet.length > 200_000) {
+    return { paramName: 'ev', onExplodeBody: '', remainingSnippet: snippet || '', hasOnExplode: false };
+  }
+
+  // Fast check before doing regex
+  if (snippet.indexOf('on_explode') === -1) {
+    return { paramName: 'ev', onExplodeBody: '', remainingSnippet: snippet, hasOnExplode: false };
+  }
+
+  // Locate on_explode =
+  const declMatch = snippet.match(/(?:^|\n)[ \t]*on_explode\s*=/);
+  if (!declMatch || declMatch.index === undefined) {
+    return { paramName: 'ev', onExplodeBody: '', remainingSnippet: snippet, hasOnExplode: false };
+  }
+
+  const matchStart = declMatch.index + (declMatch[0].startsWith('\n') ? 1 : 0);
+  const afterEquals = matchStart + declMatch[0].length - (declMatch[0].startsWith('\n') ? 1 : 0);
+  const rest = snippet.slice(afterEquals);
+
+  // Look for either function(param) or { ... on = function(param)
+  const fnMatch = rest.match(/^[ \t]*(?:\{[ \t\r\n]*(?:[a-zA-Z0-9_]+[ \t]*=[ \t]*[^,]+,[ \t\r\n]*)*\bon[ \t]*=[ \t]*)?function[ \t]*\([ \t]*([a-zA-Z0-9_]*)[ \t]*\)/);
+  if (!fnMatch) {
+    return { paramName: 'ev', onExplodeBody: '', remainingSnippet: snippet, hasOnExplode: true };
+  }
+
+  const isTable = rest.trimStart().startsWith('{');
+  const paramName = fnMatch[1] || 'ev';
+  const fnBodyStart = afterEquals + fnMatch[0].length;
+
+  // Scan forward for matching `end` using linear token search with max 5000 iterations
+  const searchSlice = snippet.slice(fnBodyStart);
+  const tokenRegex = /\b(function|if|for|while|end)\b/g;
+  let depth = 1;
+  let fnBodyEnd = -1;
+  let iterations = 0;
+  let m: RegExpExecArray | null;
+
+  while ((m = tokenRegex.exec(searchSlice)) !== null && iterations < 5000) {
+    iterations += 1;
+    if (m[1] === 'end') {
+      depth -= 1;
+      if (depth === 0) {
+        fnBodyEnd = fnBodyStart + m.index;
+        break;
+      }
+    } else {
+      depth += 1;
+    }
+  }
+
+  if (fnBodyEnd === -1) {
+    fnBodyEnd = snippet.length;
+  }
+
+  const onExplodeBody = snippet.slice(fnBodyStart, fnBodyEnd).trim();
+
+  // Find the end of the entire on_explode statement
+  let stmtEnd = fnBodyEnd + 3; // past 'end'
+  const afterEnd = snippet.slice(stmtEnd);
+
+  if (isTable) {
+    const braceIdx = afterEnd.indexOf('}');
+    if (braceIdx !== -1 && braceIdx < 100) {
+      stmtEnd += braceIdx + 1;
+    }
+  }
+
+  // Skip trailing whitespace or comma
+  while (stmtEnd < snippet.length && /[ \t\r\n,]/.test(snippet[stmtEnd])) {
+    const ch = snippet[stmtEnd];
+    stmtEnd += 1;
+    if (ch === ',') break;
+  }
+
+  const before = snippet.slice(0, matchStart).trim();
+  const after = snippet.slice(stmtEnd).trim();
+  const remainingSnippet = [before, after].filter(Boolean).join('\n');
+
+  return {
+    paramName,
+    onExplodeBody,
+    remainingSnippet,
+    hasOnExplode: true,
+  };
+}
+
+export function reindentCode(code: string, targetIndent: string): string[] {
+  const lines = code.split('\n');
+  if (lines.length === 0) return [];
+  if (lines.length === 1) return [`${targetIndent}${lines[0].trim()}`];
+
+  let subIndent = Infinity;
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    const match = line.match(/^[ \t]*/);
+    const len = match ? match[0].length : 0;
+    if (len < subIndent) subIndent = len;
+  }
+
+  if (!lines[0].startsWith(' ') && subIndent !== Infinity && subIndent > 0) {
+    return lines.map((line, idx) => {
+      if (!line.trim()) return '';
+      if (idx === 0) return `${targetIndent}${line.trim()}`;
+      return `${targetIndent}${line.slice(subIndent)}`;
+    });
+  }
+
+  let minIndent = Infinity;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const match = line.match(/^[ \t]*/);
+    const len = match ? match[0].length : 0;
+    if (len < minIndent) minIndent = len;
+  }
+  if (minIndent === Infinity) minIndent = 0;
+
+  return lines.map((line) => {
+    if (!line.trim()) return '';
+    return `${targetIndent}${line.slice(minIndent)}`;
+  });
+}
+
+/**
+ * Bundle path of an uploaded custom WAV, or null when the role is off or has no
+ * file. Rebuilt from the current weapon id on every export (like `packArtPath`),
+ * so a rename cannot leave a stale `sounds/<old id>/...` path. The engine loads
+ * it from the claim's `sounds` list as `sounds/<mod>/<role>.wav`.
+ */
+export function customSoundPath(
+  project: WeaponProject,
+  role: 'explosion' | 'interval',
+): string | null {
+  const sounds = project.customSounds;
+  if (!sounds) return null;
+  const enabled = role === 'explosion' ? sounds.explosionEnabled : sounds.intervalEnabled;
+  const asset = role === 'explosion' ? sounds.explosion : sounds.interval;
+  if (!enabled || !asset?.file) return null;
+  return `sounds/${sanitizeModFolder(project.id)}/${role}.wav`;
+}
+
 /** A safe `.wep` filename for the exported bundle. */
 export function sanitizeWepFileName(name: string): string {
   const base = (name || 'weapon.wep').replace(/\\/g, '/').split('/').pop() || 'weapon.wep';
@@ -171,6 +324,38 @@ export function generateLuaCode(project: WeaponProject): string {
   const usesHold = project.hold && project.hold.enabled;
   const missileSpriteEnabled = !!project.missileSprite?.enabled;
   const usesMissileSprite = missileSpriteEnabled && project.missileSprite.mode === 'custom';
+
+  // Which record families WA blasts at all: a gun, arrow, spray or special has
+  // no explosion to decorate, and neither does an air strike. A strike's bombs
+  // are built by AirStrikeEntity::release_missile from the strike's own record
+  // copy, not from a weapon-table slot, so the engine never maps them to this
+  // claim (`missile_boom::weapon_of` has no slot for them) and `on_explode`
+  // cannot fire. A mine is a drop without a fuse; the rest are missiles.
+  const explodesNatively = project.fireType === 'power' || project.fireType === 'drop';
+
+  // Parse custom Lua callbacks to extract any `on_explode` hook.
+  // This allows custom Lua logic, custom explosion WAV sound, and the effects-SDK
+  // explosion burst to merge seamlessly into a single `on_explode` hook.
+  const parsedLua = project.enableCustomLua && project.customLuaSnippet
+    ? parseCustomLua(project.customLuaSnippet)
+    : { paramName: 'ev', onExplodeBody: '', remainingSnippet: project.customLuaSnippet || '', hasOnExplode: false };
+
+  // The effects SDK's px_effects burst: the electric ring + lens, an optional
+  // PX-style blast replacement, and the smoke and re-buffer passes.
+  const explosionEffect = project.explosionEffect;
+  const usesExplosionEffect = !!explosionEffect?.enabled && explodesNatively;
+  // Replacing WA's blast needs the claim to own the blast, which a missile and
+  // a mine do; the custom explosion supplies damage, push, crater and sound.
+  const silencesBlast = usesExplosionEffect && explosionEffect!.mode === 'blast';
+  // Uploaded WAVs.
+  const customSounds = project.customSounds;
+  const explosionSoundPath = customSoundPath(project, 'explosion');
+  const intervalSoundPath = customSoundPath(project, 'interval');
+  const usesExplosionSound = !!explosionSoundPath && explodesNatively;
+  const usesIntervalSound =
+    !!intervalSoundPath &&
+    (project.fireType === 'power' || (project.fireType === 'drop' && !!project.body.fuse));
+  const hasCustomExplodeCode = project.enableCustomLua && !!parsedLua.onExplodeBody.trim();
   // The effects SDK's ribbon trail follows a missile WA builds from this
   // record, so it only applies to the missile families (a strike's bombs are
   // not one: their `m.weapon` is nil).
@@ -188,7 +373,17 @@ export function generateLuaCode(project: WeaponProject): string {
   if (usesRibbonTrail) {
     lines.push('local trail = require("wf-lib/effects/trail")');
   }
-  if (usesHold || usesMissileSprite || usesRibbonTrail) {
+  if (usesExplosionEffect) {
+    lines.push('local fx = require("wf-lib/effects/px_effects")');
+    if (!usesRibbonTrail) {
+      // px_effects falls back to the trail module's beam and glow sheets.
+      lines.push('local trail = require("wf-lib/effects/trail")');
+    }
+    if (silencesBlast) {
+      lines.push('local blast = require("wf-lib/effects/custom_explosion")');
+    }
+  }
+  if (usesHold || usesMissileSprite || usesRibbonTrail || usesExplosionEffect) {
     lines.push('');
   }
 
@@ -219,6 +414,12 @@ export function generateLuaCode(project: WeaponProject): string {
 
   // Install function
   lines.push('  install = function(ctx)');
+  if (usesExplosionEffect) {
+    // px_effects draws through a hidden driver actor, so it has to be installed
+    // before a round can explode; `trail = true` also installs the ribbon
+    // module the trail block below samples with.
+    lines.push(`    fx.install{ trail = ${usesRibbonTrail ? 'true' : 'false'} }`);
+  }
   lines.push('    wa.weapons.replace{');
   lines.push(`      name = ${luaQuote(project.name)},`);
   const wepPath = wepBundlePath(project);
@@ -276,8 +477,24 @@ export function generateLuaCode(project: WeaponProject): string {
   if (usesRibbonTrail) {
     packSprites.push('trail.BEAM', 'trail.GLOW');
   }
+  if (usesExplosionEffect) {
+    // The burst draws with the same beam/glow pair and, when enabled, the
+    // cloud sheet. Listing the module fields registers the pack paths for this
+    // claim, exactly as the electric mine does.
+    if (!usesRibbonTrail) packSprites.push('trail.BEAM', 'trail.GLOW');
+    if (explosionEffect!.smoke) packSprites.push('fx.SMOKE');
+  }
   if (packSprites.length > 0) {
     lines.push(`      sprites = { ${packSprites.join(', ')} },`);
+  }
+
+  // Pack WAVs are declared by path in `sounds`; the engine loads them into
+  // WormForge's own sample bank (WA's record sound fields take native ids).
+  const packSounds: string[] = [];
+  if (usesExplosionSound) packSounds.push(luaQuote(explosionSoundPath!));
+  if (usesIntervalSound) packSounds.push(luaQuote(intervalSoundPath!));
+  if (packSounds.length > 0) {
+    lines.push(`      sounds = { ${packSounds.join(', ')} },`);
   }
 
   // Fire type specific properties
@@ -387,6 +604,7 @@ export function generateLuaCode(project: WeaponProject): string {
     }
   } else if (project.fireType === 'drop' && !body.fuse) {
     const mineTouched =
+      silencesBlast ||
       !baseline ||
       bodyChanged('proximity') ||
       bodyChanged('arm_delay_ms') ||
@@ -409,19 +627,25 @@ export function generateLuaCode(project: WeaponProject): string {
       const mineExplosionBias = override('mine.explosion.bias');
       const mineExplosionPush = override('mine.explosion.push_pct');
       if (
+        silencesBlast ||
         !baseline ||
         bodyChanged('damage') ||
         mineExplosionBias !== undefined ||
         mineExplosionPush !== undefined
       ) {
         lines.push('        explosion = {');
-        if (!baseline || bodyChanged('damage')) {
+        if (silencesBlast) {
+          // The custom explosion in `on_explode` replaces the mine's own blast
+          // (the electric mine silences it the same way).
+          lines.push('          power = 0,');
+          lines.push('          push_pct = 0,');
+        } else if (!baseline || bodyChanged('damage')) {
           lines.push(`          power = ${body.damage ?? 50},`);
         }
-        if (mineExplosionBias !== undefined) {
+        if (!silencesBlast && mineExplosionBias !== undefined) {
           lines.push(`          bias = ${mineExplosionBias},`);
         }
-        if (mineExplosionPush !== undefined) {
+        if (!silencesBlast && mineExplosionPush !== undefined) {
           lines.push(`          push_pct = ${mineExplosionPush},`);
         }
         lines.push('        },');
@@ -456,11 +680,19 @@ export function generateLuaCode(project: WeaponProject): string {
       powerChanged ||
       pushPct !== undefined ||
       explosionBias !== undefined ||
-      explosionVariation !== undefined
+      explosionVariation !== undefined ||
+      silencesBlast
     ) {
       lines.push('        explosion = {');
-      if (powerChanged) lines.push(`          power = ${body.damage},`);
-      if (pushPct !== undefined) lines.push(`          push_pct = ${pushPct},`);
+      if (silencesBlast) {
+        // The custom explosion in `on_explode` does the damage, push and
+        // crater; a power here would blast a second time.
+        lines.push('          power = 0,');
+        lines.push('          push_pct = 0,');
+      } else if (powerChanged) lines.push(`          power = ${body.damage},`);
+      if (!silencesBlast && pushPct !== undefined) {
+        lines.push(`          push_pct = ${pushPct},`);
+      }
       if (explosionBias !== undefined) lines.push(`          bias = ${explosionBias},`);
       if (explosionVariation !== undefined) {
         lines.push(`          variation = ${explosionVariation},`);
@@ -1421,14 +1653,121 @@ export function generateLuaCode(project: WeaponProject): string {
   }
 
   // Custom Lua callback (only when checkbox is explicitly enabled)
-  if (project.enableCustomLua && project.customLuaSnippet && project.customLuaSnippet.trim()) {
+  if (project.enableCustomLua && parsedLua.remainingSnippet && parsedLua.remainingSnippet.trim()) {
     lines.push('      -- Custom weapon callbacks');
     lines.push(
-      project.customLuaSnippet
+      parsedLua.remainingSnippet
         .split('\n')
         .map((l) => (l ? `      ${l}` : ''))
         .join('\n')
     );
+  }
+
+  // Unified explosion hook: merges effects-SDK burst, custom WAV, and custom Lua logic.
+  // The claim's `on_explode` runs before WA's own blast, which is the frame PX draws on:
+  // `effect` mode leaves the native blast alone, `blast` mode has already
+  // silenced it in the record above, so the custom explosion does the damage,
+  // push, crater and sound and then draws the same burst.
+  const hasExplodeHook = usesExplosionEffect || usesExplosionSound || hasCustomExplodeCode;
+  if (hasExplodeHook) {
+    const parts = [
+      usesExplosionEffect ? 'effects-SDK burst' : '',
+      usesExplosionSound ? 'custom WAV' : '',
+      hasCustomExplodeCode ? 'custom Lua logic' : '',
+    ].filter(Boolean).join(' + ');
+    lines.push(`      -- Explosion hook: merged ${parts}.`);
+    lines.push('      on_explode = { on = function(ev)');
+    if (usesExplosionSound) {
+      // `ev.worm` is the firing worm; WA needs an entity for a positional
+      // custom voice, and `wa.sound.play` takes its handle.
+      lines.push(
+        `        if ev.worm then wa.sound.play(ev.worm, ${luaQuote(
+          explosionSoundPath!,
+        )}, ${Math.max(0, Math.round(customSounds?.explosionPriority ?? 10))}) end`,
+      );
+    }
+    if (usesExplosionEffect) {
+      const e = explosionEffect!;
+      const { r, g, b } = hexToRgb(e.color);
+      const fxField = (indent: string, name: string, value: string) =>
+        `${indent}${name} = ${value},`;
+      const burstRows = (indent: string): string[] => {
+        const rows = [
+          fxField(indent, 'radius', formatNumber(Math.max(1, e.radius))),
+          `${indent}r = ${r}, g = ${g}, b = ${b},`,
+          fxField(indent, 'thickness', formatNumber(Math.max(0.5, e.thickness))),
+          fxField(indent, 'noise', formatNumber(Math.max(0, e.noise))),
+          fxField(indent, 'duration', String(Math.max(1, Math.round(e.duration)))),
+          fxField(indent, 'fade', formatNumber(e.fade)),
+          fxField(indent, 'grow', formatNumber(Math.max(0, e.grow))),
+          fxField(indent, 'live', String(Math.max(1, Math.round(e.live)))),
+          fxField(
+            indent,
+            'ellipse',
+            `{ ${formatNumber(e.ellipseX)}, ${formatNumber(e.ellipseY)} }`,
+          ),
+        ];
+        if (Math.round(e.segments) > 0) {
+          rows.push(fxField(indent, 'segments', String(Math.round(e.segments))));
+        }
+        // `smoke` is a nested spec: a bare `true` would inherit the preset's
+        // fixed blue numbers, so hand it the same colour as the ring.
+        rows.push(
+          e.smoke
+            ? `${indent}smoke = { count = 7, kinds = 2, r = ${r}, g = ${g}, b = ${b} },`
+            : `${indent}smoke = false,`,
+        );
+        // PX's BufferChange re-noise and recolour at frame 16 (fade -0.85).
+        rows.push(
+          e.rebuffer
+            ? `${indent}rebuffer = { at = 16, noise = ${formatNumber(
+                Math.max(1.8, e.noise * 1.6),
+              )}, r = ${r}, g = ${g}, b = ${b}, fade = -0.85 },`
+            : `${indent}rebuffer = false,`,
+        );
+        return rows;
+      };
+
+      if (e.mode === 'blast') {
+        const blastRows = [
+          '          x = ev.x, y = ev.y, owner = ev.worm,',
+          fxField('          ', 'damage', formatNumber(Math.max(0, Math.round(e.damage)))),
+          fxField('          ', 'push', formatNumber(Math.max(0, Math.round(e.push)))),
+        ];
+        const hole = Math.max(0, Math.round(e.hole));
+        if (hole > 0) {
+          blastRows.push(fxField('          ', 'hole', String(hole)));
+        } else {
+          blastRows.push('          destroy = false,');
+        }
+        // PX's own default is a random 69-71 blast; `sound = true` asks for it.
+        // A pack WAV already covers the blast, so the native one stays off.
+        if (!usesExplosionSound) {
+          if (e.sound === 'default') blastRows.push('          sound = true,');
+          else if (typeof e.sound === 'number') blastRows.push(`          sound = ${e.sound},`);
+        }
+        lines.push('        blast.explode{');
+        for (const row of blastRows) lines.push(row);
+        lines.push('          effect = {');
+        for (const row of burstRows('            ')) lines.push(row);
+        lines.push('          },');
+        lines.push('        }');
+      } else {
+        lines.push('        fx.burst{');
+        lines.push('          x = ev.x, y = ev.y,');
+        for (const row of burstRows('          ')) lines.push(row);
+        lines.push('        }');
+      }
+    }
+    if (hasCustomExplodeCode) {
+      if (parsedLua.paramName !== 'ev') {
+        lines.push(`        local ${parsedLua.paramName} = ev`);
+      }
+      for (const line of reindentCode(parsedLua.onExplodeBody, '        ')) {
+        lines.push(line);
+      }
+    }
+    lines.push('      end },');
   }
 
   lines.push('    }');
@@ -1445,7 +1784,8 @@ export function generateLuaCode(project: WeaponProject): string {
     const max = Math.max(2, Math.round(t.max));
     const every = Math.max(1, Math.round(t.every));
     const vanish = Math.max(1, Math.round(t.vanish));
-    lines.push('    trail.install()');
+    // An exploding bundle already installed the SDK (fx.install runs trail.install).
+    if (!usesExplosionEffect) lines.push('    trail.install()');
     lines.push('    local TRAIL = {');
     lines.push(`      max = ${max}, every = ${every}, vanish = ${vanish},`);
     lines.push(`      core_w = ${formatNumber(Math.max(0, t.coreWidth))},`);
@@ -1487,6 +1827,48 @@ export function generateLuaCode(project: WeaponProject): string {
     } else {
       lines.push('      trail.add(m.id, trail_worm(), TRAIL)');
     }
+    lines.push('    end)');
+    lines.push('');
+  }
+
+  // A pack WAV on a fixed interval while the round flies. `wa.on.missile_frame`
+  // has no owner handle, so the voice rides the firing worm (whose turn it is,
+  // else any living worm): WA's positional sound needs a game entity, and a
+  // missile is not one Lua can name. Stored by `m.id` (an array, never
+  // `pairs`), because the order must match on every peer.
+  if (usesIntervalSound) {
+    const s = customSounds!;
+    // WA's game frame is 20 ms; the module ticks on the `pre` frame.
+    const every = Math.max(1, Math.round(s.intervalMs / 20));
+    const delay = Math.max(0, Math.round(s.intervalDelayMs / 20));
+    const limit = Math.max(0, Math.round(s.intervalLimit));
+    lines.push('    local SOUND = {');
+    lines.push(`      path = ${luaQuote(intervalSoundPath!)},`);
+    lines.push(
+      `      every = ${every}, delay = ${delay}, limit = ${limit}, priority = ${Math.max(
+        0,
+        Math.round(s.intervalPriority),
+      )},`,
+    );
+    lines.push('    }');
+    lines.push('    local sound_ticks = {}');
+    lines.push('    local function sound_worm()');
+    lines.push('      local first');
+    lines.push('      for _, w in ipairs(wa.worms.all()) do');
+    lines.push('        if w.turn then return w end');
+    lines.push('        if not first and w.hp > 0 then first = w end');
+    lines.push('      end');
+    lines.push('      return first');
+    lines.push('    end');
+    lines.push('    wa.on.missile_frame(function(m)');
+    lines.push('      if m.weapon ~= ctx.id or m.phase ~= "pre" then return end');
+    lines.push('      local t = (sound_ticks[m.id] or 0) + 1');
+    lines.push('      sound_ticks[m.id] = t');
+    lines.push('      local n = t - SOUND.delay - 1');
+    lines.push('      if n < 0 or n % SOUND.every ~= 0 then return end');
+    lines.push('      if SOUND.limit > 0 and n / SOUND.every >= SOUND.limit then return end');
+    lines.push('      local w = sound_worm()');
+    lines.push('      if w then wa.sound.play(w, SOUND.path, SOUND.priority) end');
     lines.push('    end)');
     lines.push('');
   }
@@ -1541,6 +1923,12 @@ export function generateModToml(project: WeaponProject): string {
   const usesRibbonTrail =
     !!project.ribbonTrail?.enabled &&
     (project.fireType === 'power' || (project.fireType === 'drop' && project.body.fuse));
+  // The explosion burst is px_effects, and the optional blast replacement is
+  // custom_explosion: both live in the effects SDK. Air strikes are excluded:
+  // their bombs have no weapon slot, so the claim hook cannot run.
+  const explodesNatively = project.fireType === 'power' || project.fireType === 'drop';
+  const usesExplosionEffect =
+    !!project.explosionEffect?.enabled && explodesNatively;
 
   const lines: string[] = [
     `id = ${luaQuote(project.id)}`,
@@ -1553,7 +1941,13 @@ export function generateModToml(project: WeaponProject): string {
 
   const dependencies: string[] = [];
   if (usesSdk) dependencies.push('wf.sdk');
-  if (usesRibbonTrail) dependencies.push('effects.sdk');
+  if (usesRibbonTrail || usesExplosionEffect) dependencies.push('effects.sdk');
+  // Extra library bundles the author asked for (they may be used from the
+  // custom Lua snippet, or by a component this editor does not model).
+  for (const dependency of project.extraDependencies || []) {
+    const id = (dependency || '').trim();
+    if (id && !dependencies.includes(id)) dependencies.push(id);
+  }
   if (dependencies.length > 0) {
     lines.push(`dependencies = [${dependencies.map(luaQuote).join(', ')}]`);
   }

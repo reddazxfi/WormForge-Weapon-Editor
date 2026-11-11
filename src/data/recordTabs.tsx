@@ -20,6 +20,7 @@ export type RecordTabId =
   | 'collisions'
   | 'callbacks'
   | 'gun_mine'
+  | 'effects'
   | 'burst_bit'
   | 'burst_bit_collision'
   | 'burst_bit_bounce'
@@ -49,6 +50,7 @@ export const RECORD_TABS: RecordTabDef[] = [
   { id: 'burst_bit_roam', label: 'Bit Roam', hint: 'Walk, jumps, gas, targets', icon: Zap, parent: 'burst' },
   { id: 'burst_bit_dig', label: 'Bit Dig', hint: 'Sound and digging frames', icon: Sliders, parent: 'burst' },
   { id: 'sprite', label: 'Indices & Trail', hint: 'Sprite, trail, sounds', icon: Sliders },
+  { id: 'effects', label: 'Effects', hint: 'Ribbon trail, explosion burst', icon: Sparkles },
   { id: 'advanced', label: 'Advanced', hint: 'Explosion, collision, motion', icon: Layers },
   {
     id: 'collisions',

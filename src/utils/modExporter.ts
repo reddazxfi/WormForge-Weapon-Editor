@@ -4,6 +4,7 @@ import {
   generateLuaCode,
   generateModToml,
   generateProfileToml,
+  customSoundPath,
   packArtPath,
   PACK_ART_SLOTS,
   sanitizeModFolder,
@@ -75,6 +76,16 @@ export async function exportModZip(project: WeaponProject): Promise<Blob> {
     const asset = project.packArt?.[slot];
     const path = packArtPath(project, slot);
     if (asset?.file && path) {
+      zip.file(`${modFolder}/${path}`, asset.file);
+    }
+  }
+
+  // Custom WAVs the claim plays by path. The Lua's `sounds` list and the file
+  // written here are one contract: a declared path must exist at load.
+  for (const role of ['explosion', 'interval'] as const) {
+    const path = customSoundPath(project, role);
+    const asset = role === 'explosion' ? project.customSounds?.explosion : project.customSounds?.interval;
+    if (path && asset?.file) {
       zip.file(`${modFolder}/${path}`, asset.file);
     }
   }

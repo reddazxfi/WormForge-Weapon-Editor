@@ -1,7 +1,7 @@
 /**
  * Dev-only test pack generator.
  *
- * Writes one WormForge bundle with 20 weapon components plus a profile that
+ * Writes one WormForge bundle with one component per test plus a profile that
  * places all of them, so an engine behaviour can be checked in one match.
  * Every sheet is derived from `spec/default_grenade.png`:
  *
@@ -25,6 +25,8 @@ import { fileURLToPath } from 'node:url';
 import { deflateSync, inflateSync } from 'node:zlib';
 import { WeaponProject, PackArtSlot } from '../src/types/weapon';
 import { generateLuaCode, packArtPath, sanitizeModFolder } from '../src/utils/luaGenerator';
+import { DEFAULT_EXPLOSION_EFFECT, EXPLOSION_PRESETS } from '../src/data/explosionPresets';
+import { DEFAULT_CUSTOM_SOUNDS } from '../src/data/soundPresets';
 import { getStockPanelPosition } from '../src/data/stockWeapons';
 
 // ---------------------------------------------------------------------------
@@ -214,6 +216,49 @@ function art(slot: PackArtSlot, bytes: Buffer, frames: number) {
   };
 }
 
+/**
+ * A short mono 16-bit PCM tone, so the test pack ships real WAVs for
+ * `sounds = {...}` / `wa.sound.play`. `fade` ramps the edges to avoid clicks.
+ */
+function wavTone(freq: number, ms: number, volume = 0.35): Buffer {
+  const rate = 22050;
+  const samples = Math.max(1, Math.round((rate * ms) / 1000));
+  const data = Buffer.alloc(samples * 2);
+  const ramp = Math.min(240, Math.floor(samples / 4));
+  for (let i = 0; i < samples; i += 1) {
+    const edge = Math.min(1, (i + 1) / ramp, (samples - i) / ramp);
+    const sample = Math.sin((2 * Math.PI * freq * i) / rate) * volume * edge;
+    data.writeInt16LE(Math.round(sample * 32767), i * 2);
+  }
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0, 'ascii');
+  header.writeUInt32LE(36 + data.length, 4);
+  header.write('WAVE', 8, 'ascii');
+  header.write('fmt ', 12, 'ascii');
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(1, 22); // mono
+  header.writeUInt32LE(rate, 24);
+  header.writeUInt32LE(rate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36, 'ascii');
+  header.writeUInt32LE(data.length, 40);
+  return Buffer.concat([header, data]);
+}
+
+const EXPLOSION_WAV = wavTone(180, 420);
+const INTERVAL_WAV = wavTone(880, 70);
+
+function soundAsset(bytes: Buffer, name: string) {
+  return {
+    file: new File([new Uint8Array(bytes)], name, { type: 'audio/wav' }),
+    fileName: name,
+    previewUrl: '',
+    size: bytes.length,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Project factory.
 // ---------------------------------------------------------------------------
@@ -298,6 +343,8 @@ function makeOp(partial: {
   overrides?: Record<string, any>;
   missileSprite?: Partial<WeaponProject['missileSprite']>;
   trailer?: Partial<typeof DEFAULTS.ribbon>;
+  explosion?: Partial<WeaponProject['explosionEffect']>;
+  customSounds?: Partial<WeaponProject['customSounds']>;
   roam?: Partial<typeof DEFAULTS.roam>;
   fire?: Partial<WeaponProject['fireConfig']>;
   packArt?: Partial<WeaponProject['packArt']>;
@@ -368,6 +415,9 @@ function makeOp(partial: {
       ...partial.fire,
     },
     ribbonTrail: { ...DEFAULTS.ribbon, ...partial.trailer },
+    explosionEffect: { ...DEFAULT_EXPLOSION_EFFECT, ...partial.explosion },
+    customSounds: { ...DEFAULT_CUSTOM_SOUNDS, ...partial.customSounds },
+    extraDependencies: [],
     hold: {
       enabled: false,
       sheet: '',
@@ -689,6 +739,53 @@ const TESTS: TestCase[] = [
     expect: 'A spinning grenade sheet homes and dodges; the sprite follows every turn.',
     watch: 'Follower lagging or detaching on sharp turns.',
   },
+  {
+    project: makeOp({
+      id: 'wftest.21_explosion_blast',
+      name: 'WF 21 Explosion Blast',
+      slot: 'bazooka',
+      body: { sprite: 'grenade', damage: 45 },
+      explosion: { enabled: true, mode: 'blast', preset: 'electric', sound: 'default' },
+    }),
+    intent: 'Effects-SDK custom explosion replacing WA blast (electric ring + squashed lens).',
+    expect: 'The rocket leaves WA damage/knockback to the SDK: one blue ring + lens, smoke, and the terrain crater; blast sound plays.',
+    watch: 'A second native blast (power not zeroed), no burst, or the ring not re-noising at frame 16.',
+  },
+  {
+    project: makeOp({
+      id: 'wftest.22_explosion_overlay',
+      name: 'WF 22 Explosion Overlay',
+      slot: 'mine',
+      fireType: 'drop',
+      body: { sprite: 'mine', damage: 45, fuse: false, proximity: 25, arm_delay_ms: 1000, trigger_delay_ms: 2000 },
+      explosion: { enabled: true, mode: 'effect', preset: 'pyro', ...EXPLOSION_PRESETS.pyro.patch },
+    }),
+    intent: 'Mine keeps its ordinary blast and draws the Pyro blue burst on top of it.',
+    expect: 'The mine still damages, pushes and craters as a stock mine; a round blue ring appears at the same point.',
+    watch: 'No damage (native blast silenced in effect mode), no burst, or a burst only where the mine was placed.',
+  },
+  {
+    project: makeOp({
+      id: 'wftest.23_custom_sounds',
+      name: 'WF 23 Custom Sounds',
+      slot: 'grenade',
+      body: { sprite: 'grenade', fuse: true, fuse_time_ms: 5000 },
+      customSounds: {
+        explosionEnabled: true,
+        explosion: soundAsset(EXPLOSION_WAV, 'explosion.wav'),
+        explosionPriority: 10,
+        intervalEnabled: true,
+        interval: soundAsset(INTERVAL_WAV, 'interval.wav'),
+        intervalMs: 500,
+        intervalDelayMs: 500,
+        intervalLimit: 4,
+        intervalPriority: 8,
+      },
+    }),
+    intent: 'Uploaded WAVs: a low blast tone from `on_explode`, and a tick every 500 ms (4 times) while the grenade flies.',
+    expect: 'A short low tone at the blast and four high ticks, the first half a second after the throw, then silence.',
+    watch: 'Silence (a path not declared in `sounds`), a stock WA sound instead, or ticks that never stop.',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -710,6 +807,7 @@ const spriteDecls = new Map<string, { frames: number; fps: number; play: string 
 const usedSheets = new Set<string>();
 let usesBuilders = false;
 let usesRibbon = false;
+let usesExplosion = false;
 
 for (const test of TESTS) {
   const project = test.project;
@@ -749,7 +847,24 @@ for (const test of TESTS) {
     usedSheets.add(path);
   }
 
+  // Custom WAVs the claim declares in `sounds`. The editor writes these bytes
+  // from the uploaded File; the test pack regenerates the same tones.
+  if (project.customSounds.explosionEnabled && project.customSounds.explosion?.file) {
+    mkdirSync(join(BUNDLE, 'sounds', folder), { recursive: true });
+    writeFileSync(join(BUNDLE, 'sounds', folder, 'explosion.wav'), EXPLOSION_WAV);
+  }
+  if (project.customSounds.intervalEnabled && project.customSounds.interval?.file) {
+    mkdirSync(join(BUNDLE, 'sounds', folder), { recursive: true });
+    writeFileSync(join(BUNDLE, 'sounds', folder, 'interval.wav'), INTERVAL_WAV);
+  }
+
   if (project.ribbonTrail.enabled) usesRibbon = true;
+  if (
+    project.explosionEffect?.enabled &&
+    (project.fireType === 'power' || project.fireType === 'drop')
+  ) {
+    usesExplosion = true;
+  }
 
   const position = getStockPanelPosition(project.slot);
   componentBlocks.push(
@@ -770,7 +885,7 @@ for (const test of TESTS) {
 // mod.toml
 const dependencies: string[] = [];
 if (usesBuilders) dependencies.push('wf.sdk');
-if (usesRibbon) dependencies.push('effects.sdk');
+if (usesRibbon || usesExplosion) dependencies.push('effects.sdk');
 
 const toml: string[] = [
   `id = ${quote(MOD_ID)}`,
@@ -793,7 +908,11 @@ writeFileSync(join(BUNDLE, 'mod.toml'), toml.join('\n'));
 
 // Profile: every test weapon placed, infinite ammo, plus the stock donors and
 // the two always-available utilities.
-const profile: string[] = ['description = "All 20 WormForge behaviour tests in one match."', '', '[weapons]'];
+const profile: string[] = [
+  `description = "All ${TESTS.length} WormForge behaviour tests in one match."`,
+  '',
+  '[weapons]',
+];
 for (const test of TESTS) {
   profile.push(`${quote(test.project.id)} = true`);
   profile.push(`${quote(`stock.${test.project.slot}`)} = true`);
@@ -816,6 +935,9 @@ const readme: string[] = [
   '(32 or 16 frames, frame 0 up, clockwise), and native trail puffs use a 4-frame',
   'rotation strip. Records that cannot draw stock sprite 50 (strike munitions,',
   'cluster bits, claim-level body sheets) carry their own pack sheet.',
+  '',
+  '`WF 23 Custom Sounds` also ships two generated PCM WAVs under `sounds/`,',
+  'declared in its claim\'s `sounds` list and played with `wa.sound.play`.',
   '',
   '| # | Weapon | Slot | Tests | Expected in game |',
   '|---|---|---|---|---|',

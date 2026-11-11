@@ -39,15 +39,19 @@ different project. Do not modify it from this repository.
 │  ├─ components/
 │  │  ├─ Sidebar.tsx           # desktop sidebar + mobile bar
 │  │  ├─ WeaponSettings.tsx    # identity / donor / slot / icon / defaults
-│  │  ├─ RecordEditor.tsx      # the eight record sections
+│  │  ├─ RecordEditor.tsx      # the record sections
 │  │  ├─ HoldPreview.tsx       # hold + flight art builders (canvas)
 │  │  ├─ PackSpriteUpload.tsx  # upload for trail / cluster-bit pack art
+│  │  ├─ EffectsCards.tsx      # ribbon trail + explosion burst cards
+│  │  ├─ ExplosionPreview.tsx  # 50 Hz px_effects burst preview (canvas)
+│  │  ├─ BundleDependencies.tsx # extra mod.toml dependencies panel
 │  │  ├─ WepImportModal.tsx    # .wep drop zone and decode summary
 │  │  ├─ LuaPreviewModal.tsx   # generated Lua / mod.toml / profile
 │  │  └─ ProjectileSimulation.tsx # RETIRED, unused; do not re-enable
 │  ├─ data/
 │  │  ├─ recordTabs.tsx        # section ids/labels/icons shared by nav
 │  │  ├─ recordSchema.ts       # field tables used by the editor
+│  │  ├─ explosionPresets.ts   # PX electric / pyro / ember burst presets
 │  │  └─ stockWeapons.ts       # stock donors, slots, panel positions
 │  ├─ types/weapon.ts          # WeaponProject and all record types
 │  ├─ utils/
@@ -115,6 +119,11 @@ Node 26.x, Vite 8.3.x, React 19.3.x, Tailwind 4.3.x, TypeScript 7.0.x.
   sections unless the payload is clusters and an action entry unless that action
   is selected; `bitActionOf()` is the single bit-action expression. Other tabs
   (Flight, Action, …) stay exclusive — do not mix the two models.
+- The **Effects** section (`effects` in `recordTabs.tsx`) is one page with two
+  cards from `EffectsCards.tsx`: the ribbon trail (moved here from Indices &
+  Trail) and the explosion burst with its `ExplosionPreview` canvas. It shows an
+  empty state for families with no claim-owned round or blast (guns, arrows,
+  sprays, specials, air strikes).
 - `isDark` with `localStorage['wf_theme_v2']`; **light is the default** unless a
   stored value says dark. `index.html` applies the stored class before paint.
 - modals: `.wep` import and the inline bundle-code view.
@@ -234,6 +243,19 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   `all` trails a whole burst. Live trail ids are kept in an array, never with
   `pairs` (wfcheck `lockstep-pairs`). Only missile families get the card: strike
   bombs have no `m.weapon`, so their rounds cannot be matched this way.
+- **Explosion burst (`project.explosionEffect`).** `px_effects`' electric ring +
+  squashed lens, drawn from a claim `on_explode` (the engine emits it before
+  WA's own blast). `effect` mode keeps the native blast; `blast` mode zeroes
+  `missile.explosion.power`/`push_pct` (or `mine.explosion.*`) and lets
+  `custom_explosion.explode` supply damage, push, crater and sound. Emits
+  `require("wf-lib/effects/px_effects")` (+ `custom_explosion` in blast mode),
+  `fx.install{ trail = … }` before the claim, `trail.BEAM`/`trail.GLOW` and
+  `fx.SMOKE` when smoke is on. Applies to `power` and `drop` (missile or mine)
+  only: an **air strike's bombs are built from the strike's own record copy and
+  have no weapon-table slot**, so `missile_boom::weapon_of` cannot map them and
+  `on_explode` never fires. When a custom Lua `on_explode` exists in the snippet,
+  `parseCustomLua` safely extracts its body and merges it with the explosion burst
+  and custom sound into a single `on_explode = { on = function(ev) ... end }` callback.
 - Hold geometry is emitted in PX units:
   `weap_rotation = 1 + degrees/180`, `hand_rotation = 1`,
   `weap_radial_rotation = 1`, `hand_radial_rotation = 1`.
@@ -355,6 +377,10 @@ never declare it without writing the file.
   weapon id on every export (`packArtPath`), so renaming cannot leave a stale
   folder. `packArtPath` returns null for `cluster_homing_sprite` on a strike
   (see `packArtSlotApplies`).
+- `mod.toml` `dependencies` merges the features' own entries (`wf.sdk`,
+  `effects.sdk`) with `project.extraDependencies` (deduped). The Bundle Code
+  page's `BundleDependencies` panel edits that list; no SDK files are copied
+  because WormForge resolves ids from `Mods/` at load.
 
 ---
 
@@ -373,12 +399,13 @@ Test pack for engine behaviour (dev only, output is git-ignored):
 bun run tools/gen_test_pack.ts   # -> test_pack/wftest_pack/ + test_pack/README.md
 ```
 
-It writes one bundle with 20 components, one profile ("WF Test Pack") and all
+It writes one bundle with 22 components, one profile ("WF Test Pack") and all
 art derived from `spec/default_grenade.png` (single frame for the sprite builder,
 32/16-frame rotation strips for bits, a 4-frame strip for native trails). Each
 test carries its intent, expected result and failure symptom in
-`test_pack/README.md`; the profile places them on 20 distinct stock slots with
-infinite ammo.
+`test_pack/README.md`; the profile places them on distinct stock slots with
+infinite ammo. Tests 21/22 cover the explosion burst in `blast` mode (a
+bazooka) and `effect` overlay mode (a mine).
 
 Compiler check (lives in the code-editor repo):
 
@@ -493,6 +520,10 @@ that `vite preview` at `/` hides).
     trail and then overwrote that write with the preset fields). Use
     `updateOverrides(patch)` for multi-key edits. The same staleness applies to
     any `onChange` object built from `project` rather than from previous state.
+20. **A claim `on_explode` needs a weapon-table slot.** Missiles and mines are
+    mapped to their slot by `missile_boom::weapon_of`; an air strike builds its
+    bombs from the strike's own record copy, so the hook never fires for them.
+    Do not offer effects on a `cursor` (strike) record.
 
 ---
 
@@ -523,6 +554,9 @@ Done and validated:
   accessibility pass; Gemini/Antigravity and "API 4.0" copy removed.
 - Default Grenade/Bazooka art used by previews and exports; no dangling sheets.
 - In-game hold FPS conversion (`anim_speed`) and honest UI copy.
+- Effects tab: ribbon trail (moved from Indices & Trail) and the effects-SDK
+  explosion burst with a 50 Hz preview; Bundle Code page lists auto and manual
+  `mod.toml` dependencies.
 - GitHub Pages workflow, `.gitignore`, Pages-subpath smoke test.
 
 Likely next steps:

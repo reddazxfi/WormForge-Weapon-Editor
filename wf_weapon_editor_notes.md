@@ -772,3 +772,81 @@ browser: no bit entries for a plain payload, Bit Behaviour/Collision plus only
 Bit Bounce for a bouncing bit, the page shows behaviour + collision + bounce
 together, clicking Bit Collision scrolls to the grid, and switching the bit
 action to homing swaps the nav entry and the section.
+
+## 2026-11-10 — effects-SDK explosion burst, Effects section and bundle dependencies
+
+The editor could draw a ribbon trail but not the other half of the effects SDK:
+PX's explosion burst (`wf-lib/effects/px_effects`, the electric mine's blast).
+The port lives in `spec/lua_sdk/effects_sdk/libs/px_effects.lua` and the original
+C is `wapx-scipts/utils_red/px_effects.c` (`DrawExplosion`, `DrawEllipse`,
+`BufferChange`); the installed reference is
+`WormForge/Mods/wf-lib/px_electric/weapons/electric_mine.lua`.
+
+### Generator
+
+`project.explosionEffect` (`ExplosionEffectConfig`) emits a claim
+`on_explode` hook:
+
+- `effect` mode keeps WA's blast and calls `fx.burst{ … }` at `ev.x`/`ev.y`.
+- `blast` mode zeroes the record's own blast (`missile.explosion.power` and
+  `push_pct`; `mine.explosion.*` on a mine) and calls
+  `blast.explode{ damage, push, hole, sound, owner = ev.worm, effect = { … } }`.
+  That helper does the falloff blast, crater and burst (the SDK's
+  `custom_explosion`).
+- `fx.install{ trail = <ribbon enabled> }` runs before `wa.weapons.replace`;
+  the claim's `sprites` list `trail.BEAM`, `trail.GLOW` and `fx.SMOKE` when
+  smoke is on. `effects.sdk` is added to `mod.toml`.
+- The burst spec is the module's own fields: `radius`, `r/g/b`, `thickness`,
+  `noise`, `duration`, `fade`, `grow`, `live`, `segments` (0 = radius × 1.2),
+  `ellipse = { x, y }`, `smoke` (a tinted smoke table, or `false`) and
+  `rebuffer` (frame 16, noise ≥ 1.8, fade -0.85).
+- **Families:** `power` and `drop` only. A strike's bombs are built by
+  `AirStrikeEntity::release_missile` from the strike's own record copy, so
+  `missile_boom::weapon_of` has no slot to match and `on_explode` never fires;
+  offering the card on a `cursor` record would lie.
+- **Unified callback merge:** When a custom Lua snippet declares `on_explode`,
+  `parseCustomLua` safely extracts its body while preserving other callbacks (`on_place`,
+  `on_proximity`). The generator merges the custom sound (`wa.sound.play`), the effects-SDK
+  burst (`fx.burst` or `blast.explode`), and the user's custom logic into a single
+  unified `on_explode = { on = function(ev) ... end }` callback. The parser runs in bounded
+  linear time (< 0.01 ms) with strict loop guards to prevent any typing lag or stalls.
+
+### UI
+
+- New **Effects** section (`effects` in `recordTabs.tsx`), one page with the two
+  cards from `EffectsCards.tsx`; the ribbon trail card moved there from Indices
+  & Trail. Families with no claim-owned round/blast get an explanatory empty
+  state.
+- `ExplosionEffectCard` exposes enable, the two modes, the three PX presets,
+  colour, radius/thickness/noise/duration/fade/grow/live/segments/ellipse,
+  smoke and re-buffer; `blast` mode adds damage, push, crater and sound
+  (`default` random 69–71, `none`, or an id). Presets fill the numbers and any
+  manual edit marks the preset `custom`.
+- `ExplosionPreview.tsx` replays the burst at 50 Hz on a canvas with
+  deterministic noise (Park-Miller hash), the frame-16 re-buffer, the outer ring
+  and the squashed lens (four additive ribbon passes) plus the smoke particles.
+  It is an approximation of `wa.draw.ribbon` with the beam/glow sheets, not a
+  pixel copy.
+
+### Bundle dependencies
+
+- `project.extraDependencies` is merged into `mod.toml` `dependencies` after the
+  automatic `wf.sdk`/`effects.sdk` entries (deduped).
+- The Bundle Code page now starts with `BundleDependencies.tsx`: read-only
+  "Required by this bundle" chips (with the feature that caused each), manual
+  ids with remove buttons, a validated input and `effects.sdk`/`wf.sdk`
+  shortcuts. Ids resolve from `Mods/`; nothing is vendored into the ZIP.
+
+### Validation
+
+- `bun run lint`, `bun run build` clean.
+- `tools/gen_test_pack.ts` now writes 22 tests; **21 Explosion Blast** (bazooka,
+  blast mode, electric preset) and **22 Explosion Overlay** (mine, effect mode,
+  pyro preset) cover both paths. `wfcheck --format pretty test_pack/wftest_pack`
+  reports no findings for all 22 Lua files.
+- Playwright: the Effects section renders both cards; enabling + the Electric
+  preset draws on the preview canvas; switching to Replace WA blast reveals the
+  damage/push/crater/sound fields and the generated Lua has `blast.explode`,
+  `power = 0` and `fx.install`; effect mode emits `fx.burst{` and `fx.SMOKE`;
+  the dependency panel lists `effects.sdk` automatically, accepts `px.electric`,
+  and `mod.toml` contains both. The mobile picker lists Effects.

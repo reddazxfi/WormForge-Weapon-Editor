@@ -2,12 +2,31 @@ import React, { useRef } from 'react';
 import { WeaponProject, FireType } from '../types/weapon';
 import { STOCK_WEAPONS, STOCK_BY_ID } from '../data/stockWeapons';
 import { sanitizeWepFileName } from '../utils/luaGenerator';
-import { Image as ImageIcon, Trash2, Info, Sparkles } from 'lucide-react';
+import { Image as ImageIcon, Trash2, Info, Sparkles , HelpCircle } from 'lucide-react';
 
 interface WeaponSettingsProps {
   project: WeaponProject;
   onChange: (updated: Partial<WeaponProject>) => void;
 }
+
+const TooltipLabel: React.FC<{
+  label: string;
+  code?: string;
+  desc?: string;
+  htmlFor?: string;
+}> = ({ label, code, desc, htmlFor }) => (
+  <div className="flex items-center justify-between gap-1 mb-1">
+    <label htmlFor={htmlFor} className="text-xs font-semibold text-stone-700 dark:text-stone-300 truncate cursor-pointer" title={desc}>
+      {label}
+      {code && <span className="ml-1 text-[10px] font-mono text-stone-400 font-normal">({code})</span>}
+    </label>
+    {desc && (
+      <span className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0 transition-colors" title={desc}>
+        <HelpCircle className="w-3.5 h-3.5" />
+      </span>
+    )}
+  </div>
+);
 
 export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChange }) => {
   const iconInputRef = useRef<HTMLInputElement>(null);
@@ -117,10 +136,9 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {/* Name */}
         <div>
-          <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-            Display Name
-          </label>
+          <TooltipLabel label="Display Name" desc="Player-facing name shown in panel & game." htmlFor="ws-display-name" />
           <input
+            id="ws-display-name"
             type="text"
             value={project.name}
             onChange={(e) => onChange({ name: e.target.value })}
@@ -128,15 +146,13 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
             maxLength={40}
             className="w-full px-3 py-2 text-sm bg-stone-50 dark:bg-stone-800/60 border border-stone-300 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-forge-500"
           />
-          <p className="text-[11px] text-stone-400 mt-1">Player-facing name shown in panel & game.</p>
         </div>
 
         {/* Component ID */}
         <div>
-          <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-            Component Unique ID
-          </label>
+          <TooltipLabel label="Component Unique ID" code="id" desc="Rule 1: A weapon is an ID, never a slot number." htmlFor="ws-component-id" />
           <input
+            id="ws-component-id"
             type="text"
             value={project.id}
             onChange={(e) => onChange({ id: e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, '') })}
@@ -144,14 +160,11 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
             maxLength={64}
             className="w-full px-3 py-2 text-sm font-mono bg-stone-50 dark:bg-stone-800/60 border border-stone-300 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-forge-500"
           />
-          <p className="text-[11px] text-stone-400 mt-1">Rule 1: A weapon is an ID, never a slot number.</p>
         </div>
 
         {/* Author */}
         <div>
-          <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-            Author / Credits
-          </label>
+          <TooltipLabel label="Author / Credits" desc="Creator or modding team credit." htmlFor="ws-author" />
           <input
             type="text"
             value={project.author}
@@ -347,9 +360,7 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
 
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <div>
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-400 mb-1">
-              Start Ammo (-1 = ∞)
-            </label>
+            <TooltipLabel label="Start Ammo" code="ammo" desc="Default ammunition count (-1 = infinite)." />
             <input
               type="number"
               value={project.defaults.ammo}
@@ -363,9 +374,7 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
           </div>
 
           <div>
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-400 mb-1">
-              Turn Delay
-            </label>
+            <TooltipLabel label="Turn Delay" code="delay" desc="Number of turns before this weapon unlocks." />
             <input
               type="number"
               min={0}
@@ -380,9 +389,7 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
           </div>
 
           <div>
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-400 mb-1">
-              Crate Drop Chance (%)
-            </label>
+            <TooltipLabel label="Crate Chance" code="chance_pct" desc="Probability of appearing in crate drops (0-100%)." />
             <input
               type="number"
               min={0}
@@ -398,9 +405,7 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
           </div>
 
           <div>
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-400 mb-1">
-              Crate Type
-            </label>
+            <TooltipLabel label="Crate Type" desc="Crate category (Weapon, Utility, Super Weapon)." />
             <select
               value={project.defaults.crateType}
               onChange={(e) =>
@@ -417,9 +422,7 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
           </div>
 
           <div>
-            <label className="block text-[11px] font-semibold text-stone-600 dark:text-stone-400 mb-1">
-              After Use Action
-            </label>
+            <TooltipLabel label="After Use" code="after_use" desc="Action taken after firing (retreat timer, end turn)." />
             <select
               value={project.defaults.afterUse}
               onChange={(e) =>

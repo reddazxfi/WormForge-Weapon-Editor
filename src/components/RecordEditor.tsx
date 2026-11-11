@@ -8,7 +8,6 @@ import {
   ClustletConfig,
   RoamActionConfig,
   DigActionConfig,
-  RibbonTrailConfig,
 } from '../types/weapon';
 import { COLLISION_FLAGS, MISSILE_ANIM_HINT, MISSILE_ANIM_TYPES } from '../data/recordSchema';
 
@@ -94,9 +93,19 @@ import {
   AlertTriangle,
   Volume2,
   Sliders,
+  HelpCircle,
 } from 'lucide-react';
 import { bitActionOf, type RecordTabId } from '../data/recordTabs';
 import { PackSpriteUpload } from './PackSpriteUpload';
+import {
+  CustomSoundsCard,
+  ExplosionEffectCard,
+  RibbonTrailCard,
+  supportsExplosionEffect,
+  supportsExplosionSound,
+  supportsIntervalSound,
+  supportsRibbonTrail,
+} from './EffectsCards';
 
 interface RecordEditorProps {
   project: WeaponProject;
@@ -155,6 +164,30 @@ const DEFAULT_BIT_DIG: DigActionConfig = {
   sprite_2: 0,
   sprite_3: 0,
 };
+
+export const TooltipLabel: React.FC<{
+  label: string;
+  code?: string;
+  desc?: string;
+  htmlFor?: string;
+}> = ({ label, code, desc, htmlFor }) => (
+  <div className="flex items-center justify-between gap-1 mb-1">
+    <label htmlFor={htmlFor} className="text-xs font-semibold text-stone-700 dark:text-stone-300 truncate cursor-pointer" title={desc}>
+      {label}
+      {code && <span className="ml-1 text-[10px] font-mono text-stone-400 font-normal">({code})</span>}
+    </label>
+    {desc && (
+      <span
+        tabIndex={0}
+        role="tooltip"
+        className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0 transition-colors"
+        title={desc}
+      >
+        <HelpCircle className="w-3.5 h-3.5" />
+      </span>
+    )}
+  </div>
+);
 
 export const RecordEditor: React.FC<RecordEditorProps> = ({
   project,
@@ -221,24 +254,16 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
     document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [activeSubTab]);
 
-  // Effects-SDK ribbon trail. Only a missile family has rounds for
-  // `wa.on.missile_frame` to hand the trail module (a strike's bombs have no
-  // weapon id).
-  const canRibbonTrail =
-    project.fireType === 'power' || (project.fireType === 'drop' && body.fuse);
-  const ribbon: RibbonTrailConfig = project.ribbonTrail ?? {
-    enabled: false,
-    max: 12,
-    every: 2,
-    vanish: 2,
-    coreWidth: 8,
-    glowWidth: 13,
-    color: '#ffffff',
-    target: 'main',
-  };
-  const updateRibbon = (patch: Partial<RibbonTrailConfig>) => {
-    onChange({ ribbonTrail: { ...ribbon, ...patch } });
-  };
+  // Effects-SDK cards live on the Effects tab. The ribbon trail needs a missile
+  // round; the explosion burst needs a native blast (missile or mine). Custom
+  // sounds split the same way: a blast sound needs `on_explode`, the interval
+  // needs flight frames. None apply to strikes: their bombs are not fired from
+  // a weapon-table slot.
+  const effectsAvailable =
+    supportsRibbonTrail(project) ||
+    supportsExplosionEffect(project) ||
+    supportsExplosionSound(project) ||
+    supportsIntervalSound(project);
 
   // Two independent selections. `ends_on_contact` stops the projectile;
   // `bounce.hits` only adds targets the bounce action reacts to (the engine
@@ -270,8 +295,17 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
     desc: string,
     opts: { min?: number; max?: number; step?: number; unit?: string } = {}
   ) => (
-    <div className="space-y-1.5">
-      <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">{label}</label>
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-1">
+        <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 truncate" title={desc}>
+          {label}
+        </label>
+        {desc && (
+          <span className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0" title={desc}>
+            <HelpCircle className="w-3.5 h-3.5" />
+          </span>
+        )}
+      </div>
       <div className="relative">
         <input
           type="number"
@@ -286,20 +320,27 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
           <span className="absolute right-3 top-2 text-xs text-stone-400">{opts.unit}</span>
         )}
       </div>
-      <p className="text-[10px] text-stone-400">{desc}</p>
     </div>
   );
 
   const spriteField = (path: string, label: string, fallback: string, desc: string) => (
-    <div className="space-y-1.5">
-      <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">{label}</label>
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-1">
+        <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 truncate" title={desc}>
+          {label}
+        </label>
+        {desc && (
+          <span className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0" title={desc}>
+            <HelpCircle className="w-3.5 h-3.5" />
+          </span>
+        )}
+      </div>
       <input
         type="text"
         value={project.recordOverrides[path] ?? fallback}
         onChange={(e) => updateOverride(path, e.target.value)}
         className="w-full text-xs font-mono px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
       />
-      <p className="text-[10px] text-stone-400">{desc}</p>
     </div>
   );
 
@@ -312,8 +353,17 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
     label: string,
     desc: string
   ) => (
-    <div className="space-y-1.5">
-      <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">{label}</label>
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-1">
+        <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 truncate" title={desc}>
+          {label}
+        </label>
+        {desc && (
+          <span className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0" title={desc}>
+            <HelpCircle className="w-3.5 h-3.5" />
+          </span>
+        )}
+      </div>
       <select
         value={value}
         onChange={(e) => onChangeValue(Number(e.target.value))}
@@ -328,7 +378,6 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
           </option>
         ))}
       </select>
-      <p className="text-[10px] text-stone-400">{desc}</p>
     </div>
   );
 
@@ -863,9 +912,9 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                 Bounce Configuration (`missile.bounce`)
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-xs">
-                    <span className="font-semibold text-stone-700 dark:text-stone-300">Bounciness (`bounciness`)</span>
+                <div className="space-y-1">
+                  <div className="flex justify-between items-center text-xs">
+                    <TooltipLabel label="Bounciness" code="bounciness" desc="0 is standard grenade bounciness; Banana Bomb uses 60." />
                     <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">{body.bounce_pct}</span>
                   </div>
                   <input
@@ -876,12 +925,11 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     onChange={(e) => updateBody({ bounce_pct: Number(e.target.value) })}
                     className="w-full accent-forge-500 cursor-pointer"
                   />
-                  <p className="text-[10px] text-stone-400">0 is standard grenade bounciness; Banana Bomb uses 60.</p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-xs">
-                    <span className="font-semibold text-stone-700 dark:text-stone-300">Terrain Speed Keep (`terrain_keep_speed_pct`)</span>
+                <div className="space-y-1">
+                  <div className="flex justify-between items-center text-xs">
+                    <TooltipLabel label="Terrain Speed Keep" code="terrain_keep_speed_pct" desc="Percentage of momentum preserved when ricocheting off soil." />
                     <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
                       {project.recordOverrides['missile.bounce.terrain_keep_speed_pct'] ?? 75}%
                     </span>
@@ -894,11 +942,10 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     onChange={(e) => updateOverride('missile.bounce.terrain_keep_speed_pct', Number(e.target.value))}
                     className="w-full accent-forge-500 cursor-pointer"
                   />
-                  <p className="text-[10px] text-stone-400">Percentage of momentum preserved when ricocheting off soil.</p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Max Bounces (`max_bounces`)</label>
+                <div className="space-y-1">
+                  <TooltipLabel label="Max Bounces" code="max_bounces" desc="0 leaves normal fuse timing. > 0 detonates on Nth bounce." />
                   <input
                     type="number"
                     min={0}
@@ -907,7 +954,6 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     onChange={(e) => updateOverride('missile.bounce.max_bounces', Number(e.target.value))}
                     className="w-full text-xs font-mono px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
                   />
-                  <p className="text-[10px] text-stone-400">0 leaves normal fuse timing. &gt; 0 detonates on Nth bounce.</p>
                 </div>
 
                 {numField('missile.bounce.sound', 'Bounce Sound (`sound`)', 0, 'Native sound identifier (0 = none).')}
@@ -1267,8 +1313,8 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Emission Angle (`angle`)</label>
+                <div className="space-y-1">
+                  <TooltipLabel label="Emission Angle" code="angle" desc="Native emission angle; preserve special base values." />
                   <div className="relative">
                     <input
                       type="number"
@@ -1278,11 +1324,10 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     />
                     <span className="absolute right-3 top-2 text-xs text-stone-400">native</span>
                   </div>
-                  <p className="text-[10px] text-stone-400">Native emission angle; preserve special base values.</p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Power Variation (`power_variation_pct`)</label>
+                <div className="space-y-1">
+                  <TooltipLabel label="Power Variation" code="power_variation_pct" desc="Random reduction applied to the launch strength." />
                   <div className="relative">
                     <input
                       type="number"
@@ -1294,11 +1339,14 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     />
                     <span className="absolute right-3 top-2 text-xs text-stone-400">%</span>
                   </div>
-                  <p className="text-[10px] text-stone-400">Random reduction applied to the launch strength.</p>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Bit Sprite Run (`bit.sprite_count`)</label>
+                <div className="space-y-1">
+                  <TooltipLabel
+                    label="Bit Sprite Run"
+                    code="bit.sprite_count"
+                    desc="Consecutive sprite ids bits take in turn: bit.sprite + (i-1) % count. Use 1 with uploaded pack sheet."
+                  />
                   <input
                     type="number"
                     min={0}
@@ -1306,11 +1354,6 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     onChange={(e) => updateClustlet({ sprite_count: Number(e.target.value) })}
                     className="w-full text-xs font-mono px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
                   />
-                  <p className="text-[10px] text-stone-400">
-                    How many consecutive sprite ids the bits take in turn: bit i draws
-                    `bit.sprite + (i-1) % count`. This is not a frame count — use 1 with an
-                    uploaded pack sheet, or bit 2+ pulls in the neighbouring WA sprites.
-                  </p>
                 </div>
               </div>
             </div>
@@ -2151,242 +2194,6 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
               </div>
             </div>
 
-            {/* Card: effects-SDK ribbon trail. The stock particle trail above is
-                a record field with a stock sprite; this one is drawn by Lua from
-                sampled positions, so colour and widths are free. */}
-            {canRibbonTrail && (
-              <div className="md:col-span-2 p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-850/40 space-y-4">
-                <div className="flex items-center justify-between border-b border-stone-200 dark:border-stone-700/80 pb-2.5">
-                  <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-forge-500" />
-                    Ribbon Trail (`wf-lib/effects/trail`)
-                  </span>
-                  <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={ribbon.enabled}
-                      onChange={(e) => updateRibbon({ enabled: e.target.checked })}
-                      className="rounded text-forge-600 focus:ring-forge-500 w-3.5 h-3.5"
-                    />
-                    <span className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-                      Enable
-                    </span>
-                  </label>
-                </div>
-
-                <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                  Lua samples the round every {ribbon.every} game frame(s) and the engine
-                  draws a tapering ribbon through those points, so the colour and widths
-                  are yours — the stock particle trail above is a record field with a stock
-                  sprite. Adds the `effects.sdk` library to the bundle.
-                </p>
-
-                <div className="flex flex-wrap gap-1.5 items-center">
-                  <span className="text-[10px] text-stone-400 font-medium mr-1 uppercase">Presets:</span>
-                  {[
-                    {
-                      name: 'PX bullet',
-                      patch: { max: 12, every: 2, vanish: 2, coreWidth: 8, glowWidth: 13, color: '#ffffff' },
-                    },
-                    {
-                      name: 'Thin line',
-                      patch: { max: 8, every: 1, vanish: 2, coreWidth: 3, glowWidth: 6, color: '#ffffff' },
-                    },
-                    {
-                      name: 'Green streak',
-                      patch: { max: 12, every: 1, vanish: 1, coreWidth: 5, glowWidth: 9, color: '#7cff5a' },
-                    },
-                  ].map((preset) => (
-                    <button
-                      key={preset.name}
-                      type="button"
-                      onClick={() => updateRibbon(preset.patch)}
-                      className="px-2 py-1 text-[11px] rounded bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 font-medium transition-colors cursor-pointer"
-                    >
-                      {preset.name}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div className="space-y-1">
-                    <label
-                      htmlFor="ribbon-color"
-                      className="text-xs font-semibold text-stone-700 dark:text-stone-300"
-                    >
-                      Colour (`r`, `g`, `b`)
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="ribbon-color"
-                        type="color"
-                        value={
-                          /^#[0-9a-fA-F]{6}$/.test(ribbon.color) ? ribbon.color : '#ffffff'
-                        }
-                        onChange={(e) => updateRibbon({ color: e.target.value })}
-                        className="h-8 w-10 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 cursor-pointer"
-                      />
-                      <input
-                        type="text"
-                        value={ribbon.color}
-                        onChange={(e) => updateRibbon({ color: e.target.value })}
-                        spellCheck={false}
-                        className="w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label
-                      htmlFor="ribbon-core"
-                      className="text-xs font-semibold text-stone-700 dark:text-stone-300"
-                    >
-                      Core width (`core_w`)
-                    </label>
-                    <div className="relative">
-                      <input
-                        id="ribbon-core"
-                        type="number"
-                        min={0}
-                        max={40}
-                        step={0.5}
-                        value={ribbon.coreWidth}
-                        onChange={(e) => updateRibbon({ coreWidth: Number(e.target.value) })}
-                        className="w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
-                      />
-                      <span className="absolute right-2 top-1.5 text-[10px] text-stone-400">px</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label
-                      htmlFor="ribbon-glow"
-                      className="text-xs font-semibold text-stone-700 dark:text-stone-300"
-                    >
-                      Glow width (`glow_w`)
-                    </label>
-                    <div className="relative">
-                      <input
-                        id="ribbon-glow"
-                        type="number"
-                        min={0}
-                        max={40}
-                        step={0.5}
-                        value={ribbon.glowWidth}
-                        onChange={(e) => updateRibbon({ glowWidth: Number(e.target.value) })}
-                        className="w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
-                      />
-                      <span className="absolute right-2 top-1.5 text-[10px] text-stone-400">px</span>
-                    </div>
-                    <p className="text-[10px] text-stone-400">0 draws the core only.</p>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label
-                      htmlFor="ribbon-max"
-                      className="text-xs font-semibold text-stone-700 dark:text-stone-300"
-                    >
-                      Length (`max`)
-                    </label>
-                    <input
-                      id="ribbon-max"
-                      type="number"
-                      min={2}
-                      max={64}
-                      value={ribbon.max}
-                      onChange={(e) => updateRibbon({ max: Number(e.target.value) })}
-                      className="w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
-                    />
-                    <p className="text-[10px] text-stone-400">Points kept.</p>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label
-                      htmlFor="ribbon-every"
-                      className="text-xs font-semibold text-stone-700 dark:text-stone-300"
-                    >
-                      Sample every (`every`)
-                    </label>
-                    <input
-                      id="ribbon-every"
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={ribbon.every}
-                      onChange={(e) => updateRibbon({ every: Number(e.target.value) })}
-                      className="w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
-                    />
-                    <p className="text-[10px] text-stone-400">Game frames per point.</p>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label
-                      htmlFor="ribbon-vanish"
-                      className="text-xs font-semibold text-stone-700 dark:text-stone-300"
-                    >
-                      Fade (`vanish`)
-                    </label>
-                    <input
-                      id="ribbon-vanish"
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={ribbon.vanish}
-                      onChange={(e) => updateRibbon({ vanish: Number(e.target.value) })}
-                      className="w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
-                    />
-                    <p className="text-[10px] text-stone-400">Frames between shed points.</p>
-                  </div>
-
-                  <div className="space-y-1 col-span-2">
-                    <span className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-                      Attach to
-                    </span>
-                    <div className="grid grid-cols-2 gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-lg border border-stone-200 dark:border-stone-700 text-xs">
-                      {(
-                        [
-                          { id: 'main', label: 'Main round' },
-                          { id: 'all', label: 'Every round + bits' },
-                        ] as const
-                      ).map((option) => (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() => updateRibbon({ target: option.id })}
-                          className={`py-1.5 font-medium rounded-md transition-colors ${
-                            ribbon.target === option.id
-                              ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-bold'
-                              : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-                          }`}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-[10px] text-stone-400">
-                      Main round skips cluster bits (they are born where the parent's
-                      ribbon is still fading). Every round trails a full burst.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <div
-                    aria-hidden="true"
-                    className="h-1.5 w-full rounded-full"
-                    style={{
-                      background: `linear-gradient(90deg, transparent, ${ribbon.color})`,
-                      boxShadow: ribbon.glowWidth > 0 ? `0 0 6px ${ribbon.color}88` : undefined,
-                    }}
-                  />
-                  <p className="text-[10px] text-stone-400">
-                    Ribbon fades toward the tail; widths and colour are emitted as
-                    `TRAIL` in the generated Lua.
-                  </p>
-                </div>
-              </div>
-            )}
-
             {/* Card 3: Native Sound & Sub-Action Indices */}
             <div className="md:col-span-2 p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-850/40 space-y-4">
               <div className="flex items-center justify-between border-b border-stone-200 dark:border-stone-700/80 pb-2.5">
@@ -2475,6 +2282,44 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Tab 5: Effects-SDK trail and explosion burst */}
+      {activeSubTab === 'effects' && (
+        <div className="p-6 space-y-6 animate-in fade-in">
+          <div>
+            <h3 className="font-heading text-sm font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-forge-500" />
+              Effects (`wf-lib/effects`, `wa.sound`)
+            </h3>
+            <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
+              Claim hooks rather than native record fields: the Project X ribbon trail, the
+              electric-style explosion burst, and uploaded WAVs played with `wa.sound.play` — at the
+              blast or on an interval. Their colour, shape, sound and timing are free.
+            </p>
+          </div>
+
+          {effectsAvailable ? (
+            <>
+              <RibbonTrailCard project={project} onChange={onChange} />
+              <ExplosionEffectCard project={project} onChange={onChange} />
+              <CustomSoundsCard project={project} onChange={onChange} />
+            </>
+          ) : (
+            <div className="p-6 rounded-xl border border-dashed border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/20 text-center space-y-2">
+              <Sparkles className="w-8 h-8 text-stone-400 mx-auto" />
+              <div className="text-xs font-semibold text-stone-700 dark:text-stone-300">
+                This record family has no native effect to decorate
+              </div>
+              <p className="text-xs text-stone-500 max-w-xl mx-auto">
+                Guns, arrows, sprays, specials and air strikes do not fire a missile this claim owns,
+                so the ribbon trail, the explosion burst and the sound hooks cannot run. Air-strike
+                bombs are built by the strike entity from its own record copy, which the engine never
+                maps to a weapon slot.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

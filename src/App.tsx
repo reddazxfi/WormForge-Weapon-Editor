@@ -6,8 +6,11 @@ import { RecordEditor } from './components/RecordEditor';
 import { HoldPreview } from './components/HoldPreview';
 import { WepImportModal } from './components/WepImportModal';
 import { LuaPreviewModal } from './components/LuaPreviewModal';
+import { BundleDependencies } from './components/BundleDependencies';
 import { exportModZip, downloadBlob } from './utils/modExporter';
 import { sanitizeModFolder } from './utils/luaGenerator';
+import { DEFAULT_EXPLOSION_EFFECT } from './data/explosionPresets';
+import { DEFAULT_CUSTOM_SOUNDS } from './data/soundPresets';
 import type { RecordTabId } from './data/recordTabs';
 import { CheckCircle2 } from 'lucide-react';
 
@@ -133,6 +136,9 @@ const INITIAL_PROJECT: WeaponProject = {
     color: '#ffffff',
     target: 'main',
   },
+  explosionEffect: { ...DEFAULT_EXPLOSION_EFFECT },
+  customSounds: { ...DEFAULT_CUSTOM_SOUNDS },
+  extraDependencies: [],
   hold: {
     enabled: true,
     sheet: '',
@@ -410,8 +416,11 @@ export default function App() {
           )}
 
           {activeTab === 'code' && (
-            <div className="h-[750px]">
-              <LuaPreviewModal project={project} inline />
+            <div className="space-y-6">
+              <BundleDependencies project={project} onChange={updateProject} />
+              <div className="h-[750px]">
+                <LuaPreviewModal project={project} inline />
+              </div>
             </div>
           )}
         </main>

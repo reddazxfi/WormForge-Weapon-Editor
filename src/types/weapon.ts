@@ -220,6 +220,88 @@ export interface RibbonTrailConfig {
   target: 'main' | 'all';
 }
 
+/**
+ * The effects SDK's `px_effects` burst: PX's electric-explosion ring plus its
+ * squashed lens, drawn for a fixed number of game frames.
+ */
+export type ExplosionPreset = 'electric' | 'pyro' | 'ember';
+
+/**
+ * `effect` keeps WA's own blast and draws the burst on top of it (an `on_explode`
+ * hook); `blast` silences WA's blast and runs the SDK's custom explosion.
+ */
+export type ExplosionMode = 'effect' | 'blast';
+
+/**
+ * A WAV uploaded into the bundle and played by path. WA's record sound fields
+ * take native sample ids only, so a custom sound is declared in the claim's
+ * `sounds` list and played with `wa.sound.play(target, path, priority)`.
+ */
+export interface CustomSoundAsset {
+  file?: File;
+  fileName?: string;
+  /** Object URL for the UI's `<audio>` preview. */
+  previewUrl?: string;
+  /** Bytes, shown in the UI as a sanity check (the engine caps a WAV at 32 MiB). */
+  size?: number;
+}
+
+/**
+ * Custom pack WAVs. `explosion` plays once from the claim's `on_explode`; the
+ * `interval` sound plays while the round flies, from `wa.on.missile_frame`.
+ * WormForge resolves the paths from this bundle at load (`sounds = {...}`).
+ */
+export interface CustomSoundsConfig {
+  explosionEnabled: boolean;
+  explosion?: CustomSoundAsset;
+  /** Higher priorities replace lower ones in a full voice pool. */
+  explosionPriority: number;
+  intervalEnabled: boolean;
+  interval?: CustomSoundAsset;
+  /** Game frames between plays, from the UI's milliseconds at 50 Hz. */
+  intervalMs: number;
+  /** Delay before the first play, in milliseconds. */
+  intervalDelayMs: number;
+  /** Plays before it stops; 0 keeps it going for the whole flight. */
+  intervalLimit: number;
+  intervalPriority: number;
+}
+
+export interface ExplosionEffectConfig {
+  enabled: boolean;
+  mode: ExplosionMode;
+  /** Custom-explosion fields, used by `blast` mode only. */
+  damage: number;
+  push: number;
+  /** Crater radius; 0 leaves the terrain alone. */
+  hole: number;
+  /** `default` is PX's random 69-71 blast, `none` is silent, a number is a WA id. */
+  sound: 'default' | 'none' | number;
+  /** Shape/colour preset the numbers below started from. */
+  preset: ExplosionPreset | 'custom';
+  /** Ring radius in game pixels. */
+  radius: number;
+  color: string;
+  /** Beam half-width of both passes (`thickness`). */
+  thickness: number;
+  noise: number;
+  /** Frames the envelope takes to fade (`duration`). */
+  duration: number;
+  /** Envelope lost per frame (`fade`). */
+  fade: number;
+  /** Radius growth over the whole envelope (`grow`). */
+  grow: number;
+  /** Frames the effect exists at all (`live`). */
+  live: number;
+  /** Points around the ring; 0 derives them from the radius. */
+  segments: number;
+  ellipseX: number;
+  ellipseY: number;
+  /** Re-noise and recolour halfway through, as the electric explosion does. */
+  rebuffer: boolean;
+  smoke: boolean;
+}
+
 export type MissileAnimType = 'track' | 'rotation' | 'slow' | 'medium' | 'fast' | 'none';
 
 export interface MissileSpriteConfig {
@@ -318,6 +400,12 @@ export interface WeaponProject {
   fireConfig: FirePayloadConfig;
   /** Effects-SDK ribbon trail for this weapon's projectile. */
   ribbonTrail: RibbonTrailConfig;
+  /** Effects-SDK explosion burst, added to or replacing WA's own blast. */
+  explosionEffect: ExplosionEffectConfig;
+  /** Uploaded WAVs played with `wa.sound.play` (blast and flight interval). */
+  customSounds: CustomSoundsConfig;
+  /** Extra library bundles (`effects.sdk`, …) the exported mod.toml depends on. */
+  extraDependencies: string[];
   hold: HoldConfig;
   /** Uploaded PNG/GIF art for the record fields that accept pack paths. */
   packArt: Partial<Record<PackArtSlot, PackArtAsset>>;
