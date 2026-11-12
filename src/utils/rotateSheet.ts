@@ -11,6 +11,10 @@
  * The cell is padded to the rotating frame's bounding square (w×√2 for a
  * square source) so diagonal frames keep their corners; every cell is the
  * same size, which is what `frames` in mod.toml slices.
+ *
+ * Roaming animals use the same convention: WA picks the cell from the flight
+ * heading (its own `spsheep1/2` and PX's Ghost Sheep `ghstshp1/2.png` are
+ * 32 cells), so the baked strip goes straight into `sheep_sprites`.
  */
 export interface RotationSheet {
   file: File;
