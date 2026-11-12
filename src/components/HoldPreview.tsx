@@ -1565,8 +1565,18 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
               </span>
             </div>
             <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
-              Follow flying projectiles with custom PNG sheets, animation types (<code className="font-mono text-forge-600 dark:text-forge-400">track</code>, <code className="font-mono text-forge-600 dark:text-forge-400">rotation</code>, <code className="font-mono text-forge-600 dark:text-forge-400">slow/med/fast</code>), cyclical frame playback, and <code className="font-mono text-stone-600 dark:text-stone-300">m.sprite = 0</code> native sprite hiding. Cluster bits can use their own sheet, and behaviour states (homing, dig, roam, gas) can swap art mid-flight.
+              Follow flying projectiles with custom PNG sheets, animation types (<code className="font-mono text-forge-600 dark:text-forge-400">track</code>, <code className="font-mono text-forge-600 dark:text-forge-400">rotation</code>, <code className="font-mono text-forge-600 dark:text-forge-400">slow/med/fast</code>), cyclical frame playback, and <code className="font-mono text-stone-600 dark:text-stone-300">m.sprite = 0</code> native sprite hiding. Cluster bits can use their own sheet, and the builder swaps art on its own clock (timed homing) or by probing the land (dig). Roaming animals keep WA's walk and take off into this sheet when the player presses Space.
             </p>
+            {project.action === 'roam' && (
+              <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-900/40 px-3 py-1.5">
+                Roaming animal: this sheet replaces the flown art. WA keeps
+                drawing the walk from the record `sprite`; the builder waits for
+                the turn player's Space press (lockstep, so every peer starts on
+                the same frame), then draws and animates its frames. The export
+                zeroes `sheep.flight_1` / `sheep.flight_2` so the native flown
+                sprites do not draw underneath.
+              </p>
+            )}
           </div>
 
           <label className="flex items-center gap-2 cursor-pointer bg-stone-100 dark:bg-stone-800 px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700">
@@ -1784,7 +1794,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                     WFWS role art
                   </div>
                   <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
-                    Cluster bits and behaviour states are drawn by the same
+                    Cluster bits, timed homing and terrain-probed dig are drawn by
+                    the same
                     <code className="font-mono"> sb.flight </code> call. Each role can keep WA&apos;s
                     sprite, draw your own sheet, or inherit the primary art.
                   </p>
@@ -1796,8 +1807,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
 
               {!builderOn && (
                 <p className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg px-2.5 py-1.5">
-                  Enable <strong>Missile Flight Sprite</strong> above first. Bits and behaviour states
-                  are emitted inside that builder call; until then these rows are saved but ignored.
+                  Enable <strong>Missile Flight Sprite</strong> above first. Bits, homing
+                  and dig art are emitted inside that builder call; until then these rows are saved but ignored.
                 </p>
               )}
 
@@ -1858,6 +1869,17 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
 
               {project.action === 'roam' && (
                 <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 space-y-3">
+                  {builderOn && (
+                    <p className="text-[11px] rounded-lg border border-amber-300/70 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-amber-800 dark:text-amber-200">
+                      The missile flight builder above owns the flying state, so
+                      these two sheets are not installed and not written while it
+                      is on. It keeps WA's walking pose, waits for the player's
+                      Space press, then draws its own sheet; the export zeroes
+                      `sheep.flight_1` / `sheep.flight_2` so WA's flown art does
+                      not draw underneath. Turn the builder off to use these
+                      sheets instead.
+                    </p>
+                  )}
                   <div>
                     <div className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
                       Roaming animal sheets (`sheep_sprites`)

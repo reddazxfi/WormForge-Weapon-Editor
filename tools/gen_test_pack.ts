@@ -30,7 +30,7 @@ import {
   behaviorStateSheetPath,
   missileFlightSheetPath,
   roamSheetPath,
-  roamSheetPaths,
+  roamSheetsOwnFlight,
   packArtPath,
   sanitizeModFolder,
 } from '../src/utils/luaGenerator';
@@ -897,6 +897,32 @@ const TESTS: TestCase[] = [
     watch:
       'Stock sheep sheets in flight (nothing installed), art stuck facing up (no `frames` declared), the whole tall strip drawn as one image, or our art on the ground / while farting.',
   },
+  {
+    project: makeOp({
+      id: 'wftest.28_roam_builder',
+      name: 'WF 28 Roam Builder',
+      slot: 'super_sheep',
+      action: 'roam',
+      body: { sprite: 'sheepwlk' },
+      // A builder sheet owns the flying state: the export keeps the record
+      // `sprite` (WA's walking pose), zeroes `sheep.flight_1/2`, and the
+      // builder waits for the player's Space press before drawing. 32 frames
+      // gives one cell per direction, so `track` reads the heading.
+      missileSprite: {
+        enabled: true,
+        mode: 'custom',
+        anim: 'track',
+        frames: 32,
+        hideStock: true,
+      },
+    }),
+    intent:
+      'Roaming art through the sprite builder: `sprite` keeps WA\'s walk, `sheep.flight_1/2` are zeroed, `sb.flight` gets `roam = true`.',
+    expect:
+      'The sheep walks with WA\'s pose after firing; on the first Space press it takes off into our 32-frame sheet and points along the heading. No native flown sprites draw under it.',
+    watch:
+      'A missing walk pose (`sprite` zeroed by the builder), stock flown art under ours (`sheep.flight_1/2` not zeroed), our art while still walking (Space detection firing early), or nothing after Space (`wa.world.keys().space`/turn worm).',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -985,8 +1011,8 @@ for (const test of TESTS) {
 
   // A roaming animal's two flying sheets (`sheep_sprites`). WA rotates the
   // flying animal, so the sheet is a rotation strip and its frame count is
-  // what mod.toml has to declare.
-  if (roamSheetPaths(project)) {
+  // what mod.toml has to declare. A builder sheet owns that state instead.
+  if (roamSheetsOwnFlight(project)) {
     mkdirSync(join(BUNDLE, 'sprites', folder), { recursive: true });
     for (const [which, asset] of [
       ['flight1', project.roamSheets?.flight1],

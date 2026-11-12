@@ -200,6 +200,17 @@ export function roamSheetPaths(
   return { first: roamSheetPath(project, 'flight1'), second: roamSheetPath(project, 'flight2') };
 }
 
+/**
+ * True when the uploaded roaming sheets are what WA draws in the flying state.
+ * A builder sheet (`sb.flight`) replaces that state outright: the generator
+ * zeroes `sheep.flight_1` / `sheep.flight_2`, so the two WA sheets are neither
+ * installed nor referenced and the uploads stay dormant while it is on.
+ */
+export function roamSheetsOwnFlight(project: WeaponProject): boolean {
+  if (primaryBuilderOn(project) && project.action === 'roam') return false;
+  return !!roamSheetPaths(project);
+}
+
 /** Bundle path of one behaviour-state sheet. */
 export function behaviorStateSheetPath(
   project: WeaponProject,
@@ -634,8 +645,9 @@ export function generateLuaCode(project: WeaponProject): string {
   // A roaming animal's two flying sheets. `sheep_sprites` installs them as WA
   // sprites and writes `sheep.flight_1` / `sheep.flight_2`, which WA alternates
   // while the animal is steered -- the walking pose stays the record body and
-  // the gas pose `roam.gas.animal_sprite`.
-  const roamSheets = roamSheetPaths(project);
+  // the gas pose `roam.gas.animal_sprite`. A builder sheet replaces the flying
+  // state instead, so the uploads are dormant while it is on.
+  const roamSheets = roamSheetsOwnFlight(project) ? roamSheetPaths(project) : null;
   if (roamSheets) {
     lines.push(`      sheep_sprites = { ${luaQuote(roamSheets.first)}, ${luaQuote(roamSheets.second)} },`);
   }
@@ -984,11 +996,16 @@ export function generateLuaCode(project: WeaponProject): string {
     // ANIM_TYPE (`track`, `rotation`, `slow`, ...) must NOT be written to the
     // record's `animation`: that field is WA's native selector (0..5).
     const spriteOverride = override('missile.sprite');
-    if (builderOn) {
+    if (builderOn && action !== 'roam') {
       // The builder classifies a missile as the primary only when `m.sprite` is
       // zero at first sight. This write is unconditional: an imported `.wep`
       // baseline or a `missile.sprite` override must not leave WA's sprite in
       // place, or the primary would classify as a cluster bit.
+      //
+      // Roaming is the exception: its `sprite` is the walking pose WA draws
+      // before the player presses Space, and `m.sprite` is not what draws the
+      // flown animal (that is `sheep.flight_1/2`, zeroed below). Zeroing it
+      // here would delete the walk, so a roam record keeps normal diffing.
       lines.push('        sprite = 0,');
     } else if (spriteOverride !== undefined) {
       if (spriteOverride === 0 || spriteOverride === '0') {
@@ -1000,9 +1017,12 @@ export function generateLuaCode(project: WeaponProject): string {
       }
     } else if (
       missileSpriteEnabled &&
+      action !== 'roam' &&
       project.missileSprite?.hideStock &&
       (!baseline || !same(project.missileSprite?.hideStock, baseline.missileSprite?.hideStock))
     ) {
+      // `hideStock` hides WA's normal flight sprite; a roam record's `sprite`
+      // is the walking pose, so it never applies there.
       lines.push('        sprite = 0,');
     } else if (
       missileSpriteEnabled &&
@@ -1419,13 +1439,12 @@ export function generateLuaCode(project: WeaponProject): string {
     }
 
     // Roaming sheep art is a top-level `sheep` group, not part of `missile`.
+    const roamFlightOne = project.roamConfig?.flight_1 ?? 0;
+    const roamFlightTwo = project.roamConfig?.flight_2 ?? 0;
     const sheepTouched =
-      !baseline ||
+      !!baseline &&
       !same(
-        {
-          flight_1: project.roamConfig?.flight_1,
-          flight_2: project.roamConfig?.flight_2,
-        },
+        { flight_1: roamFlightOne, flight_2: roamFlightTwo },
         {
           flight_1: baseline.roamConfig?.flight_1,
           flight_2: baseline.roamConfig?.flight_2,
@@ -1434,22 +1453,33 @@ export function generateLuaCode(project: WeaponProject): string {
     // `sheep_sprites` installs both sheets and writes these two fields itself
     // after the record tables are applied, so numbering them here would only be
     // overwritten (and a 0 would look like it did something).
-    const roamSheetsOwnFlight = !!roamSheetPaths(project);
-    if (
-      action === 'roam' &&
-      project.roamConfig &&
-      !roamSheetsOwnFlight &&
-      (sheepTouched || !!roamFlightState)
-    ) {
+    const builderOwnsRoamFlight = builderOn && action === 'roam';
+    const roamSheetsOwnFlyingState = roamSheetsOwnFlight(project);
+    // A stock-based project has no baseline and starts at 0/0, so writing the
+    // group on "no baseline" alone would delete WA's flying art on an untouched
+    // weapon. Only an explicit id, a changed import, or the builder owning the
+    // state writes it.
+    const writesSheep =
+      builderOwnsRoamFlight ||
+      !!roamFlightState ||
+      sheepTouched ||
+      roamFlightOne !== 0 ||
+      roamFlightTwo !== 0;
+    if (action === 'roam' && !roamSheetsOwnFlyingState && writesSheep) {
       lines.push('      sheep = {');
-      const flightOne =
-        roamFlightState?.assigned.roam_flight_1 !== undefined
+      // A builder sheet is drawn by its follower, so WA's two flown sprites
+      // have to go or they draw underneath it. `missile.sprite` is untouched:
+      // for roaming it is the walking pose, not flight art.
+      const flightOne = builderOwnsRoamFlight
+        ? 0
+        : roamFlightState?.assigned.roam_flight_1 !== undefined
           ? roamFlightState.assigned.roam_flight_1
-          : project.roamConfig.flight_1 ?? 0;
-      const flightTwo =
-        roamFlightState?.assigned.roam_flight_2 !== undefined
+          : roamFlightOne;
+      const flightTwo = builderOwnsRoamFlight
+        ? 0
+        : roamFlightState?.assigned.roam_flight_2 !== undefined
           ? roamFlightState.assigned.roam_flight_2
-          : project.roamConfig.flight_2 ?? 0;
+          : roamFlightTwo;
       lines.push(`        flight_1 = ${flightOne},`);
       lines.push(`        flight_2 = ${flightTwo},`);
       lines.push('      },');
@@ -2320,6 +2350,13 @@ export function generateLuaCode(project: WeaponProject): string {
       lines.push('      dig = true,');
     }
 
+    // A roaming animal walks until the turn's player presses Space, then
+    // flies. The builder owns that flying state: it waits for the press and
+    // then draws the sheet (the record's `sheep.flight_1/2` are zeroed above).
+    if (project.action === 'roam') {
+      lines.push('      roam = true,');
+    }
+
     // Identity debugging: one log line per missile's first frames, so the
     // zero-means-bit convention can be confirmed from the game log.
     if (m.logIdentity) {
@@ -2446,8 +2483,9 @@ export function generateModToml(project: WeaponProject): string {
   }
   // A roaming animal's two flying sheets (`sheep_sprites`). WA rotates the
   // flying animal itself and picks the frame from the strip, so the declared
-  // frame count is what makes the art turn (PX ships 32).
-  const roamSheets = roamSheetPaths(project);
+  // frame count is what makes the art turn (PX ships 32). A builder sheet owns
+  // the flying state instead, so nothing is declared while it is on.
+  const roamSheets = roamSheetsOwnFlight(project) ? roamSheetPaths(project) : null;
   if (roamSheets) {
     for (const [path, asset] of [
       [roamSheets.first, project.roamSheets?.flight1],

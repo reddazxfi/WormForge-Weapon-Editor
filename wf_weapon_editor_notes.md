@@ -1044,6 +1044,16 @@ strip** (16/32/64 frames from one frame, via `buildRotationSheet`) plus a frame
 count for a strip uploaded as-is, and `generateModToml` declares `frames` so the
 engine slices it. A single-pose upload is drawn as one cell and never turns.
 
+**The flight builder can own the flying state.** `sprite` is normal-flight art
+only, so zeroing it for a roam record deletes WA's walking pose and does not
+touch the flown art (`sheep.flight_1/2`). With the builder on, the generator
+therefore keeps `sprite`, zeroes `sheep.flight_1/2`, and passes `roam = true`.
+The builder draws nothing while the animal walks and starts its sheet on the
+turn player's synchronized Space press (`wa.world.keys().space`; a sheep never
+takes off without it), which is the same frame on every peer. The two
+`sheep_sprites` uploads stay in the project but are neither installed nor
+declared while the builder owns the state.
+
 ### `wfws.sdk` ships under `wf-lib/`
 
 Library bundles live in `Mods/wf-lib/` (`wf-lib/sdk` = `wf.sdk`,

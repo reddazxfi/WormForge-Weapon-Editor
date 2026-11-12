@@ -30,11 +30,12 @@ two more layers:
 
 - **Identity** (once, on a missile's first sight): primary, cluster bit, or a
   named extra role.
-- **State** (every `pre` phase): homing, digging, roaming, gas... Each state can
-  swap the sheet/animation or hand the missile back to WA.
+- **State** (every `pre` phase): homing, digging, and the roaming take-off. Each
+  state can swap the sheet/animation or hand the missile back to WA.
 
 That is what allows a weapon to give its cluster bits different art from its
-main round, and to give a behaviour (homing, dig, gas) its own sheet.
+main round, to time homing art by the record's own window, and to animate a
+roaming animal's flight.
 
 ## API
 
@@ -45,6 +46,7 @@ sb.flight(ctx, {
   anim   = "track",              -- track | rotation | slow | medium | fast | none
   cyclical = 32,                 -- frames in the sheet (optional)
   anim_speed = 1.0, spin = 1.0, scale = 1.0, mirror = true, z = 5.0,
+  roam = true,                   -- roaming animal: wait for Space, then draw
 
   bits = {                       -- cluster-bit art
     sheet = "sprites/<mod>/bit_flight.png",
@@ -91,11 +93,10 @@ sprite fields:
 | homing (main) | `missile.homing.sprite` |
 | homing bit | `clusters.bit.homing.sprite` |
 | dig | `dig.dive_sprite`, `dig.sprite_1..3` |
-| roam flight | `sheep.flight_1`, `sheep.flight_2` |
-| gas | `roam.gas.animal_sprite` |
 
 Each active state needs a **distinct** nonzero id. The editor assigns one when
-the record field is empty and warns about duplicates.
+the record field is empty and warns about duplicates. Roaming is not here: its
+walk/flight/gas art are separate record fields, not `m.sprite`.
 
 ### Digging (no state, no sheet)
 
@@ -132,19 +133,33 @@ no guessing and no desync. The generator zeroes `missile.homing.sprite` /
 `clusters.bit.homing.sprite` while the builder owns the art, so WA's own homing
 sprite cannot draw underneath.
 
-### Roaming (record fields, not builder art)
+### Roaming (the builder owns the flying state)
 
-A roaming animal is not a state role. WA draws its walking pose from the record
-`sprite`, alternates `sheep.flight_1` / `sheep.flight_2` while it is steered, and
-switches to `roam.gas.animal_sprite` to fart. Use the claim key for the two
-flying sheets (the engine installs them and writes both fields):
+A roaming animal walks until the turn's player presses Space, and only then
+flies. WA draws the walk from the record `sprite` (normal-flight art only), so
+the builder never zeroes it. Pass `roam = true` and the builder waits for the
+synchronized Space press (`wa.world.keys().space`; the press belongs to the
+turn's worm) and then draws the sheet and animates its frames. The generator
+zeroes `sheep.flight_1` / `sheep.flight_2` so WA's flown sprites do not draw
+underneath:
+
+```lua
+sb.flight(ctx, { weapon = ctx.id,
+                 sheet = "sprites/<mod>/missile.png",
+                 anim = "track", cyclical = 32,
+                 roam = true })
+```
+
+Without the builder, the claim key installs the two WA flying sheets instead.
+Each is a rotation strip (WA picks the cell from the heading, frame 0 up,
+clockwise; PX's Ghost Sheep ships 32 cells) and WA alternates the pair for the
+cape sway:
 
 ```lua
 sheep_sprites = { "sprites/<mod>/sheep_flight1.png", "sprites/<mod>/sheep_flight2.png" }
 ```
 
-Exactly two are required, one pose each (WA alternates the pair). The walking and
-gas poses stay record fields.
+Exactly two are required. The walking and gas poses stay record fields.
 
 ### Native hand-back
 

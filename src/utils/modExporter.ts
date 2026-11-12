@@ -3,7 +3,7 @@ import { WeaponProject } from '../types/weapon';
 import { WFWS_SDK_MOD_TOML, WFWS_SPRITE_BUILDER_LUA } from '../data/wfwsSdk';
 import {
   roamSheetPath,
-  roamSheetPaths,
+  roamSheetsOwnFlight,
   generateLuaCode,
   generateModToml,
   generateProfileToml,
@@ -124,8 +124,9 @@ export async function exportModZip(project: WeaponProject): Promise<Blob> {
   }
 
   // A roaming animal's two flying sheets (`sheep_sprites`). The engine installs
-  // exactly two, so nothing is written unless both are uploaded.
-  if (roamSheetPaths(project)) {
+  // exactly two, so nothing is written unless both are uploaded. A builder
+  // sheet owns the flying state instead, and then neither is referenced.
+  if (roamSheetsOwnFlight(project)) {
     const sheets = [
       ['flight1', project.roamSheets?.flight1?.file],
       ['flight2', project.roamSheets?.flight2?.file],

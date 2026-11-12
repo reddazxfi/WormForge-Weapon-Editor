@@ -319,6 +319,14 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
     while you steer. `RoamSheetField` has **Rotate into strip** (bakes 16/32/64
     frames from one upload) and a frame count for a strip uploaded as-is; the
     generator declares `frames` in `mod.toml` so the engine slices it.
+    **The flight builder can own this state.** With `sb.flight` on for a roam
+    record the generator keeps the record `sprite` (WA's walking pose), zeroes
+    `sheep.flight_1/2` instead, and passes `roam = true`; the builder draws
+    nothing until the turn player's synchronized Space press (a sheep never
+    takes off without it) and then draws and animates its own frames. `m.sprite`
+    is normal-flight art only: zeroing it for roam would delete the walk and
+    would not affect `sheep.flight_*`. While the builder owns the state the two
+    `sheep_sprites` uploads are dormant (not installed or declared).
     PX's sheep editor shows five sprites: flying / flying 2 are
     `sheep.flight_1/2` (0xE0/0xE4), farting is `roam.gas.animal_sprite` (0xDC),
     and taking off / during flight are 0xE8/0xEC — two sheep sprite fields WA
@@ -495,10 +503,12 @@ never declare it without writing the file.
 - `sprites/<mod>/bit_flight.png` when the WFWS bit role is set to Builder, and
   `sprites/<mod>/state_homing.png` / `state_homing_bit.png` when the homing role
   is set to Builder (`wfwsRoleFlags`). Uploaded sheet if present, otherwise the
-  default missile art. Digging and roaming write no state sheet (the flight
-  sheet is the dig animation, and roaming uses `sheep_sprites`).
+  default missile art. Digging writes no state sheet (the flight sheet is the
+  dig animation), and roaming uses `sheep_sprites` unless the builder owns the
+  flown art, in which case `missile.png` is that art.
 - `sprites/<mod>/sheep_flight1.png` / `sheep_flight2.png` when both roaming
-  sheets are uploaded (`sheep_sprites` needs exactly two). They are rotation
+  sheets are uploaded (`sheep_sprites` needs exactly two) and the flight builder
+  is off — a builder sheet owns the flying state instead. They are rotation
   strips, so `mod.toml` declares their `frames` (the sheet is sliced into that
   many direction cells).
 - Any `customSprites` entries are written at their declared paths.
@@ -695,6 +705,10 @@ that `vite preview` at `/` hides).
     WFWS builder calls any missile with a nonzero `m.sprite` at first sight a
     cluster bit. A `.wep` baseline or a `missile.sprite` override must not keep
     the native sprite when the builder is on, or the primary draws bit art.
+    **Roaming is the exception:** there `sprite` is WA's walking pose, `m.sprite`
+    is not what draws the flown animal, and zeroing it deletes the walk while
+    the flying art (`sheep.flight_1/2`) still draws. For roam the generator
+    zeroes the two `sheep` fields instead and passes `roam = true`.
 22. **A bit needs a nonzero stock sprite.** If `clusters.bit.sprite` is 0/empty,
     every bit classifies as the primary. The generator forces `clustlet` and
     `sprite_count = 1`; `sprite_count` counts sprite ids, not frames.
@@ -703,6 +717,11 @@ that `vite preview` at `/` hides).
     `sprite_1..3`, `sheep.flight_1/2` and `roam.gas.animal_sprite`, and matched
     against the last nonzero `m.sprite`. Assign 245+, avoid the bit marker and
     stock bodies, and never use a negative id (record dwords are signed).
+24. **A sheep never takes off without Space.** The builder's `roam = true` waits
+    for the turn player's synchronized `wa.world.keys().space` edge, then owns
+    the flown art; before that WA draws the walk from `sprite`. The press is
+    lockstep input, so every peer starts the animation on the same frame — use
+    it instead of guessing from velocity or position.
 
 ---
 

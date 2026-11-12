@@ -6,8 +6,14 @@
 --     primary, cluster bit, or an extra `roles` entry. Cached per missile id.
 --
 --   STATE (re-evaluated every pre phase): what is it doing right now?
---     homing, roaming, emitting gas... Each state may swap the art, the
---     animation, or hand the missile back to WA (native = true).
+--     homing, digging, or a roaming animal waiting to take off. Each state may
+--     swap the art, the animation, or hand the missile back to WA (native).
+--
+--   ROAM (`roam = true`): a roaming animal walks until the turn's player
+--     presses Space, then flies. WA draws the walk from `m.sprite`, which is
+--     normal-flight art only, so it is never zeroed here; the generator zeroes
+--     `sheep.flight_1/2` instead. The builder draws nothing until the Space
+--     press, then owns the flown art.
 --
 --   DIG is not a state: a digging round has no art of its own. The record's
 --     dig sprite indexes are zeroed (a mole or the wsv* frames would draw
@@ -23,6 +29,7 @@
 --     is_bit = function(m) ... end,             -- optional classifier override
 --     roles  = { { name = "x", match = function(m) ... end, sheet = "..." } },
 --     dig    = true | { probe = 6, spread = 3, hold = 3, need = 2 },
+--     roam   = true,                            -- roaming animal: wait for Space
 --     states = {
 --       { scope = "main" | "bit" | "any" | <role name>,
 --         sig  = 245 | { 246, 247, 248 },       -- native sprite ids that mean
@@ -262,6 +269,14 @@ function M.flight(ctx, opts)
   local dig_dir = {}     -- [id] = last heading, for the terrain probes
   local dig_hold = {}    -- [id] = frames left of "digging"
   local dig = dig_settings(opts.dig)
+  -- Roaming animals: WA walks the animal until the turn's player presses
+  -- Space, and only then does it fly. The press is synchronized lockstep input
+  -- (`wa.world.keys().space`), so every peer draws the flight art from the
+  -- same frame. `m.sprite` stays WA's walking pose; the generator zeroes
+  -- `sheep.flight_1/2` so nothing draws under ours once it takes off.
+  local roam = opts.roam == true
+  local flying = {}      -- [id] = true once the animal has taken off
+  local armed = {}       -- [id] = Space was seen up since the missile appeared
   local age = {}         -- [id] = frames since first sight, for homing ms
   local logged = {}      -- [id] = frames logged so far (opts.log)
   local gen = 0
@@ -317,6 +332,8 @@ function M.flight(ctx, opts)
       active[id] = nil
       dig_dir[id] = nil
       dig_hold[id] = nil
+      flying[id] = nil
+      armed[id] = nil
       logged[id] = nil
       age[id] = nil
       b:despawn()
@@ -355,14 +372,31 @@ function M.flight(ctx, opts)
     end
 
     if m.phase == "pre" then
+      if roam and not flying[id] then
+        -- Walking. The Space press that takes off is the turn's player's, so
+        -- the turn's worm has to exist; `wa.world.keys()` is synchronized, so
+        -- every peer agrees on the frame the art starts.
+        local keys = wa.world.keys and wa.world.keys() or nil
+        local held = keys and keys.space and true or false
+        if not held then
+          armed[id] = true
+        elseif armed[id] and current_worm() then
+          flying[id] = true
+        end
+      end
+      if roam and not flying[id] then
+        active[id] = NATIVE
+        return
+      end
       if m.sprite ~= 0 then sig[id] = m.sprite end   -- read BEFORE zeroing
       local cfg = pick(m, ent)
       active[id] = cfg
       if cfg == NATIVE then
         -- Hand the sprite back. If our earlier zero stuck, restore the last
         -- signal (VERIFY: m.sprite is writable and WA draws it again).
-        if m.sprite == 0 and sig[id] then m.sprite = sig[id] end
-      else
+        if not roam and m.sprite == 0 and sig[id] then m.sprite = sig[id] end
+      elseif not roam then
+        -- Roaming keeps `m.sprite`: it is the walking pose, not flight art.
         m.sprite = 0
       end
       return
