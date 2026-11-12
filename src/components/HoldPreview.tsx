@@ -1427,86 +1427,85 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
               </div>
             </div>
 
-            {/* Row: Scale Multiplier on left; Animate Put-Away and Keep While Firing on right */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-              <div className="space-y-1">
-                <div className="flex justify-between items-center text-xs">
-                  <label htmlFor="hold-scale" className="font-semibold text-stone-700 dark:text-stone-300">
-                    Scale Multiplier
+            {/* Scale Multiplier Slider */}
+            <div className="space-y-1">
+              <div className="flex justify-between items-center text-xs">
+                <label htmlFor="hold-scale" className="font-semibold text-stone-700 dark:text-stone-300">
+                  Scale Multiplier
+                </label>
+                <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
+                  {hold.scale}x
+                </span>
+              </div>
+              <input
+                id="hold-scale"
+                type="range"
+                min={0.5}
+                max={2.5}
+                step={0.1}
+                value={hold.scale}
+                onChange={(e) => updateHold({ scale: Number(e.target.value) })}
+                className="w-full accent-forge-500 cursor-pointer"
+              />
+            </div>
+
+            {/* Row: Animate Put-Away and Keep While Firing checkboxes */}
+            <div className="grid grid-cols-2 gap-3">
+              <div
+                title="Gun swings down and smoothly shrinks into backpack during retreat/walking (survives WA state 0x65 & 0x66) (put_away = true)"
+                className={`h-10 flex items-center justify-between px-3 rounded-lg border transition-colors ${
+                  hold.thrown
+                    ? 'opacity-50 cursor-not-allowed border-stone-200 dark:border-stone-800 bg-stone-100/50 dark:bg-stone-900/50'
+                    : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800'
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <label
+                    htmlFor="hold-put-away"
+                    className={`text-xs font-semibold text-stone-800 dark:text-stone-200 select-none ${
+                      hold.thrown ? 'cursor-not-allowed' : 'cursor-pointer'
+                    }`}
+                  >
+                    Animate Put-Away
                   </label>
-                  <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
-                    {hold.scale}x
-                  </span>
+                  {hold.putAway && !hold.thrown && (
+                    <button
+                      type="button"
+                      disabled={putAwayCounter !== null}
+                      onClick={triggerPutAwayDemo}
+                      title="Test put-away in preview canvas (0x65)"
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 cursor-pointer disabled:opacity-50 shrink-0"
+                    >
+                      {putAwayCounter !== null ? '...' : 'Test'}
+                    </button>
+                  )}
                 </div>
                 <input
-                  id="hold-scale"
-                  type="range"
-                  min={0.5}
-                  max={2.5}
-                  step={0.1}
-                  value={hold.scale}
-                  onChange={(e) => updateHold({ scale: Number(e.target.value) })}
-                  className="w-full accent-forge-500 cursor-pointer"
+                  id="hold-put-away"
+                  type="checkbox"
+                  disabled={hold.thrown}
+                  checked={hold.putAway && !hold.thrown}
+                  onChange={(e) => updateHold({ putAway: e.target.checked })}
+                  className="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer shrink-0 ml-2"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div
-                  title="Gun swings down and smoothly shrinks into backpack during retreat/walking (survives WA state 0x65 & 0x66) (put_away = true)"
-                  className={`h-10 flex items-center justify-between px-2.5 rounded-lg border transition-colors ${
-                    hold.thrown
-                      ? 'opacity-50 cursor-not-allowed border-stone-200 dark:border-stone-800 bg-stone-100/50 dark:bg-stone-900/50'
-                      : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <label
-                      htmlFor="hold-put-away"
-                      className={`text-xs font-semibold text-stone-800 dark:text-stone-200 truncate select-none ${
-                        hold.thrown ? 'cursor-not-allowed' : 'cursor-pointer'
-                      }`}
-                    >
-                      Animate Put-Away
-                    </label>
-                    {hold.putAway && !hold.thrown && (
-                      <button
-                        type="button"
-                        disabled={putAwayCounter !== null}
-                        onClick={triggerPutAwayDemo}
-                        title="Test put-away in preview canvas (0x65)"
-                        className="text-[10px] font-semibold px-1 py-0.5 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 cursor-pointer disabled:opacity-50 shrink-0"
-                      >
-                        {putAwayCounter !== null ? '...' : 'Test'}
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    id="hold-put-away"
-                    type="checkbox"
-                    disabled={hold.thrown}
-                    checked={hold.putAway && !hold.thrown}
-                    onChange={(e) => updateHold({ putAway: e.target.checked })}
-                    className="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer shrink-0 ml-1"
-                  />
-                </div>
-
-                <label
-                  htmlFor="hold-keep-firing"
-                  title="Weapon remains held and visible in worm hand throughout WA firing poses 0x6A & 0x6B (e.g. Crossbows, Miniguns) (keep_while_firing = true)"
-                  className="h-10 flex items-center justify-between px-2.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 cursor-pointer shadow-2xs hover:bg-stone-50 dark:hover:bg-stone-750 transition-colors"
-                >
-                  <span className="text-xs font-semibold text-stone-800 dark:text-stone-200 truncate select-none">
-                    Keep While Firing
-                  </span>
-                  <input
-                    id="hold-keep-firing"
-                    type="checkbox"
-                    checked={hold.keepWhileFiring}
-                    onChange={(e) => updateHold({ keepWhileFiring: e.target.checked })}
-                    className="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer shrink-0 ml-1"
-                  />
-                </label>
-              </div>
+              <label
+                htmlFor="hold-keep-firing"
+                title="Weapon remains held and visible in worm hand throughout WA firing poses 0x6A & 0x6B (e.g. Crossbows, Miniguns) (keep_while_firing = true)"
+                className="h-10 flex items-center justify-between px-3 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 cursor-pointer shadow-2xs hover:bg-stone-50 dark:hover:bg-stone-750 transition-colors"
+              >
+                <span className="text-xs font-semibold text-stone-800 dark:text-stone-200 select-none">
+                  Keep While Firing
+                </span>
+                <input
+                  id="hold-keep-firing"
+                  type="checkbox"
+                  checked={hold.keepWhileFiring}
+                  onChange={(e) => updateHold({ keepWhileFiring: e.target.checked })}
+                  className="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer shrink-0 ml-2"
+                />
+              </label>
             </div>
 
             {/* Hold Animation Card */}

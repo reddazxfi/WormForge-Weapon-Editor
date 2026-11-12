@@ -2038,8 +2038,10 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push('        hand_rotation = 1,');
     lines.push('        hand_radial_rotation = 1,');
     lines.push(`        weap_radius = ${h.weapRadius ?? 6},`);
+    lines.push(`        weap_radius_y = ${h.weapRadiusY ?? h.weapRadius ?? 6},`);
     lines.push(`        weap_rotation = ${(1 + (h.weapRotation || 0) / 180).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')},`);
     lines.push('        weap_radial_rotation = 1,');
+    lines.push(`        weap_scale = ${h.scale ?? 1},`);
     if (h.frames > 1) {
       lines.push(`        frames = ${h.frames},`);
       // worm_hold.rs advances `phase` by anim_speed * 0.03 on every 50 Hz
@@ -2053,6 +2055,7 @@ export function generateLuaCode(project: WeaponProject): string {
         lines.push(`        anim_speed = ${formatNumber(animSpeed)},`);
       }
     }
+    if (h.scale && h.scale !== 1) lines.push(`        weap_scale = ${h.scale},`);
     if (h.handScale && h.handScale !== 1) lines.push(`        hand_scale = ${h.handScale},`);
     if (!h.drawHand) lines.push('        draw_hand = false,');
     if (h.keepWhileFiring) lines.push('        keep_while_firing = true,');
