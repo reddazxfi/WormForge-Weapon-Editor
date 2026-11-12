@@ -11,6 +11,7 @@ import { LuaPreviewModal } from './components/LuaPreviewModal';
 import { BundleDependencies } from './components/BundleDependencies';
 import { exportModZip, downloadBlob } from './utils/modExporter';
 import { sanitizeModFolder } from './utils/luaGenerator';
+import { rebaseToDonor } from './utils/donorRebase';
 import { DEFAULT_EXPLOSION_EFFECT } from './data/explosionPresets';
 import { stockDonor, stockDonorBaseline } from './data/stockDonors';
 import { DEFAULT_BODY, DEFAULT_DIG, DEFAULT_FIRE, DEFAULT_ROAM } from './data/defaults';
@@ -172,7 +173,16 @@ export default function App() {
   };
 
   const updateProject = (patch: Partial<WeaponProject>) => {
-    setProject((prev) => ({ ...prev, ...patch }));
+    setProject((prev) => {
+      // A donor change re-bases the record: the panels must show the donor the
+      // claim actually copies, and the generator diffs against that donor.
+      const donor =
+        patch.based_on !== undefined && patch.based_on !== prev.based_on
+          ? patch.based_on
+          : undefined;
+      const next = { ...prev, ...patch };
+      return donor && !next.useWepFile ? rebaseToDonor(next, donor) : next;
+    });
   };
 
   const handleApplyWepImport = (parsed: Partial<WeaponProject>) => {
@@ -245,6 +255,14 @@ export default function App() {
               specialSubtype,
             }
           : undefined),
+        // A preset (or any import without its own baseline) copies a donor, so
+        // its diff base has to be *that* donor's record -- not whatever donor
+        // the open project happened to be using.
+        donorBaseline:
+          parsed.donorBaseline ??
+          (useWepFile
+            ? prev.donorBaseline
+            : stockDonorBaseline(parsed.based_on ?? prev.based_on) ?? prev.donorBaseline),
       };
     });
     showToast(

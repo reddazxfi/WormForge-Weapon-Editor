@@ -127,6 +127,9 @@ export interface HoldConfig {
   sheet: string;
   sheetFile?: File;
   sheetPreview?: string;
+  /** Pixel size of the uploaded hold image; `px_hold_art` needs the cell. */
+  sheetWidth?: number;
+  sheetHeight?: number;
   handType: HandType;
   handRadius: number;
   weapRadius: number;
@@ -483,6 +486,13 @@ export interface FirePayloadConfig {
  * overrides. See `luaGenerator.ts`.
  */
 export interface WepBaseline {
+  /**
+   * The stock donor this baseline was decoded from, for a `copy_from` base.
+   * Unset for a `.wep` baseline (the file is its own base). The generator only
+   * honours a donor baseline whose slot still matches the claim's `copy_from`,
+   * so a donor change can never be diffed against the previous donor.
+   */
+  slot?: string;
   body: BodyConfig;
   action: MissileAction;
   burst: BurstPayload;

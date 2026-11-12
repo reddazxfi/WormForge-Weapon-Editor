@@ -259,6 +259,16 @@ const RoamSheetField: React.FC<{
 };
 
 const WORM_AIM_SRC = assetUrl('assets/worm/aim.png');
+
+/** Natural pixel size of an image URL (used for `px_hold_art`'s cell size). */
+function imagePixelSize(url: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => reject(new Error('That image could not be decoded.'));
+    img.src = url;
+  });
+}
 const HAND_MID_SRC = assetUrl('assets/worm/hand_rad.png');
 const HAND_LOWER_SRC = assetUrl('assets/worm/hand_rad_lower.png');
 const HAND_UPPER_SRC = assetUrl('assets/worm/hand_rad_upper.png');
@@ -1052,15 +1062,29 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
   // ---------------------------------------------------------------------------
   // HANDLERS FOR UPLOADING CUSTOM ASSETS
   // ---------------------------------------------------------------------------
-  const handleUploadSheet = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadSheet = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const previewUrl = URL.createObjectURL(file);
+    // `px_hold_art` (sequential fire) draws a quad of the sheet's pixel cell,
+    // so keep the natural size beside the file.
+    let sheetWidth: number | undefined;
+    let sheetHeight: number | undefined;
+    try {
+      const px = await imagePixelSize(previewUrl);
+      sheetWidth = px.width;
+      sheetHeight = px.height;
+    } catch {
+      // The preview will show whatever the browser can draw; the size falls
+      // back to the stock art's, like an imported project.
+    }
     updateHold({
       enabled: true,
       sheetFile: file,
       sheetPreview: previewUrl,
+      sheetWidth,
+      sheetHeight,
       // The path is worked out when the pack is exported, from the id the
       // weapon has THEN. Baking it in here kept an old id (moon_grenade)
       // after a rename.
@@ -1074,6 +1098,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     updateHold({
       sheetFile: undefined,
       sheetPreview: undefined,
+      sheetWidth: undefined,
+      sheetHeight: undefined,
       sheet: '',
     });
     if (fileInputRef.current) fileInputRef.current.value = '';

@@ -17,6 +17,9 @@ export interface DefaultArt {
   key: DefaultArtKey;
   label: string;
   url: string;
+  /** Native pixels of the supplied PNG (square, as PX's hold cells). */
+  width: number;
+  height: number;
 }
 
 const ART: Record<DefaultArtKey, DefaultArt> = {
@@ -24,11 +27,15 @@ const ART: Record<DefaultArtKey, DefaultArt> = {
     key: 'blue_zook',
     label: 'Bazooka',
     url: assetUrl('assets/defaults/default_blue_zook.png'),
+    width: 32,
+    height: 32,
   },
   grenade: {
     key: 'grenade',
     label: 'Grenade',
     url: assetUrl('assets/defaults/default_grenade.png'),
+    width: 46,
+    height: 46,
   },
 };
 

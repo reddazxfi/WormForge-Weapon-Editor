@@ -29,6 +29,7 @@ import {
   bitFlightSheetPath,
   behaviorStateSheetPath,
   missileFlightSheetPath,
+  holdSheetPath,
   roamSheetPath,
   roamSheetsOwnFlight,
   packArtPath,
@@ -369,6 +370,8 @@ function makeOp(partial: {
   roamSheets?: WeaponProject['roamSheets'];
   /** `wf-lib/fire_seq` burst from one `on_fire`. */
   fireSequence?: Partial<NonNullable<WeaponProject['fireSequence']>>;
+  /** Held art (`hold`), e.g. the repeat-fire draw with `px_hold_art`. */
+  hold?: Partial<WeaponProject['hold']>;
   defaults?: Partial<WeaponProject['defaults']>;
 }): WeaponProject {
   return {
@@ -462,6 +465,7 @@ function makeOp(partial: {
       handRad: 10,
       handRadLower: 0,
       handRadUpper: 0,
+      ...partial.hold,
     },
     packArt: { ...(partial.packArt || {}) },
     customSprites: {},
@@ -989,6 +993,48 @@ const TESTS: TestCase[] = [
     watch:
       'Sheet drawn at its own size (`size` not reaching the builder), still pointing up (`angle` ignored), or the offset applied twice on the mirrored side.',
   },
+  {
+    project: makeOp({
+      id: 'wftest.31_seq_hold',
+      name: 'WF 31 Sequential Hold',
+      slot: 'grenade',
+      // A held sheet plus a burst: WA's repeat-fire frames (0x6A/0x6B) alternate
+      // and the engine only draws them while `h.firing` is set, which a
+      // fire_seq burst does not refresh. `px_hold_art` covers those two states,
+      // so the grenade must stay visible for the whole burst. `size` is the
+      // 46 px default cell times the 0.7 scale.
+      hold: {
+        enabled: true,
+        handType: 'mid',
+        handRadius: 10,
+        weapRadius: -8,
+        weapRotation: 0,
+        scale: 0.7,
+        frames: 1,
+        drawHand: true,
+        thrown: false,
+        putAway: true,
+      },
+      fireSequence: {
+        enabled: true,
+        mode: 'missiles',
+        count: 6,
+        delay: 4,
+        speed: 14,
+        standoff: 20,
+        offsetY: -3,
+        liveAim: true,
+        cancelOnWeaponChange: true,
+        repeatFirePose: true,
+      },
+    }),
+    intent:
+      '`px_hold_art` with `wf-lib/fire_seq`: the held grenade is redrawn on WA\'s repeat-fire frames, at the sheet\'s cell size times `weap_scale`.',
+    expect:
+      'After the first shot the held art stays on screen every frame for the rest of the burst, at the same size as while aiming (0.7x), and still follows the live aim.',
+    watch:
+      'The grenade blinking out on every other frame (px_hold_art missing or its `weapon` id wrong), the firing frames drawing at 1x instead of 0.7x (`size` missing the scale), or art drawn at a fixed 90 px cell.',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -1012,6 +1058,7 @@ let usesBuilders = false;
 let usesRibbon = false;
 let usesExplosion = false;
 let usesFireSeq = false;
+let usesHolds = false;
 
 for (const test of TESTS) {
   const project = test.project;
@@ -1040,6 +1087,14 @@ for (const test of TESTS) {
     if (asset.frames > 1) {
       spriteDecls.set(path, { frames: asset.frames, fps: asset.fps || 15, play: asset.play || 'loop' });
     }
+  }
+
+  // Held art. The engine loads `hold.sheet` itself, so no `sprites` entry; the
+  // file only has to exist. `px_hold_art` redraws the same sheet on the
+  // repeat-fire frames, so a sequential-fire test needs the pixels too.
+  if (project.hold?.enabled) {
+    mkdirSync(join(BUNDLE, 'sprites', folder), { recursive: true });
+    writeFileSync(join(BUNDLE, holdSheetPath(project)), GRENADE_PNG);
   }
 
   // Sprite-builder flight sheet.
@@ -1112,6 +1167,7 @@ for (const test of TESTS) {
 
   if (project.ribbonTrail.enabled) usesRibbon = true;
   if (project.fireSequence?.enabled) usesFireSeq = true;
+  if (project.hold?.enabled) usesHolds = true;
   if (
     project.explosionEffect?.enabled &&
     (project.fireType === 'power' || project.fireType === 'drop')
@@ -1137,7 +1193,8 @@ for (const test of TESTS) {
 
 // mod.toml
 const dependencies: string[] = [];
-// The WFWS builder is its own bundle; `wf.sdk` is only needed for holds.
+// The WFWS builder is its own bundle; `wf.sdk` carries the hold art module.
+if (usesHolds) dependencies.push('wf.sdk');
 if (usesBuilders) dependencies.push('wfws.sdk');
 if (usesRibbon || usesExplosion) dependencies.push('effects.sdk');
 if (usesFireSeq) dependencies.push('px.fire_seq');

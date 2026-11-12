@@ -1225,8 +1225,40 @@ local function seq_dir(w) ... end          -- aim 0 down, 1 up, mirrored by faci
   Air strikes are excluded: their munitions are created by the strike entity, so
   the slot never fires.
 
+**Held art during the burst: `px_hold_art`.** The engine draws `spec.hold` on
+the firing frames only while `h.firing` is set, and that flag comes from the
+turn's fire message; `fire_seq` repeats the shot from its own timer, so from the
+second shot the held sheet blinks on every other frame (0x6A/0x6B). The
+`px.fire_seq` bundle exports `wf-lib/px_hold_art`, which redraws exactly those
+two states through `wa.on.draw`. With hold art on, the generator now emits:
+
+```lua
+local hold_art = require("wf-lib/px_hold_art")
+...
+    local hold = {                       -- the same table the claim gets
+      sheet = "sprites/<mod>/hold.png", ...,
+      weapon = ctx.id,                   -- px_hold_art's key (engine ignores it)
+      size = 32.2,                       -- cell px * weap_scale
+    }
+    wa.weapons.replace{ ..., hold = hold, ... }
+    hold_art.add(hold)
+```
+
+`size` is the sheet's pixel cell: an upload's width / (`height ÷ frames`), else
+the default art's 46 (grenade) or 32 (bazooka), multiplied by `weap_scale`
+because the helper has no scale key (a wrong size is what made the pump draw at
+2x). Hold uploads now store `sheetWidth`/`sheetHeight`; imported projects fall
+back to the default art's. The hold sheet is packed into the GPU atlas by
+`apply.rs` automatically (its `hold_sheet` test matches `hold.sheet` /
+`hold.hand` / `hold.flash.sheet`), so `params.gpu_prefix` is not needed for the
+quad to resolve. The claim emits `params = { gpu_prefix = "sprites/" }` anyway,
+matching PX's own fire_seq weapons (megashark/famas) as a belt-and-braces for
+the sprite-key registry; it is skipped when the claim also carries a body or
+cluster sheet, since the prefix would move those off their real WA slot.
+
 Test pack **WF 29 Sequential Fire** (mortar, 12 shells, 3-frame delay, live aim)
-covers it; `wfcheck` is clean on the 29-weapon pack.
+and **WF 31 Sequential Hold** (held grenade, 0.7 scale, 6 shells) cover it;
+`wfcheck` is clean on the 31-weapon pack.
 
 ### Weapon-wide sprite-builder parameters: `size` and `angle`
 
@@ -1472,6 +1504,46 @@ art, the sprite builder, effects, sounds and custom Lua all switched off. A
 bundle import sets `replaceProject` so it starts from that project instead of
 merging into whatever was open — the previous weapon's art and builder settings
 used to leak into the new one.
+
+### Re-basing the donor (a stale baseline silently ate edits)
+
+The diff design above has a sharp edge that bit a real weapon: the baseline
+describes *one* donor, but nothing tied it to the donor the claim copies. The
+"Based On" picker (and the Fire Archetype buttons, which set `based_on` to their
+own default donor) only changed the string, so a project kept the previous
+donor's record in its panels and in `donorBaseline` while `copy_from` named the
+new one.
+
+That is not just stale panels. Every value the two donors happen to share looked
+"unchanged" to the generator and was never written, so the engine's own donor
+value survived. A Mortar re-based from the Grenade is the clean example: the
+Grenade's `burst` is `nothing` and its `push_pct` is 100, the Mortar's are
+`clusters` and 0. The author turned the Mortar's clustlets off and set its push
+to 100 — both were skipped, and the weapon still spawned clustlets with no
+knockback.
+
+Two changes, one for the state and one as a backstop:
+
+- **`utils/donorRebase.ts` → `rebaseToDonor(project, donor)`**, called from
+  `App.updateProject` whenever `based_on` actually changes. It starts from the
+  new donor's decoded record and re-applies the author's edits: a field equal to
+  the *old* donor was inherited and takes the new donor's value, a field that
+  differed was edited and is kept (same rule for `recordOverrides`, where a key
+  the new donor does not declare and nobody edited is dropped rather than
+  written onto the new record).
+- **`WepBaseline.slot`.** `stockDonorBaseline` records which donor it decoded.
+  The generator honours a stored baseline only when its slot matches
+  `project.based_on`, and otherwise re-derives it from `stockDonors.json`. An
+  unknown donor yields no baseline, so the whole record is written instead of
+  silently inheriting a donor nobody can diff against.
+
+`bun run tools/check_copyfrom.ts` is the regression check: an untouched donor
+writes no record tables, the Mortar case writes `burst = "nothing"` and
+`push_pct = 100` on both a correct and a stale baseline, and a re-base adopts
+the new donor while keeping edited fields. Not covered yet: switching `based_on`
+to a donor of another *family* still leaves `fireType` alone (the archetype
+buttons set both), so the panels and the claim can name different record shapes.
+
 
 Round trip with the stricter check (donor record + emitted diffs + `rec.*`
 leftovers vs. the declared tables): **88 of 115** donor-based weapons reproduce

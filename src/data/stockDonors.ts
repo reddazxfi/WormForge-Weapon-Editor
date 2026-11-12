@@ -35,6 +35,7 @@ export function stockDonorBaseline(slot: string | undefined): WepBaseline | unde
   const donor = stockDonor(slot);
   if (!donor?.body || !donor.action) return undefined;
   return {
+    slot: slot?.toLowerCase(),
     body: { ...donor.body, clustlet: { ...donor.body.clustlet } },
     action: donor.action,
     burst: donor.burst ?? 'nothing',

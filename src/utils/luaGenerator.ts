@@ -9,9 +9,11 @@ import {
   WeaponProject,
 } from '../types/weapon';
 import { getStockPanelPosition } from '../data/stockWeapons';
+import { stockDonorBaseline } from '../data/stockDonors';
 import { resolveStockSprite } from '../data/stockSprites';
 import { supportsFireSequence } from '../data/fireSequence';
 import { COLLISION_FLAGS } from '../data/recordSchema';
+import { defaultArtFor } from './defaultArt';
 import {
   bitActionOf,
   bitBuilderMode,
@@ -618,6 +620,11 @@ export function generateLuaCode(project: WeaponProject): string {
     project.enableCustomLua && /(?:^|\n)[ \t]*on_fire\s*=/.test(project.customLuaSnippet || '');
   const usesFireSequence =
     !!fireSequence?.enabled && !hasCustomOnFire && supportsFireSequence(project);
+  // A held weapon loses its sheet on the repeat-fire frames (WA state 0x6A/0x6B
+  // alternate) from the second shot of a burst: the engine's `hold` only draws
+  // them while `h.firing` is set, and only the turn's fire message sets it.
+  // `wf-lib/px_hold_art` redraws those two states through `wa.on.draw`.
+  const usesHoldArt = !!usesHold && usesFireSequence;
   const shotSoundPath = usesFireSequence ? customSoundPath(project, 'shot') : null;
   // The effects SDK's ribbon trail follows a missile WA builds from this
   // record, so it only applies to the missile families (a strike's bombs are
@@ -629,6 +636,10 @@ export function generateLuaCode(project: WeaponProject): string {
 
   if (usesHold) {
     lines.push('local holds = require("wf-lib/holds")');
+  }
+  if (usesHoldArt) {
+    // Part of the px.fire_seq bundle: covers WA's two repeat-fire frames.
+    lines.push('local hold_art = require("wf-lib/px_hold_art")');
   }
   if (usesMissileSprite) {
     // WFWS's fork: primary + cluster-bit + per-behaviour art in one call.
@@ -694,6 +705,62 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push('');
   }
 
+  // The held-art table. Computed once: with `px_hold_art` it has to exist as a
+  // local before the claim (the helper keeps the table and reads it on every
+  // draw), otherwise it stays inline in the claim.
+  const holdRows: string[] = [];
+  let holdArtSize = 0;
+  if (usesHold) {
+    const h = project.hold;
+    const handIdx = h.handType === 'lower' ? 1 : h.handType === 'upper' ? 3 : 2;
+    holdRows.push(`sheet = ${luaQuote(holdSheetPath(project))},`);
+    holdRows.push(`hand = holds.PX_HANDS[${handIdx}],`);
+    holdRows.push(`hand_type = ${handIdx},`);
+    holdRows.push(`hand_radius = ${h.handRadius ?? 10},`);
+    holdRows.push('hand_rotation = 1,');
+    holdRows.push('hand_radial_rotation = 1,');
+    holdRows.push(`weap_radius = ${h.weapRadius ?? 6},`);
+    holdRows.push(`weap_rotation = ${(1 + (h.weapRotation || 0) / 180).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')},`);
+    holdRows.push('weap_radial_rotation = 1,');
+    holdRows.push(`weap_scale = ${h.scale ?? 1},`);
+    if (h.frames > 1) {
+      holdRows.push(`frames = ${h.frames},`);
+      // worm_hold.rs advances `phase` by anim_speed * 0.03 on every 50 Hz
+      // game frame, so one full cycle takes 0.667 / anim_speed seconds and the
+      // sheet shows 1.5 * frames * anim_speed frames per second. The builder
+      // asks for that real in-game FPS; convert it to the engine multiplier
+      // here so the number on screen is what the game plays.
+      const fps = Math.max(1, Number(h.fps) || 15);
+      const animSpeed = fps / (1.5 * h.frames);
+      if (Math.abs(animSpeed - 1) > 0.0005) {
+        holdRows.push(`anim_speed = ${formatNumber(animSpeed)},`);
+      }
+    }
+    if (h.handScale && h.handScale !== 1) holdRows.push(`hand_scale = ${h.handScale},`);
+    if (!h.drawHand) holdRows.push('draw_hand = false,');
+    if (h.keepWhileFiring) holdRows.push('keep_while_firing = true,');
+    if (h.thrown) holdRows.push('thrown = true,');
+    if (h.putAway) holdRows.push('put_away = true,');
+    if (usesHoldArt) {
+      // `px_hold_art` takes the same table plus these two presentation keys
+      // (the engine ignores them). It has no scale key: `weap_scale` is folded
+      // into `size`, the cell's pixel extent, or the firing frames would draw
+      // at a different size from the aiming frames.
+      const fallback = defaultArtFor(project);
+      const frames = Math.max(1, h.frames || 1);
+      const width = h.sheetWidth ?? fallback.width;
+      // An uploaded sheet is already a strip; the exporter stacks the default
+      // art to `frames`, so its cell is the original image.
+      const cellHeight = h.sheetFile
+        ? (h.sheetHeight ?? fallback.height) / frames
+        : fallback.height;
+      holdArtSize =
+        Math.max(1, Math.round(Math.min(width, cellHeight) * (h.scale ?? 1) * 100) / 100);
+      holdRows.push('weapon = ctx.id,');
+      holdRows.push(`size = ${holdArtSize},`);
+    }
+  }
+
   // Install function
   lines.push('  install = function(ctx)');
   if (usesExplosionEffect) {
@@ -701,6 +768,11 @@ export function generateLuaCode(project: WeaponProject): string {
     // before a round can explode; `trail = true` also installs the ribbon
     // module the trail block below samples with.
     lines.push(`    fx.install{ trail = ${usesRibbonTrail ? 'true' : 'false'} }`);
+  }
+  if (usesHoldArt) {
+    lines.push('    local hold = {');
+    for (const row of holdRows) lines.push(`      ${row}`);
+    lines.push('    }');
   }
   lines.push(extraAssignments.length > 0 ? '    local rec = {' : '    wa.weapons.replace{');
   lines.push(`      name = ${luaQuote(project.name)},`);
@@ -800,6 +872,21 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push(`      sprites = { ${packSprites.join(', ')} },`);
   }
 
+  // `px_hold_art` draws the hold sheet through `wa.draw.quad`, which resolves a
+  // pack path through the same sprite-key registry the claim fills. The engine
+  // already packs every `hold.sheet` into the GPU atlas by itself
+  // (`apply.rs`'s `hold_sheet` test), so this is belt-and-braces: it is the key
+  // PX's own fire_seq weapons pass (`params = { gpu_prefix = "sprites/" }`),
+  // and it keeps the quad's path resolving if a build ever stops claiming the
+  // hold sheet implicitly.
+  //
+  // It is skipped when the claim has art WA itself has to draw from a real slot:
+  // `gpu_prefix` moves every matching path to a virtual atlas id, and a body or
+  // cluster sheet needs the stock id the record points at.
+  if (usesHoldArt && !strikeBodyArt && !clusterBitArt && !clusterBitHomingArt) {
+    lines.push('      params = { gpu_prefix = "sprites/" },');
+  }
+
   // Pack WAVs are declared by path in `sounds`; the engine loads them into
   // WormForge's own sample bank (WA's record sound fields take native ids).
   const packSounds: string[] = [];
@@ -818,7 +905,22 @@ export function generateLuaCode(project: WeaponProject): string {
   // the donor's record, so the donor's decoded values are the baseline. Untouched
   // fields are then left to the engine instead of being written over with the
   // editor's defaults (which is how a donor weapon used to inherit a preset).
-  const baseline = project.useWepFile ? project.wepBaseline : project.donorBaseline;
+  // `copy_from` supplies the donor's record sight-unseen, so the diff base has
+  // to be *that* donor. A baseline decoded from another donor (the Grenade
+  // default, or the donor a project was re-based from) makes every value the
+  // two donors share look "unchanged" and skips it: a mortar carrying the
+  // grenade's burst `nothing` and 100% push exported neither, so the engine's
+  // own clustlets and 0% push survived the user turning them off.
+  const donorSlot = (project.based_on || project.slot || '').replace(/^stock\./, '');
+  const donorBaseline = project.donorBaseline;
+  const baselineMatchesDonor =
+    !donorBaseline?.slot || !donorSlot || donorBaseline.slot === donorSlot;
+  const currentDonorBaseline = stockDonorBaseline(donorSlot) ?? donorBaseline;
+  const baseline = project.useWepFile
+    ? project.wepBaseline
+    : baselineMatchesDonor
+      ? (donorBaseline ?? currentDonorBaseline)
+      : currentDonorBaseline;
   const baseBody = baseline?.body;
   const baseOverrides = baseline?.recordOverrides || {};
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -2172,41 +2274,16 @@ export function generateLuaCode(project: WeaponProject): string {
 
   // Hold Art
   if (usesHold) {
-    const h = project.hold;
-    const handIdx = h.handType === 'lower' ? 1 : h.handType === 'upper' ? 3 : 2;
-    const sheetPath = holdSheetPath(project);
-
     lines.push('      worm_sprites = holds.PX_POSTURE,');
-    lines.push('      hold = {');
-    lines.push(`        sheet = ${luaQuote(sheetPath)},`);
-    lines.push(`        hand = holds.PX_HANDS[${handIdx}],`);
-    lines.push(`        hand_type = ${handIdx},`);
-    lines.push(`        hand_radius = ${h.handRadius ?? 10},`);
-    lines.push('        hand_rotation = 1,');
-    lines.push('        hand_radial_rotation = 1,');
-    lines.push(`        weap_radius = ${h.weapRadius ?? 6},`);
-    lines.push(`        weap_rotation = ${(1 + (h.weapRotation || 0) / 180).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')},`);
-    lines.push('        weap_radial_rotation = 1,');
-    lines.push(`        weap_scale = ${h.scale ?? 1},`);
-    if (h.frames > 1) {
-      lines.push(`        frames = ${h.frames},`);
-      // worm_hold.rs advances `phase` by anim_speed * 0.03 on every 50 Hz
-      // game frame, so one full cycle takes 0.667 / anim_speed seconds and the
-      // sheet shows 1.5 * frames * anim_speed frames per second. The builder
-      // asks for that real in-game FPS; convert it to the engine multiplier
-      // here so the number on screen is what the game plays.
-      const fps = Math.max(1, Number(h.fps) || 15);
-      const animSpeed = fps / (1.5 * h.frames);
-      if (Math.abs(animSpeed - 1) > 0.0005) {
-        lines.push(`        anim_speed = ${formatNumber(animSpeed)},`);
-      }
+    if (usesHoldArt) {
+      // The table itself is declared before the claim (px_hold_art needs it as
+      // a table too); the engine sees the same values here.
+      lines.push('      hold = hold,');
+    } else {
+      lines.push('      hold = {');
+      for (const row of holdRows) lines.push(`        ${row}`);
+      lines.push('      },');
     }
-    if (h.handScale && h.handScale !== 1) lines.push(`        hand_scale = ${h.handScale},`);
-    if (!h.drawHand) lines.push('        draw_hand = false,');
-    if (h.keepWhileFiring) lines.push('        keep_while_firing = true,');
-    if (h.thrown) lines.push('        thrown = true,');
-    if (h.putAway) lines.push('        put_away = true,');
-    lines.push('      },');
   }
 
   // Custom Lua callback (only when checkbox is explicitly enabled)
@@ -2427,6 +2504,16 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push('    wa.weapons.replace(rec)');
   } else {
     lines.push('    }');
+  }
+
+  if (usesHoldArt) {
+    // WA draws the held sheet on the firing frames only while `h.firing` is
+    // set, and the engine sets that on the fire message alone; a fire_seq burst
+    // repeats the shot without one, so 0x6A/0x6B would hide it every other
+    // frame. The helper redraws exactly those two states.
+    lines.push('    -- Keep the held art on WA\'s repeat-fire frames (0x6A/0x6B).');
+    lines.push('    hold_art.add(hold)');
+    lines.push('');
   }
 
   // Effects-SDK ribbon trail (`wf-lib/effects/trail`): PX's effect manager

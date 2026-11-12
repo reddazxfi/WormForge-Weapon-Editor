@@ -255,7 +255,7 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
           <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1">
             {project.useWepFile
               ? 'Disabled while the .wep supplies the firing record.'
-              : `Inherits physics, native handler & sounds from ${selectedDonor?.name || project.based_on}.`}
+              : `Inherits physics, native handler & sounds from ${selectedDonor?.name || project.based_on}. Changing the donor re-bases the record: values still equal to the old donor follow the new one, and your own edits are kept.`}
           </p>
         </div>
 

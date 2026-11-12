@@ -223,6 +223,17 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
 
 - Emission is **diff-based**: with `useWepFile`, compare against
   `wepBaseline`; without it, only emit values that differ from the stock donor.
+- **The donor baseline must be the donor the claim copies.** `copy_from`
+  supplies the donor's whole record, so comparing against a baseline decoded
+  from a *different* donor makes every value the two donors share look
+  "unchanged" and skips it. `WepBaseline.slot` records which donor a baseline
+  came from (`stockDonorBaseline` sets it), and the generator falls back to
+  `stockDonorBaseline(project.based_on)` when it does not match. The editor also
+  re-bases the record when the donor changes (`utils/donorRebase.ts`, called from
+  `App.updateProject`), keeping fields the author edited. Without either half, a
+  Mortar carrying the Grenade's record exported neither `burst = "nothing"` nor
+  `push_pct = 100` (both equal to the Grenade's), so the engine kept the
+  Mortar's clustlets and its 0% push. `tools/check_copyfrom.ts` guards it.
 - `missile.ends_on_contact` and `missile.bounce.hits` are independent masks.
   `bounce.hits` is emitted only when `action = "bounce"`.
 - Collision masks: `worms` (0x3C) may **not** be combined with
@@ -354,7 +365,8 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   - The editor UI is `HoldPreview.tsx` → **WFWS role art** (`FlightRoleEditor`
     cards): bit mode and one row per available behaviour, each with native /
     builder / inherit, upload, animation, frames/FPS/anim speed/spin/scale/depth,
-    and the resolved `sig` ids.
+    and the resolved `sig` ids. (The `sig`/`states` fields are legacy: nothing in
+    the editor emits them, see `resolveBehaviorStates`.)
   - Behaviour art requires the primary builder; with it off the rows are stored
     but not emitted. Strikes have no builder path at all.
   - Known limits: a state does not automatically revert when WA stops writing
@@ -389,6 +401,24 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   gains `px.fire_seq`. A custom Lua `on_fire` owns the trigger, so the card is
   skipped then (the UI says so). Air strikes are excluded: their munitions are
   created by the strike entity, so the slot never fires.
+  **Held art needs `px_hold_art`.** WA draws the held sheet on its firing frames
+  (0x6A/0x6B) only while `h.firing` is set, and the engine sets that from the
+  turn's fire message; a burst repeats the shot without one, so from the second
+  shot the sheet blinks every other frame. When the weapon has hold art the
+  generator also emits `local hold_art = require("wf-lib/px_hold_art")`,
+  declares the hold table as a **local before the claim** (adding `weapon =
+  ctx.id` and `size = cell × weap_scale`, both ignored by the engine) and calls
+  `hold_art.add(hold)` after the replace. `size` is the sheet's pixel cell — the
+  uploaded sheet's width/`height ÷ frames`, else the default art's 46 or 32 —
+  because the helper draws a square quad and has no scale key of its own (a
+  wrong size is the classic "pump looks 2x" bug). `holds` is `wf.sdk`, so the
+  dependency set is `wf.sdk` + `px.fire_seq`; the hold sheet is auto-GPU
+  (`apply.rs`'s `hold_sheet` test), so no `gpu_prefix` is required. The claim
+  still emits `params = { gpu_prefix = "sprites/" }` — PX's own fire_seq weapons
+  pass it and it keeps the quad's pack path resolving if a build ever stops
+  claiming the hold sheet implicitly. It is skipped when the claim also has a
+  body or cluster sheet: the prefix moves every matching path to a virtual atlas
+  id, and those need the real WA slot the record points at.
 - **The burst preview draws the SDK's sheets.** `ExplosionPreview.tsx` loads
   `beam.png` / `beam_glow.png` / `cloud.png` from `public/assets/effects/`
   (copied from `spec/lua_sdk/effects_sdk/sprites/px_effects/`), tints a copy by
@@ -693,6 +723,18 @@ python tools/px_scheme_weps.py "I:/Games/WA 3.6.31.0 + Project X by 0rang3/PXSch
 Each slot's `.wep` is the record that slot plays with; the action slab is at
 +0xA8..+0xD0 (`crates/weapons/src/record.rs`).
 
+`copy_from` diff check (no server, exits 1 on a failure):
+
+```powershell
+bun run tools/check_copyfrom.ts
+```
+
+It builds donor-based projects and asserts that an untouched donor emits no
+record tables, that a Mortar with its clustlets off and a 100% push writes
+`burst = "nothing"` + `push_pct = 100` (with a correct *and* a stale baseline),
+and that re-basing a donor keeps the author's edits while adopting the new
+donor's record.
+
 Compiler check (lives in the code-editor repo):
 
 ```powershell
@@ -845,6 +887,16 @@ that `vite preview` at `/` hides).
     the flown art; before that WA draws the walk from `sprite`. The press is
     lockstep input, so every peer starts the animation on the same frame — use
     it instead of guessing from velocity or position.
+25. **`copy_from` diffs must use that donor's baseline.** The diff base used to
+    be whatever baseline the project carried, even after the donor changed, so
+    every value the old and new donors shared was skipped: a Mortar seeded from
+    the Grenade wrote neither `burst = "nothing"` nor `push_pct = 100` and the
+    engine played its own clusters and 0% push. `WepBaseline.slot` now pins a
+    baseline to its donor (the generator re-derives it when they disagree), and
+    a donor change re-bases the whole record through `rebaseToDonor`, keeping
+    only the values the author actually edited. Never add a donor without
+    updating `stockDonors.json`; an unknown donor falls back to writing the
+    whole record rather than silently inheriting one nobody can diff.
 
 ---
 
