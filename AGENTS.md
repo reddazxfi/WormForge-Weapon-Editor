@@ -300,12 +300,31 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
     (0xAC) / `clusters.bit.homing.sprite` (0x170) while the builder owns that
     art; the builder swaps to the sheet while `arm <= age*20 < arm+time` (50 Hz,
     so one frame is 20 ms; `time = 0` runs until the round lands/blasts).
-  - **Roaming is not a state at all.** WA draws the walking pose from the record
+  - **Roaming gas belongs to whichever record roams.** The Skunk proves the case:
+  its bits are the animals, so `clusters.bit.roam.gas` carries the real numbers
+  (`start_delay_ms = 1`, `poison_power = 5`, `animal_sprite = 174` = `skunk2`)
+  while the primary's group is unused. Both the Roam and Bit Roam sections show
+  it with a stock-sprite picker, and the Hold page's roam card repeats the pose
+  choice.
+- **Roaming is not a state at all.** WA draws the walking pose from the record
     `sprite`, the two flying sheets from `sheep.flight_1/2` and the gas pose from
     `roam.gas.animal_sprite`, so the editor emits `sheep_sprites = { a, b }` for
-    two uploaded poses (the engine installs them and writes the two fields after
+    two uploaded sheets (the engine installs them and writes the two fields after
     the record tables, which is why a numeric `sheep.flight_*` row is skipped
     when both are present). The gas pose stays the numeric record field.
+    **Each flying sheet is a rotation strip, not a pose:** WA turns the animal to
+    its flight direction by picking a frame, exactly like its own `spsheep1/2`
+    and PX's Ghost Sheep (`ghstshp1/2.png` = 60×1920 = 32 cells of 60×60, frame
+    0 up, clockwise). The two sheets are the cape-sway animation WA alternates
+    while you steer. `RoamSheetField` has **Rotate into strip** (bakes 16/32/64
+    frames from one upload) and a frame count for a strip uploaded as-is; the
+    generator declares `frames` in `mod.toml` so the engine slices it.
+    PX's sheep editor shows five sprites: flying / flying 2 are
+    `sheep.flight_1/2` (0xE0/0xE4), farting is `roam.gas.animal_sprite` (0xDC),
+    and taking off / during flight are 0xE8/0xEC — two sheep sprite fields WA
+    reads that `record::fields()` still does not name, so the editor cannot
+    write them (PX fills them with its own ids: 76 and `0x10000 + 77`). That is
+    an engine field to add, not a generator omission.
   - `states = { { scope, sig, sheet/native, … } }` is **legacy**: `sig` assumed
     WA writes behaviour sprites into `m.sprite`, which it does not (that field is
     the flight sprite only). Nothing in the editor emits a state any more —
@@ -365,6 +384,15 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   `atan2(vy, vx) + PI/2` because PX sheets point up.
 - `missile.animation` is the native WA animation id and is unrelated to PX
   `anim`.
+- **A record id can carry `0x10000`.** WA packs a 16.16 phase beside a sprite
+  value, and schemes store `0x10000 + id`: PX's sheep record holds `0x1004D`
+  (sprite 77), its Mole Bomb's flight sound is 65575 (39) and the Skunk's 65578
+  (42). WA masks a sprite value to its low 16 bits (`sprite::draw_phase`,
+  `DisplayGfx__BlitSprite`), so the id is the remainder. `decodeRecordId()` in
+  `src/data/stockSprites.ts` strips it and `wepParser` applies it to every
+  sprite and sound read (inside `spriteName`, plus the numeric dig, roam, gas,
+  sheep and sound fields); the export writes the plain id back. A flagged number
+  written straight into a record draws nothing.
 - **Pack art on record sprite fields.** `missile.trail.sprite` and
   `clusters.bit.trail.sprite` accept a bundle path inside the record tables;
   the engine loads the sheet for that weapon and writes its installed id into
@@ -440,6 +468,11 @@ never declare it without writing the file.
 - Branding: `public/assets/wormforge-logo.png` (327×57 wordmark) and
   `wormforge-mark.png` (49×49, also the favicon), cropped from
   `spec/modloader_banner.png`.
+- Record sprite fields use `StockSpriteInput` (`src/components/StockSpriteInput.tsx`):
+  a text box plus the stock table's datalist, the resolved `name (#id)` hint, a
+  red warning for text the engine would read as a bundle path, and the
+  `0x10000 + id` explanation when a file spelled an id that way. Use it for every
+  record sprite field instead of a bare number or text input.
 - Accessibility conventions already in place: skip link, `aria-current` on nav,
   labelled icon-only buttons, labelled form controls, semantic
   `button`/`select`, `aria-live` toast, `prefers-reduced-motion`. Keep them.
@@ -465,7 +498,9 @@ never declare it without writing the file.
   default missile art. Digging and roaming write no state sheet (the flight
   sheet is the dig animation, and roaming uses `sheep_sprites`).
 - `sprites/<mod>/sheep_flight1.png` / `sheep_flight2.png` when both roaming
-  poses are uploaded (`sheep_sprites` needs exactly two).
+  sheets are uploaded (`sheep_sprites` needs exactly two). They are rotation
+  strips, so `mod.toml` declares their `frames` (the sheet is sliced into that
+  many direction cells).
 - Any `customSprites` entries are written at their declared paths.
 - `mod.toml` declares `[sprites."sprites/<mod>/missile.png"]` for custom flight
   art, the bit, homing-state and roaming-sheep sheets above, and

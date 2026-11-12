@@ -735,6 +735,29 @@ export function resolveStockSprite(value: unknown): number | string | null {
   return stockSpriteId(text) !== undefined ? text : null;
 }
 
+/**
+ * A record id as the file spells it. WA packs a 16.16 phase beside the id, so a
+ * scheme can hold `0x10000 + id` (`0x1004D` = sprite 77, the Mole Bomb's dig
+ * sound 65574 = 38). WA itself masks a sprite value to its low 16 bits
+ * (`sprite::draw_phase`, `DisplayGfx__BlitSprite`), so the id is what remains;
+ * `flagged` lets the UI say the file spelled it that way instead of showing a
+ * number nobody can use.
+ */
+export function decodeRecordId(value: number): { id: number; flagged: boolean } {
+  if (Number.isFinite(value) && value >= 0x10000 && value < 0x20000) {
+    return { id: value - 0x10000, flagged: true };
+  }
+  return { id: value, flagged: false };
+}
+
+/** Every stock sprite, for a picker's datalist. */
+export const STOCK_SPRITE_OPTIONS: ReadonlyArray<{ name: string; id: number; label: string }> =
+  STOCK_SPRITES.filter(([name]) => !name.endsWith('_2')).map(([name, id]) => ({
+    name,
+    id,
+    label: `${name} (#${id})`,
+  }));
+
 /** Sprites that make sense as a native particle trail, for the pickers. */
 export const TRAIL_SPRITES: ReadonlyArray<{ name: string; id: number; label: string }> = [
   { name: 'smklt25', id: 609, label: 'smklt25 - light smoke (WA default)' },

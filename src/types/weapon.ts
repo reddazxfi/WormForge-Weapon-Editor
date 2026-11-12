@@ -203,13 +203,21 @@ export interface PackArtAsset {
  * widths and length are free.
  */
 /**
- * One sheet the engine installs as a WA sprite for a roaming animal. These are
- * single poses (WA picks between the fields), not animation strips.
+ * One sheet the engine installs as a WA sprite for a roaming animal. WA picks
+ * between the two fields and rotates the flying art itself, so a sheet is a
+ * rotation strip: one cell per direction (`frames` in mod.toml slices them).
  */
 export interface RoamSheetAsset {
   file?: File;
   fileName?: string;
   preview?: string;
+  /** Vertical frames in the sheet (32 = a full turn, WA's `airmisl` order). */
+  frames?: number;
+  /** Set when the app baked the rotation strip from `sourceFile`. */
+  rotationFrames?: number;
+  /** The single frame a rotation sheet was built from, for "use original". */
+  sourceFile?: File;
+  sourceName?: string;
 }
 
 /**

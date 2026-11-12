@@ -872,16 +872,30 @@ const TESTS: TestCase[] = [
       action: 'roam',
       body: { sprite: 'sheep' },
       roamSheets: {
-        flight1: { file: file(GRENADE_PNG, 'sheep_flight1.png'), fileName: 'sheep_flight1.png' },
-        flight2: { file: file(ROT_32, 'sheep_flight2.png'), fileName: 'sheep_flight2.png' },
+        // WA rotates the flying animal itself by picking a frame from the
+        // sheet, exactly as PX's Ghost Sheep does (60x1920 = 32 cells). Both
+        // strips are declared with their frame count; 16 vs 32 makes a wrong
+        // slice obvious (16 would show every other direction).
+        flight1: {
+          file: file(ROT_32, 'sheep_flight1.png'),
+          fileName: 'sheep_flight1.png',
+          frames: 32,
+          rotationFrames: 32,
+        },
+        flight2: {
+          file: file(ROT_16, 'sheep_flight2.png'),
+          fileName: 'sheep_flight2.png',
+          frames: 16,
+          rotationFrames: 16,
+        },
       },
     }),
     intent:
-      'Roaming art through `sheep_sprites`: two flying sheets installed as WA sprites and written to `sheep.flight_1` / `flight_2`.',
+      'Roaming art through `sheep_sprites`: two rotation strips installed as WA sprites and written to `sheep.flight_1` / `flight_2` (`frames` in mod.toml slices them).',
     expect:
-      "Steer the sheep after take-off: it alternates our two poses in the air; on the ground and while farting it keeps WA's walking and gas poses.",
+      'Steer the sheep after take-off: the flying art points along the heading and steps round as you steer (32-frame sheet), while the ground walk and fart poses stay WA\'s.',
     watch:
-      'Stock sheep sheets in flight (nothing installed), the same pose twice, or our art on the ground / while farting.',
+      'Stock sheep sheets in flight (nothing installed), art stuck facing up (no `frames` declared), the whole tall strip drawn as one image, or our art on the ground / while farting.',
   },
 ];
 
@@ -969,7 +983,9 @@ for (const test of TESTS) {
     }
   }
 
-  // A roaming animal's two flying sheets (`sheep_sprites`).
+  // A roaming animal's two flying sheets (`sheep_sprites`). WA rotates the
+  // flying animal, so the sheet is a rotation strip and its frame count is
+  // what mod.toml has to declare.
   if (roamSheetPaths(project)) {
     mkdirSync(join(BUNDLE, 'sprites', folder), { recursive: true });
     for (const [which, asset] of [
@@ -978,9 +994,11 @@ for (const test of TESTS) {
     ] as const) {
       if (!asset?.file) continue;
       const path = roamSheetPath(project, which);
-      writeFileSync(join(BUNDLE, path), ROT_32);
+      const frames = asset.frames ?? 1;
+      const source = frames >= 32 ? ROT_32 : frames === 16 ? ROT_16 : GRENADE_PNG;
+      writeFileSync(join(BUNDLE, path), source);
       usedSheets.add(path);
-      spriteDecls.set(path, { frames: 1, fps: 15, play: 'loop' });
+      if (frames > 1) spriteDecls.set(path, { frames, fps: 15, play: 'loop' });
     }
   }
 

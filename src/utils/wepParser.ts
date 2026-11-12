@@ -9,6 +9,7 @@ import {
   DigActionConfig,
 } from '../types/weapon';
 import { COLLISION_FLAGS } from '../data/recordSchema';
+import { decodeRecordId } from '../data/stockSprites';
 
 export interface WepParseResult {
   success: boolean;
@@ -45,8 +46,13 @@ const TRAIL_SPRITE_NAMES: Record<number, string> = {
   611: 'smklt75',
   612: 'smklt100',
 };
-const spriteName = (id: number, names: Record<number, string>): string =>
-  id === 0 ? '' : names[id] ?? String(id);
+// WA packs a 16.16 phase beside an id, so a scheme can hold `0x10000 + id`
+// (the Mole Bomb's dig sound is 65574 = 38). Decode before naming.
+const recNum = (value: number): number => decodeRecordId(value).id;
+const spriteName = (id: number, names: Record<number, string>): string => {
+  const n = recNum(id);
+  return n === 0 ? '' : names[n] ?? String(n);
+};
 
 // `record.rs` keeps the impact-particle flag in the same word as the
 // `bounce.hits` mask (`1 << 30`).
@@ -361,10 +367,10 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
     trailSpeed = bodyRaw[0x70] ?? 0;
     trailBubbles = (bodyRaw[0x74] ?? 0) / 4; // Kind::Fraction(1, 4)
     randomMotion = bodyRaw[0x80] ?? 0;
-    flightSound = bodyRaw[0x90] ?? 0;
+    flightSound = recNum(bodyRaw[0x90] ?? 0);
     explosionSoundEnabled = (bodyRaw[0x94] ?? 0) !== 0;
-    explosionSound = bodyRaw[0x98] ?? 0;
-    explosionSoundBefore = bodyRaw[0x9c] ?? 0;
+    explosionSound = recNum(bodyRaw[0x98] ?? 0);
+    explosionSoundBefore = recNum(bodyRaw[0x9c] ?? 0);
     const impactWord = bodyRaw[0xa8] ?? 0;
     impactParticles = (impactWord & IMPACT_PARTICLES) !== 0;
     // Bounce and homing share the +A8..+D0 body slots. Decode only the active
@@ -373,7 +379,7 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
       bounceHits = impactWord & ~IMPACT_PARTICLES;
       bouncePct = bodyRaw[0xac] ?? 0;
       bounceKeep = bodyRaw[0xb0] ?? 75;
-      bounceSound = bodyRaw[0xb4] ?? 0;
+      bounceSound = recNum(bodyRaw[0xb4] ?? 0);
       bounceContactSides = bodyRaw[0xb8] ?? 0;
       bounceExtraReverse = bodyRaw[0xbc] ?? 0;
       bounceExplosionBias = bodyRaw[0xc0] ?? 0;
@@ -394,7 +400,7 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
     }
     if (missileAction === 4) {
       // DigAction shares the +B0..+C0 body slots with bounce/homing.
-      digSound = bodyRaw[0xb0] ?? 0;
+      digSound = recNum(bodyRaw[0xb0] ?? 0);
       digDiveSprite = bodyRaw[0xb4] ?? 0;
       digSprite1 = bodyRaw[0xb8] ?? 0;
       digSprite2 = bodyRaw[0xbc] ?? 0;
@@ -409,18 +415,18 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
       roamStepHeight = bodyRaw[0xb4] ?? 0;
       roamEdgeAngle = bodyRaw[0xb8] ?? 0;
       roamEdgeSpeed = ((bodyRaw[0xbc] ?? 0) * 3) / 50;
-      roamEdgeSound = bodyRaw[0xc0] ?? 0;
+      roamEdgeSound = recNum(bodyRaw[0xc0] ?? 0);
       roamJumpAngle = bodyRaw[0xc4] ?? 0;
       roamJumpSpeed = ((bodyRaw[0xc8] ?? 0) * 3) / 50;
-      roamJumpSound = bodyRaw[0xcc] ?? 0;
+      roamJumpSound = recNum(bodyRaw[0xcc] ?? 0);
       roamTerrainOffset = bodyRaw[0xd0] ?? 0;
       roamGasStart = bodyRaw[0xd4] ?? 0;
       roamGasPoison = bodyRaw[0xd8] ?? 0;
-      roamGasSprite = bodyRaw[0xdc] ?? 0;
-      roamFlight1 = bodyRaw[0xe0] ?? 0;
-      roamFlight2 = bodyRaw[0xe4] ?? 0;
+      roamGasSprite = recNum(bodyRaw[0xdc] ?? 0);
+      roamFlight1 = recNum(bodyRaw[0xe0] ?? 0);
+      roamFlight2 = recNum(bodyRaw[0xe4] ?? 0);
     }
-    launchSound = bodyRaw[0xf4] ?? 0;
+    launchSound = recNum(bodyRaw[0xf4] ?? 0);
     clusterCount = bodyRaw[0xf8] ?? 5;
     clusterAngle = bodyRaw[0x104] ?? 0;
     clusterSpread = bodyRaw[0x108] ?? 45;
@@ -456,10 +462,10 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
     cGravityPct = bodyRaw[0x148] ?? 100;
     cCountdown = bodyRaw[0x14c] ?? 0;
     cFuse = bodyRaw[0x150] ?? 5000;
-    cFlightSound = bodyRaw[0x154] ?? 0;
+    cFlightSound = recNum(bodyRaw[0x154] ?? 0);
     cExplosionSoundEnabled = (bodyRaw[0x158] ?? 0) !== 0;
-    cExplosionSound = bodyRaw[0x15c] ?? 0;
-    cExplosionSoundBefore = bodyRaw[0x160] ?? 0;
+    cExplosionSound = recNum(bodyRaw[0x15c] ?? 0);
+    cExplosionSoundBefore = recNum(bodyRaw[0x160] ?? 0);
     cExplodeOnSpace = (bodyRaw[0x164] ?? 0) !== 0;
     cSpriteCount = bodyRaw[0x120] ?? 0;
     if (cAction === 2) {
@@ -467,7 +473,7 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
       cBounceHits = bounceWord & ~IMPACT_PARTICLES;
       cBouncePct = bodyRaw[0x170] ?? 0;
       cBounceKeep = bodyRaw[0x174] ?? 75;
-      cBounceSound = bodyRaw[0x178] ?? 0;
+      cBounceSound = recNum(bodyRaw[0x178] ?? 0);
       cBounceContactSides = bodyRaw[0x17c] ?? 0;
       cBounceExtraReverse = bodyRaw[0x180] ?? 0;
       cBounceExplosionBias = bodyRaw[0x184] ?? 0;
@@ -494,13 +500,13 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
         terrain_offset: bodyRaw[0x194] ?? 0,
         edge_jump_angle_deg: bodyRaw[0x17c] ?? 0,
         edge_jump_speed: ((bodyRaw[0x180] ?? 0) * 3) / 50,
-        edge_jump_sound: bodyRaw[0x184] ?? 0,
+        edge_jump_sound: recNum(bodyRaw[0x184] ?? 0),
         jump_angle_deg: bodyRaw[0x188] ?? 0,
         jump_speed: ((bodyRaw[0x18c] ?? 0) * 3) / 50,
-        jump_sound: bodyRaw[0x190] ?? 0,
+        jump_sound: recNum(bodyRaw[0x190] ?? 0),
         gas_start_delay_ms: bodyRaw[0x198] ?? 0,
         gas_poison_power: bodyRaw[0x19c] ?? 0,
-        gas_animal_sprite: bodyRaw[0x1a0] ?? 0,
+        gas_animal_sprite: recNum(bodyRaw[0x1a0] ?? 0),
         flight_1: 0,
         flight_2: 0,
         hits: maskFromBits((bodyRaw[0x16c] ?? 0) & ~IMPACT_PARTICLES),
@@ -509,11 +515,11 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
     } else if (cAction === 4) {
       // DigAction child body: same layout as `missile.dig`.
       cDig = {
-        sound: bodyRaw[0x174] ?? 0,
-        dive_sprite: bodyRaw[0x178] ?? 0,
-        sprite_1: bodyRaw[0x17c] ?? 0,
-        sprite_2: bodyRaw[0x180] ?? 0,
-        sprite_3: bodyRaw[0x184] ?? 0,
+        sound: recNum(bodyRaw[0x174] ?? 0),
+        dive_sprite: recNum(bodyRaw[0x178] ?? 0),
+        sprite_1: recNum(bodyRaw[0x17c] ?? 0),
+        sprite_2: recNum(bodyRaw[0x180] ?? 0),
+        sprite_3: recNum(bodyRaw[0x184] ?? 0),
       };
     }
   } else if (isMine) {
@@ -551,7 +557,7 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
     strikeSpacing = rawOffsets[0x40] ?? 0;
     // `strike.munition_speed` is a fraction: raw / 100.
     strikeMunitionSpeed = (rawOffsets[0x44] ?? 0) / 100;
-    strikePlaneSound = rawOffsets[0x48] ?? 0;
+    strikePlaneSound = recNum(rawOffsets[0x48] ?? 0);
     strikeMunition = rawOffsets[0x4c] ?? 0;
   }
   // Special subtypes have their own per-subtype layouts; the .wep path keeps

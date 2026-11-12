@@ -13,8 +13,11 @@ import {
   behaviorStateSheetPath,
   roamSheetPath,
 } from '../utils/luaGenerator';
+import { StockSpriteInput } from './StockSpriteInput';
+import { stockSpriteName } from '../data/stockSprites';
 import { assetUrl } from '../utils/assetUrl';
 import { defaultArtFor } from '../utils/defaultArt';
+import { buildRotationSheet } from '../utils/rotateSheet';
 import { FlightRoleEditor } from './FlightRoleEditor';
 import {
   DEFAULT_ROLE_ART,
@@ -38,7 +41,9 @@ import {
   Rocket,
   Image as ImageIcon,
   CheckCircle2,
+  Loader2,
   Package,
+  RotateCw,
 } from 'lucide-react';
 
 interface HoldPreviewProps {
@@ -48,8 +53,11 @@ interface HoldPreviewProps {
 
 /**
  * One of a roaming animal's two flying sheets (`sheep_sprites`). WA installs
- * each as a single sprite and alternates the pair while the animal is steered,
- * so there are no frames to configure -- just the pose.
+ * each as a WA sprite and rotates the flying animal itself, so the art has to
+ * carry the rotation: a vertical strip of up to 32 direction frames (frame 0
+ * pointing up, turning clockwise), exactly like PX's `ghstshp1/2.png`
+ * (60x1920). Upload a single frame and bake the strip, or upload a strip and
+ * set its frame count.
  */
 const RoamSheetField: React.FC<{
   id: string;
@@ -59,8 +67,66 @@ const RoamSheetField: React.FC<{
   onChange: (asset: RoamSheetAsset) => void;
 }> = ({ id, label, asset, path, onChange }) => {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [rotating, setRotating] = useState(false);
+  const [rotateError, setRotateError] = useState<string | null>(null);
+  const [rotateFrames, setRotateFrames] = useState(32);
+  const frames = asset?.frames ?? 1;
+  const isGif = /\.gif$/i.test(asset?.fileName || asset?.file?.name || '');
+
+  const handleUpload = (file: File) => {
+    if (asset?.preview) URL.revokeObjectURL(asset.preview);
+    onChange({
+      file,
+      fileName: file.name,
+      preview: URL.createObjectURL(file),
+      frames: 1,
+      rotationFrames: undefined,
+      sourceFile: undefined,
+      sourceName: undefined,
+    });
+    setRotateError(null);
+  };
+
+  const makeRotationSheet = async () => {
+    if (!asset?.file) return;
+    setRotating(true);
+    setRotateError(null);
+    try {
+      const sheet = await buildRotationSheet(asset.file, rotateFrames);
+      if (asset.preview) URL.revokeObjectURL(asset.preview);
+      onChange({
+        file: sheet.file,
+        fileName: sheet.file.name,
+        preview: sheet.previewUrl,
+        frames: sheet.frames,
+        rotationFrames: sheet.frames,
+        sourceFile: asset.sourceFile ?? asset.file,
+        sourceName: asset.sourceName ?? asset.fileName ?? asset.file.name,
+      });
+    } catch (err) {
+      setRotateError((err as Error)?.message || String(err));
+    } finally {
+      setRotating(false);
+    }
+  };
+
+  const restoreOriginal = () => {
+    const source = asset?.sourceFile;
+    if (!source) return;
+    if (asset?.preview) URL.revokeObjectURL(asset.preview);
+    onChange({
+      file: source,
+      fileName: asset?.sourceName || source.name,
+      preview: URL.createObjectURL(source),
+      frames: 1,
+      rotationFrames: undefined,
+      sourceFile: undefined,
+      sourceName: undefined,
+    });
+  };
+
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       <label htmlFor={id} className="text-[11px] font-semibold text-stone-700 dark:text-stone-300">
         {label}
       </label>
@@ -70,7 +136,7 @@ const RoamSheetField: React.FC<{
             <img
               src={asset.preview}
               alt=""
-              className="h-8 w-8 object-contain"
+              className={`h-8 w-8 ${frames > 1 ? 'object-cover object-top' : 'object-contain'}`}
               style={{ imageRendering: 'pixelated' }}
             />
           ) : (
@@ -84,9 +150,7 @@ const RoamSheetField: React.FC<{
           accept="image/png,image/gif"
           onChange={(e) => {
             const file = e.target.files?.[0];
-            if (!file) return;
-            if (asset?.preview) URL.revokeObjectURL(asset.preview);
-            onChange({ file, fileName: file.name, preview: URL.createObjectURL(file) });
+            if (file) handleUpload(file);
           }}
           className="hidden"
         />
@@ -103,6 +167,8 @@ const RoamSheetField: React.FC<{
             onClick={() => {
               if (asset.preview) URL.revokeObjectURL(asset.preview);
               onChange({});
+              setRotateError(null);
+              if (inputRef.current) inputRef.current.value = '';
             }}
             className="text-[11px] text-rose-500 hover:text-rose-600 font-medium"
           >
@@ -110,6 +176,81 @@ const RoamSheetField: React.FC<{
           </button>
         )}
       </div>
+
+      {asset?.file && !isGif && (
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label={`${label} rotation frame count`}
+            value={rotateFrames}
+            onChange={(e) => setRotateFrames(Number(e.target.value))}
+            className="text-[11px] px-2 py-1 rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+          >
+            <option value={16}>16 frames</option>
+            <option value={32}>32 frames</option>
+            <option value={64}>64 frames</option>
+          </select>
+          <button
+            type="button"
+            onClick={makeRotationSheet}
+            disabled={rotating || frames > 1}
+            className="px-2.5 py-1.5 text-[11px] font-semibold bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-300 dark:border-stone-700 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
+            title={
+              frames > 1
+                ? 'Already a strip: remove it and upload the single frame again to rebuild.'
+                : 'Bake a full 360° strip, frame 0 pointing up, clockwise.'
+            }
+          >
+            {rotating ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <RotateCw className="w-3 h-3 text-forge-600 dark:text-forge-400" />
+            )}
+            <span>{frames > 1 ? `Strip (${frames} frames)` : 'Rotate into strip'}</span>
+          </button>
+          {asset.rotationFrames && (
+            <button
+              type="button"
+              onClick={restoreOriginal}
+              className="text-[11px] text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200 font-medium underline"
+            >
+              Use original frame
+            </button>
+          )}
+        </div>
+      )}
+
+      {asset?.file && (
+        <div className="flex items-center gap-2">
+          <label htmlFor={`${id}-frames`} className="text-[10px] text-stone-500 dark:text-stone-400">
+            Frames
+          </label>
+          <input
+            id={`${id}-frames`}
+            type="number"
+            min={1}
+            max={64}
+            value={frames}
+            disabled={isGif || !!asset.rotationFrames}
+            title={
+              asset.rotationFrames
+                ? 'Baked strip: remove the sheet and upload the single frame again to change its frame count.'
+                : undefined
+            }
+            onChange={(e) => {
+              const next = Math.max(1, Math.min(64, Number(e.target.value) || 1));
+              onChange({ frames: next, rotationFrames: next > 1 ? asset.rotationFrames : undefined });
+            }}
+            className="w-16 text-[11px] font-mono px-2 py-1 rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white disabled:opacity-50"
+          />
+          <span className="text-[10px] text-stone-400">
+            {asset.rotationFrames
+              ? 'Baked strip: one cell per direction.'
+              : 'WA picks the frame from the flight direction; 32 = a full turn.'}
+          </span>
+        </div>
+      )}
+
+      {rotateError && <p className="text-[10px] text-rose-500">{rotateError}</p>}
       <p className="font-mono text-[10px] text-stone-400 truncate" title={path}>
         {path}
       </p>
@@ -1723,9 +1864,15 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                     </div>
                     <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
                       WA alternates these two sheets while you steer the animal
-                      (written to `sheep.flight_1` / `sheep.flight_2`, one pose each).
-                      The walking pose is the record body and the gas pose is
-                      `roam.gas.animal_sprite`, both record fields.
+                      (written to `sheep.flight_1` / `sheep.flight_2`), and it
+                      picks the frame from the flight direction: the sheet has to
+                      be a rotation strip (PX's Ghost Sheep ships 60x1920 = 32
+                      frames of 60x60). Upload one frame and hit{' '}
+                      <strong>Rotate into strip</strong>, or upload an existing
+                      strip and set its frame count. Nothing is detected here: the
+                      walking pose is the record body, the gas pose is
+                      `roam.gas.animal_sprite`, and WA picks every one of them
+                      itself.
                     </p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1752,12 +1899,50 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                       }
                     />
                   </div>
+                  <p className="text-[10px] text-stone-400">
+                    Native ids in the record: `flight_1` {project.roamConfig?.flight_1 ?? 0}
+                    {' '}({stockSpriteName(project.roamConfig?.flight_1 ?? 0) ?? 'unused'}),
+                    `flight_2` {project.roamConfig?.flight_2 ?? 0}
+                    {' '}({stockSpriteName(project.roamConfig?.flight_2 ?? 0) ?? 'unused'}).
+                    The uploads replace both, so the numeric rows are skipped while
+                    they are set.
+                  </p>
                   {!!project.roamSheets?.flight1?.file !== !!project.roamSheets?.flight2?.file && (
                     <p className="text-[11px] text-amber-700 dark:text-amber-300">
                       Both sheets are needed: the engine takes exactly two for
                       `sheep_sprites`, so nothing is emitted until the second is uploaded.
                     </p>
                   )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <StockSpriteInput
+                      id="roam-gas-pose"
+                      label="Gas pose (`roam.gas.animal_sprite`)"
+                      numeric
+                      placeholder="0"
+                      value={project.roamConfig?.gas_animal_sprite ?? 0}
+                      onChange={(v) =>
+                        onChange({
+                          roamConfig: {
+                            ...project.roamConfig,
+                            gas_animal_sprite: v === '' ? 0 : Number(v),
+                          },
+                        })
+                      }
+                      desc="Drawn instead of the animal while it emits gas (the Skunk's skunk2 is 174). A stock id, so no upload: WA has no bundle-path field here."
+                    />
+                    <div className="space-y-1 text-[11px] text-stone-500 dark:text-stone-400">
+                      <div className="font-semibold text-stone-700 dark:text-stone-300">
+                        The five PX sheep labels
+                      </div>
+                      <p>
+                        flying / flying 2 → the two uploads (`sheep_sprites`).
+                        taking off (0xE8) and during flight (0xEC) live in two
+                        sheep sprite fields the engine does not name yet, so PX
+                        spells them with its own ids (76 and `0x10000 + 77`).
+                        farting → `roam.gas.animal_sprite`.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

@@ -1030,11 +1030,19 @@ sheet. `resolveBehaviorStates` no longer produces homing/homing-bit states.
 WA draws a roaming animal from three separate places: the walking pose from the
 record `sprite`, `sheep.flight_1`/`flight_2` while it is steered, and
 `roam.gas.animal_sprite` while it farts. The old `roam_flight`/`gas` state rows
-were removed; in their place the Hold page uploads the two flying poses and the
+were removed; in their place the Hold page uploads the two flying sheets and the
 generator emits `sheep_sprites = { a, b }` (the engine installs both as WA
 sprites and writes the record fields after the record tables, so the numeric
 `sheep.flight_*` rows are skipped when both are present). `roamSheetPaths`
-returns null unless *both* poses exist, because the engine requires exactly two.
+returns null unless *both* sheets exist, because the engine requires exactly two.
+
+**The sheets are rotation strips.** WA turns the flying animal to its heading by
+picking a frame from the sheet, and alternates the two fields for the cape sway.
+Its own art is 32 cells of direction (frame 0 up, clockwise), as is PX's Ghost
+Sheep `ghstshp1/2.png` (60x1920). Each upload's card therefore has **Rotate into
+strip** (16/32/64 frames from one frame, via `buildRotationSheet`) plus a frame
+count for a strip uploaded as-is, and `generateModToml` declares `frames` so the
+engine slices it. A single-pose upload is drawn as one cell and never turns.
 
 ### `wfws.sdk` ships under `wf-lib/`
 
@@ -1051,7 +1059,8 @@ where the dependency resolver looks.
   test pack (**WF 27 Roam Sheets** added): no findings.
 - Generated Lua checked for homing builder / homing native / bit homing (arm and
   time from the record, `homing.sprite = 0`, sheet claimed and declared) and for
-  roam with both poses / one pose (`sheep_sprites` + declarations, or nothing).
+  roam with both sheets / one sheet (`sheep_sprites` + `frames` declarations, or
+  nothing).
 
 ### Homing window fix: the values were 0, not 1000
 
@@ -1119,3 +1128,49 @@ groups. Untouched `.wep` imports still emit nothing. A `dig` role also writes it
 sound on a switch (0xB0 is `homing.animation` there), and bounce writes
 `hits = {}` so a donor's mask does not come along (the mask write preserves the
 `impact_particles` bit that shares 0xA8).
+
+### Record ids carry a 16.16 phase (roam, dig, sounds)
+
+WA packs a 16.16 phase beside a sprite value, so schemes store `0x10000 + id`.
+Unpacked from PX's `default.pxs` (`WormForgeNew/tools/px_scheme_weps.py`):
+
+| record | offset | raw | id |
+|---|---|---|---|
+| super_sheep / aqua_sheep | 0xEC (`sheep` sprite) | 65613 = 0x1004D | 77 |
+| dynamite | 0x90 flight sound | 65602 | 66 |
+| magic_bullet | 0x90 | 65598 | 62 |
+| mole_bomb | 0x90 | 65575 | 39 |
+| old_woman | 0x90 | 65601 | 65 |
+| salvation_army | 0x90 | 65597 | 61 |
+| skunk | 0x90 | 65578 | 42 |
+| PX's own notes | `sound.soundIndex` | 0x10042 | 66 ("hisses") |
+
+`sprite::draw_phase` and `DisplayGfx__BlitSprite` (0x56B080) mask the value to
+its low 16 bits, so the id is the remainder and the high word is a phase, not
+part of the id. The parser now decodes before naming (`decodeRecordId`), which
+stops 65613 from reaching a record table the engine cannot draw, and the
+`StockSpriteInput` says when a file spelled an id that way.
+
+### Roam phase: what WA actually draws
+
+PX's sheep editor lists five sprites. Mapped against the record
+(`super_sheep`/`aqua_sheep` both):
+
+| PX label | record | value |
+|---|---|---|
+| flying | `sheep.flight_1` 0xE0 | 154 / 156 (`spsheep1` / `aquashp1`) |
+| flying 2 | `sheep.flight_2` 0xE4 | 155 / 157 (`spsheep2` / `aquashp2`) |
+| taking off | 0xE8 | 76 (`vasebit2`) |
+| during flight | 0xEC | 65613 = sprite 77 + phase |
+| farting | `roam.gas.animal_sprite` 0xDC | 0 |
+
+Only the first two are named by `record::fields()`, so `sheep_sprites` is the
+only bundle path there. 0xE8/0xEC are sheep sprite fields WA reads that the
+engine does not name yet — an engine field to add (phase 6 of the plan), not
+something the generator can emit.
+
+The Skunk is the reverse case worth knowing: its primary action is roam but the
+gas numbers live on the clustlet (`clusters.bit.roam.gas` = delay 1 ms, poison
+5, `animal_sprite` 174 = `skunk2`, bits 1× `skunk1` at 173). The editor shows the
+gas group in both places with a stock picker, and the Hold page's roam card
+shows the same pose choice next to the two `sheep_sprites` uploads.

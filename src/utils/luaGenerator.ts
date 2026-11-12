@@ -2444,14 +2444,21 @@ export function generateModToml(project: WeaponProject): string {
       lines.push('play = "loop"');
     }
   }
-  // A roaming animal's two flying sheets (`sheep_sprites`).
+  // A roaming animal's two flying sheets (`sheep_sprites`). WA rotates the
+  // flying animal itself and picks the frame from the strip, so the declared
+  // frame count is what makes the art turn (PX ships 32).
   const roamSheets = roamSheetPaths(project);
   if (roamSheets) {
-    for (const path of [roamSheets.first, roamSheets.second]) {
+    for (const [path, asset] of [
+      [roamSheets.first, project.roamSheets?.flight1],
+      [roamSheets.second, project.roamSheets?.flight2],
+    ] as const) {
       if (emitted.has(path)) continue;
       emitted.add(path);
       lines.push('');
       lines.push(`[sprites.${luaQuote(path)}]`);
+      const frames = asset?.frames ?? 1;
+      if (frames > 1) lines.push(`frames = ${frames}`);
       lines.push('fps = 15');
       lines.push('play = "loop"');
     }

@@ -10,6 +10,7 @@ import {
   DigActionConfig,
 } from '../types/weapon';
 import { COLLISION_FLAGS, MISSILE_ANIM_HINT, MISSILE_ANIM_TYPES } from '../data/recordSchema';
+import { StockSpriteInput } from './StockSpriteInput';
 import {
   TRAIL_SPRITES,
   resolveStockSprite,
@@ -1099,7 +1100,22 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {roamNum('gas_start_delay_ms', 'Start Delay (`start_delay_ms`)', 'Nonzero arms the emission countdown; 0 leaves it unarmed.', { min: 0, step: 100, unit: 'ms' })}
                   {roamNum('gas_poison_power', 'Disease Power (`poison_power`)', 'Native poison-message amount.', { min: 0 })}
-                  {roamNum('gas_animal_sprite', 'Sprite When Farting (`animal_sprite`)', 'Emitting animal pose; 0 = none.')}
+                  <StockSpriteInput
+                    id="roam-gas-sprite"
+                    label="Sprite When Farting (`animal_sprite`)"
+                    numeric
+                    placeholder="0"
+                    value={project.roamConfig?.gas_animal_sprite ?? 0}
+                    onChange={(v) =>
+                      onChange({
+                        roamConfig: {
+                          ...project.roamConfig,
+                          gas_animal_sprite: v === '' ? 0 : Number(v),
+                        },
+                      })
+                    }
+                    desc="The animal's pose while it emits gas (the Skunk's skunk2 is 174); the gas cloud itself is a separate effect. 0 draws nothing new."
+                  />
                 </div>
               </div>
 
@@ -1108,8 +1124,32 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   Sheep Flight Art (`sheep`)
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {roamNum('flight_1', 'Sprite When Flying (`sheep.flight_1`)', 'First native flying sprite.')}
-                  {roamNum('flight_2', 'Sprite When Flying 2 (`sheep.flight_2`)', 'Second native flying sprite.')}
+                  <StockSpriteInput
+                    id="roam-flight-1"
+                    label="Sprite When Flying (`sheep.flight_1`)"
+                    numeric
+                    placeholder="0"
+                    value={project.roamConfig?.flight_1 ?? 0}
+                    onChange={(v) =>
+                      onChange({
+                        roamConfig: { ...project.roamConfig, flight_1: v === '' ? 0 : Number(v) },
+                      })
+                    }
+                    desc="WA alternates this with flight_2 every 5 frames while the animal is steered. Bundle art goes through the Hold page's two `sheep_sprites` uploads, which replace both ids."
+                  />
+                  <StockSpriteInput
+                    id="roam-flight-2"
+                    label="Sprite When Flying 2 (`sheep.flight_2`)"
+                    numeric
+                    placeholder="0"
+                    value={project.roamConfig?.flight_2 ?? 0}
+                    onChange={(v) =>
+                      onChange({
+                        roamConfig: { ...project.roamConfig, flight_2: v === '' ? 0 : Number(v) },
+                      })
+                    }
+                    desc="The second flying pose (the Super Sheep's spsheep1/2 are 154/155, the Aqua Sheep's aquashp1/2 156/157)."
+                  />
                 </div>
               </div>
 
@@ -1748,7 +1788,22 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         {bitRoamNum('gas_start_delay_ms', 'Start Delay (`start_delay_ms`)', 'Nonzero arms the emission countdown.', { min: 0, step: 100, unit: 'ms' })}
                         {bitRoamNum('gas_poison_power', 'Disease Power (`poison_power`)', 'Native poison-message amount.', { min: 0 })}
-                        {bitRoamNum('gas_animal_sprite', 'Sprite When Farting (`animal_sprite`)', 'Emitting animal pose; 0 = none.')}
+                        <StockSpriteInput
+                          id="bit-roam-gas-sprite"
+                          label="Sprite When Farting (`animal_sprite`)"
+                          numeric
+                          placeholder="0"
+                          value={project.body.clustlet.roam?.gas_animal_sprite ?? 0}
+                          onChange={(v) =>
+                            updateClustlet({
+                              roam: {
+                                ...(project.body.clustlet.roam as RoamActionConfig),
+                                gas_animal_sprite: v === '' ? 0 : Number(v),
+                              },
+                            })
+                          }
+                          desc="The Skunk's gas values live here, on the clustlet: the bits it fires roam and fart."
+                        />
                       </div>
                     </div>
 
@@ -2133,53 +2188,15 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                   <p className="text-[10px] text-stone-400">Initial ejection velocity of trail sprites.</p>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-                    Particle Sprite Identifier (`sprite`)
-                  </label>
-                  {(() => {
-                    const raw = project.recordOverrides['missile.trail.sprite'] ?? 'smklt25';
-                    const resolved = resolveStockSprite(raw);
-                    return (
-                      <>
-                        <input
-                          type="text"
-                          list="wf-trail-sprites"
-                          value={raw}
-                          onChange={(e) => updateOverride('missile.trail.sprite', e.target.value)}
-                          disabled={!project.recordOverrides['missile.trail.enabled']}
-                          className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white disabled:opacity-50"
-                        />
-                        <datalist id="wf-trail-sprites">
-                          {TRAIL_SPRITES.map((sprite) => (
-                            <option key={sprite.name} value={sprite.name}>
-                              {sprite.label}
-                            </option>
-                          ))}
-                        </datalist>
-                        <p className="text-[10px] text-stone-400">
-                          Stock sprite name or id; an uploaded pack sheet replaces
-                          it. `0` disables the trail.
-                        </p>
-                        {resolved === null ? (
-                          <p className="text-[10px] text-rose-600 dark:text-rose-400">
-                            Not a WA stock sprite: the engine would read
-                            &quot;{String(raw)}&quot; as a bundle path and fail the
-                            install, so the export uses `smklt25` instead. Pick one
-                            from the list (or an id) to choose the particles.
-                          </p>
-                        ) : (
-                          <p className="text-[10px] text-stone-500">
-                            →{' '}
-                            {typeof resolved === 'number'
-                              ? `${stockSpriteName(resolved) ?? 'unknown'} (#${resolved})`
-                              : `${resolved} (#${stockSpriteId(resolved) ?? '?'})`}
-                          </p>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
+                <StockSpriteInput
+                  id="trail-sprite"
+                  label="Particle Sprite Identifier (`sprite`)"
+                  value={project.recordOverrides['missile.trail.sprite'] ?? 'smklt25'}
+                  onChange={(v) => updateOverride('missile.trail.sprite', v)}
+                  options={TRAIL_SPRITES}
+                  disabled={!project.recordOverrides['missile.trail.enabled']}
+                  desc="Stock sprite name or id; an uploaded pack sheet replaces it. `0` disables the trail."
+                />
 
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">
@@ -2521,23 +2538,26 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                 Homing Art & Trail (`missile.homing`)
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {spriteField(
-                  'missile.homing.sprite',
-                  'Homing Sprite (`homing.sprite`)',
-                  'homing',
-                  'Stock sprite name or numeric id used while homing.'
-                )}
+                <StockSpriteInput
+                  id="homing-sprite"
+                  label="Homing Sprite (`homing.sprite`)"
+                  value={project.recordOverrides['missile.homing.sprite'] ?? ''}
+                  onChange={(v) => updateOverride('missile.homing.sprite', v)}
+                  desc="Stock sprite name or id drawn while homing. The builder zeroes it and draws its own sheet instead."
+                />
                 {animField(
                   'missile.homing.animation',
                   'Homing Animation Type (`homing.animation`)',
                   0
                 )}
-                {spriteField(
-                  'missile.homing.trail.sprite',
-                  'Homing Trail Sprite (`homing.trail.sprite`)',
-                  '',
-                  'Stock trail sprite name or id; empty or 0 disables it.'
-                )}
+                <StockSpriteInput
+                  id="homing-trail-sprite"
+                  label="Homing Trail Sprite (`homing.trail.sprite`)"
+                  value={project.recordOverrides['missile.homing.trail.sprite'] ?? ''}
+                  onChange={(v) => updateOverride('missile.homing.trail.sprite', v)}
+                  options={TRAIL_SPRITES}
+                  desc="Stock trail sprite name or id; empty or 0 disables it. +0xB4 is the bounce sound, so a switch writes this group in full."
+                />
                 {numField(
                   'missile.homing.trail.power',
                   'Homing Trail Power (`homing.trail.power`)',
