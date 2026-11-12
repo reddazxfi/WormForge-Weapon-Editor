@@ -8,6 +8,7 @@ import {
   Layers,
   Sparkles,
   Wand2,
+  FolderSearch,
   ChevronRight,
   ChevronDown,
 } from 'lucide-react';
@@ -24,6 +25,7 @@ interface SidebarProps {
   activeSubTab: RecordTabId;
   setActiveSubTab: (tab: RecordTabId) => void;
   onImportWep: () => void;
+  onBrowseMods: () => void;
   onExportZip: () => void;
   isDark: boolean;
   setIsDark: (dark: boolean) => void;
@@ -146,6 +148,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeSubTab,
   setActiveSubTab,
   onImportWep,
+  onBrowseMods,
   onExportZip,
   isDark,
   setIsDark,
@@ -302,6 +305,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
           <button
             type="button"
+            onClick={onBrowseMods}
+            className="flex w-full items-center gap-2 rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition-colors hover:border-stone-400 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:bg-stone-800"
+          >
+            <FolderSearch className="h-3.5 w-3.5" aria-hidden="true" />
+            <span className="flex-1 text-left">Read installed mods</span>
+            <ChevronRight className="h-3 w-3 opacity-40" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
             onClick={onExportZip}
             className="flex w-full items-center gap-2 rounded-lg bg-forge-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-forge-700 dark:bg-forge-500 dark:hover:bg-forge-400"
           >
@@ -334,6 +346,7 @@ interface MobileBarProps {
   activeSubTab: RecordTabId;
   setActiveSubTab: (tab: RecordTabId) => void;
   onImportWep: () => void;
+  onBrowseMods: () => void;
   onExportZip: () => void;
   isDark: boolean;
   setIsDark: (dark: boolean) => void;
@@ -346,6 +359,7 @@ export const MobileBar: React.FC<MobileBarProps> = ({
   activeSubTab,
   setActiveSubTab,
   onImportWep,
+  onBrowseMods,
   onExportZip,
   isDark,
   setIsDark,
@@ -365,6 +379,15 @@ export const MobileBar: React.FC<MobileBarProps> = ({
         title="Import .wep"
       >
         <Upload className="h-4 w-4" aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        onClick={onBrowseMods}
+        className="rounded-md border border-stone-300 p-1.5 text-stone-600 dark:border-stone-700 dark:text-stone-300"
+        aria-label="Read installed mods"
+        title="Read installed mods"
+      >
+        <FolderSearch className="h-4 w-4" aria-hidden="true" />
       </button>
       <button
         type="button"

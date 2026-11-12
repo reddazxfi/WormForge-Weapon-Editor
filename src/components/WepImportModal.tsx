@@ -54,7 +54,7 @@ export const WepImportModal: React.FC<WepImportModalProps> = ({ isOpen, onClose,
     let preset: Partial<WeaponProject> = {};
     if (presetName === 'chilli_bomb') {
       preset = {
-        id: 'px.chilli_bomb',
+        id: 'wfws.chilli_bomb',
         name: 'Chilli Bomb',
         description: 'Project X classic: Super Banana base bursting into five incendiary children.',
         slot: 'super_banana',
@@ -132,7 +132,7 @@ export const WepImportModal: React.FC<WepImportModalProps> = ({ isOpen, onClose,
       };
     } else if (presetName === 'girder_launcher') {
       preset = {
-        id: 'px.girder_launcher',
+        id: 'wfws.girder_launcher',
         name: 'Girder Launcher',
         description: 'Specialists weapon: launches girders that stamp permanent terrain.',
         slot: 'bazooka',
@@ -212,7 +212,7 @@ export const WepImportModal: React.FC<WepImportModalProps> = ({ isOpen, onClose,
       };
     } else if (presetName === 'moon_grenade') {
       preset = {
-        id: 'guide.moon_grenade',
+        id: 'wfws.moon_grenade',
         name: 'Moon Grenade',
         description: "WormForge tutorial weapon: Grenade with low gravity and 3 crater excavation.",
         slot: 'grenade',

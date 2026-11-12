@@ -6,6 +6,7 @@ import { RecordEditor } from './components/RecordEditor';
 import { HoldPreview } from './components/HoldPreview';
 import { EffectsWorkspace } from './components/EffectsWorkspace';
 import { WepImportModal } from './components/WepImportModal';
+import { ModBrowserModal } from './components/ModBrowserModal';
 import { LuaPreviewModal } from './components/LuaPreviewModal';
 import { BundleDependencies } from './components/BundleDependencies';
 import { exportModZip, downloadBlob } from './utils/modExporter';
@@ -17,7 +18,7 @@ import type { RecordTabId } from './data/recordTabs';
 import { CheckCircle2 } from 'lucide-react';
 
 const INITIAL_PROJECT: WeaponProject = {
-  id: 'guide.moon_grenade',
+  id: 'wfws.moon_grenade',
   name: 'Moon Grenade',
   description: "WA's Grenade with about a third of gravity and small burst, which digs three craters in the ground.",
   version: '0.1.0',
@@ -198,6 +199,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'editor' | 'hold' | 'effects' | 'code'>('editor');
   const [activeSubTab, setActiveSubTab] = useState<RecordTabId>('missile');
   const [isWepModalOpen, setIsWepModalOpen] = useState(false);
+  const [isModBrowserOpen, setIsModBrowserOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -379,6 +381,7 @@ export default function App() {
         activeSubTab={activeSubTab}
         setActiveSubTab={setActiveSubTab}
         onImportWep={() => setIsWepModalOpen(true)}
+        onBrowseMods={() => setIsModBrowserOpen(true)}
         onExportZip={handleExportZip}
         isDark={isDark}
         setIsDark={setIsDark}
@@ -393,6 +396,7 @@ export default function App() {
           activeSubTab={activeSubTab}
           setActiveSubTab={setActiveSubTab}
           onImportWep={() => setIsWepModalOpen(true)}
+          onBrowseMods={() => setIsModBrowserOpen(true)}
           onExportZip={handleExportZip}
           isDark={isDark}
           setIsDark={setIsDark}
@@ -452,6 +456,14 @@ export default function App() {
           </div>
         </footer>
       </div>
+
+      {isModBrowserOpen && (
+        <ModBrowserModal
+          onClose={() => setIsModBrowserOpen(false)}
+          showToast={showToast}
+          onImport={handleApplyWepImport}
+        />
+      )}
 
       <WepImportModal
         isOpen={isWepModalOpen}

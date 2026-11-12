@@ -539,6 +539,12 @@ export interface WeaponProject {
   // Imported Project X `.wep`. `wep` and `copy_from` are mutually exclusive;
   // when `useWepFile` is true the generator emits `wep = "weps/<file>.wep"`
   // and the exporter copies the original file into the bundle.
+  /**
+   * Record tables read from another bundle's Lua, emitted verbatim over the
+   * base record (a bundled `.wep` or the donor). The engine's own key names, so
+   * a foreign record round-trips before the typed fields know every key.
+   */
+  recordExtra?: Record<string, unknown>;
   useWepFile?: boolean;
   wepFile?: File;
   wepFileName?: string;

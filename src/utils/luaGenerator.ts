@@ -51,6 +51,74 @@ function luaQuote(str: string): string {
   return JSON.stringify(str);
 }
 
+/**
+ * A plain object as Lua table rows. Used for `recordExtra`: the tables a bundle
+ * declared, written back with the engine's own key names. `null` means the
+ * reader could not follow a value, so the key is left out rather than written
+ * as `nil` (which would be a no-op inside a table constructor anyway).
+ */
+function luaTableRows(value: unknown, indent: string): string[] {
+  const rows: string[] = [];
+  if (!value || typeof value !== 'object') return rows;
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (entry === null || entry === undefined) continue;
+    const name = /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ? key : `[${luaQuote(key)}]`;
+    if (Array.isArray(entry)) {
+      rows.push(`${indent}${name} = { ${entry.map((item) => luaValue(item)).join(', ')} },`);
+    } else if (typeof entry === 'object') {
+      rows.push(`${indent}${name} = {`);
+      rows.push(...luaTableRows(entry, `${indent}  `));
+      rows.push(`${indent}},`);
+    } else {
+      rows.push(`${indent}${name} = ${luaValue(entry)},`);
+    }
+  }
+  return rows;
+}
+
+/**
+ * `{ missile: { sprite: 51 } }` -> `rec.missile.sprite = 51`, with a guard for
+ * every parent table so a group the generated record did not create still
+ * exists. Arrays and scalars are written inline.
+ */
+function recordAssignments(extra: Record<string, unknown>): string[] {
+  const lines: string[] = [];
+  const ensured = new Set<string>();
+
+  const ensure = (path: string[]) => {
+    for (let i = 1; i <= path.length; i += 1) {
+      const prefix = path.slice(0, i).join('.');
+      if (ensured.has(prefix)) continue;
+      ensured.add(prefix);
+      lines.push(`    rec.${prefix} = rec.${prefix} or {}`);
+    }
+  };
+
+  const walk = (value: Record<string, unknown>, path: string[]) => {
+    for (const [key, entry] of Object.entries(value)) {
+      if (entry === null || entry === undefined) continue;
+      const name = /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ? key : `[${luaQuote(key)}]`;
+      const next = [...path, name];
+      if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+        walk(entry as Record<string, unknown>, next);
+        continue;
+      }
+      ensure(path);
+      lines.push(`    rec.${next.join('.')} = ${luaValue(entry)}`);
+    }
+  };
+
+  walk(extra, []);
+  return lines;
+}
+
+function luaValue(value: unknown): string {
+  if (typeof value === 'string') return luaQuote(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number' && Number.isFinite(value)) return formatNumber(value);
+  return 'nil';
+}
+
 const WORM_GROUP_KEYS = [
   'worms_normal',
   'worms_acting',
@@ -593,6 +661,14 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push('');
   }
 
+  // Record tables read from another bundle (`recordExtra`): the engine's own
+  // key names, written back over the base record so the module's declared
+  // values win and every key it does not declare keeps the `.wep`/donor value.
+  // They are emitted as explicit assignments rather than a `pairs` merge: the
+  // order is then fixed in the file, which is what wfcheck's `lockstep-pairs`
+  // rule wants, and the result reads like the record it came from.
+  const extraAssignments = project.recordExtra ? recordAssignments(project.recordExtra) : [];
+
   lines.push('return {');
 
   // Defaults block
@@ -626,7 +702,7 @@ export function generateLuaCode(project: WeaponProject): string {
     // module the trail block below samples with.
     lines.push(`    fx.install{ trail = ${usesRibbonTrail ? 'true' : 'false'} }`);
   }
-  lines.push('    wa.weapons.replace{');
+  lines.push(extraAssignments.length > 0 ? '    local rec = {' : '    wa.weapons.replace{');
   lines.push(`      name = ${luaQuote(project.name)},`);
   const wepPath = wepBundlePath(project);
   if (wepPath) {
@@ -2293,7 +2369,14 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push('      end },');
   }
 
-  lines.push('    }');
+  if (extraAssignments.length > 0) {
+    lines.push('    }');
+    lines.push('    -- Values the source bundle declared, over the base record.');
+    lines.push(...extraAssignments);
+    lines.push('    wa.weapons.replace(rec)');
+  } else {
+    lines.push('    }');
+  }
 
   // Effects-SDK ribbon trail (`wf-lib/effects/trail`): PX's effect manager
   // samples the round's position on game frames and draws a tapering ribbon,

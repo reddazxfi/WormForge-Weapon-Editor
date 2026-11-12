@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { WeaponProject, FireType } from '../types/weapon';
 import { STOCK_WEAPONS, STOCK_BY_ID } from '../data/stockWeapons';
 import { sanitizeWepFileName } from '../utils/luaGenerator';
+import { WFWS_PREFIX, weaponIdSuffix, withWfwsPrefix } from '../utils/weaponId';
 import { Image as ImageIcon, Trash2, Info, Sparkles , HelpCircle } from 'lucide-react';
 
 interface WeaponSettingsProps {
@@ -148,18 +149,35 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
           />
         </div>
 
-        {/* Component ID */}
+        {/* Component ID. The `wfws.` namespace is fixed: the editor reads other
+            installed mods, so its own ids must never collide with theirs. */}
         <div>
-          <TooltipLabel label="Component Unique ID" code="id" desc="Rule 1: A weapon is an ID, never a slot number." htmlFor="ws-component-id" />
-          <input
-            id="ws-component-id"
-            type="text"
-            value={project.id}
-            onChange={(e) => onChange({ id: e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, '') })}
-            placeholder="guide.moon_grenade"
-            maxLength={64}
-            className="w-full px-3 py-2 text-sm font-mono bg-stone-50 dark:bg-stone-800/60 border border-stone-300 dark:border-stone-700 rounded-lg text-stone-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-forge-500"
+          <TooltipLabel
+            label="Component Unique ID"
+            code="id"
+            desc="Rule 1: A weapon is an ID, never a slot number. The wfws. namespace is fixed so an id can never collide with a mod this editor reads."
+            htmlFor="ws-component-id"
           />
+          <div className="flex items-stretch rounded-lg border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/60 focus-within:ring-2 focus-within:ring-forge-500 overflow-hidden">
+            <span
+              className="px-2.5 flex items-center text-sm font-mono text-stone-500 dark:text-stone-400 bg-stone-100 dark:bg-stone-800 border-r border-stone-300 dark:border-stone-700 select-none"
+              aria-hidden="true"
+            >
+              {WFWS_PREFIX}
+            </span>
+            <input
+              id="ws-component-id"
+              type="text"
+              value={weaponIdSuffix(project.id)}
+              onChange={(e) => onChange({ id: withWfwsPrefix(e.target.value) })}
+              placeholder="moon_grenade"
+              maxLength={64 - WFWS_PREFIX.length}
+              className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-transparent text-stone-900 dark:text-white focus:outline-hidden"
+            />
+          </div>
+          <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400 font-mono">
+            {project.id}
+          </p>
         </div>
 
         {/* Author */}

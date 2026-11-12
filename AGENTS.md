@@ -486,6 +486,54 @@ never declare it without writing the file.
 
 ---
 
+## 8a. Reading other mods (`src/utils/modLib/`)
+
+The editor can read installed bundles, so a weapon from `Mods/` can be
+inspected without a `.wep`. `ModBrowserModal` (sidebar → **Read installed
+mods**, also the mobile bar) takes a folder, a `.zip` or a drop and lists every
+bundle, its weapon components and the record tables each one keeps in Lua.
+
+- `luaTable.ts` reads Lua **data** only: table literals from `a.b = { … }`,
+  `a.b{ … }`, `a.b({ … })`, `a.b(name)` and `return { … }`. Function bodies are
+  skipped as values but still walked through, because this editor's own
+  bundles put `wa.weapons.replace{ … }` inside `install = function(ctx)`.
+  Anything that is not a literal becomes `null` instead of failing the file.
+- `modToml.ts` reads the manifest (scalars, `dependencies`, `[[components]]`,
+  `[sprites."…"]`).
+- `scan.ts` finds nested bundles by their own `mod.toml` and resolves each
+  weapon component to its module: its own entry when unique, else
+  `weapons/index.lua`, else `weapons/<id after the dot>.lua`; then one level of
+  `require("lib/…")`. A table is accepted as a record by shape (`missile`,
+  `clusters`, `handling`, `gun`, `mine`, `strike`) when nothing names it.
+- `loadFiles.ts` is the web-safe input: `webkitdirectory`, JSZip, and
+  `webkitGetAsEntry` drops; `.lua`/`.toml` as text, `.wep` as bytes. A native
+  path read would need `@tauri-apps/plugin-fs`, which is not a dependency.
+- A module can name a `.wep` (`wep = "X.wep"`, sometimes assembled as
+  `M.WEP .. o.wep`): the literal is matched against the bundle's own files by
+  base name, so 41 of 262 weapons on the dev machine resolve one.
+- `importWeapon.ts` builds a project the way the engine loads a bundle: the
+  `.wep` first (`parseWepBinary`, `useWepFile` + the file kept for export), else
+  `copy_from = "stock.<donor>"`; then the module's declared tables are carried
+  as **`recordExtra`**. `defaults` map to the project's defaults, and
+  `missile.action` / `missile.burst` to `action` / `burst`. The bundle's Lua
+  code is never carried (`enableCustomLua = false`) — its callbacks require
+  that bundle's own libraries.
+- **`recordExtra` emission** (`luaGenerator`): only the six native record groups
+  (`missile`, `clusters`, `handling`, `gun`, `mine`, `strike`) are carried; a
+  bundle's spec table also holds claim keys (`sprites`, `hold`, `params`,
+  `worm_sprites`, sounds, callbacks) that name art inside *that* bundle. The
+  values are written as explicit `rec.<path> = …` assignments with guarded
+  parents (`rec.missile = rec.missile or {}`) after a `local rec = { … }`
+  record, then `wa.weapons.replace(rec)` — never a `pairs` merge, which wfcheck
+  reports as `lockstep-pairs`. Full mapping of these values into the typed
+  panels is the next step.
+- Corpus: `bun run tools/scan_mods.ts [ModsFolder]` — 240 of 262 weapons read
+  from the dev machine. Misses are stock-copy examples, templates, and records
+  that only exist in a bundled `.wep`.
+
+Ids are namespaced: `src/utils/weaponId.ts` fixes `wfws.` and the ID field
+edits the suffix only, so no id can collide with a mod the reader shows.
+
 ## 9. UI and design system
 
 - Tailwind v4, no component library. The layout is Chakra-dashboard-inspired but

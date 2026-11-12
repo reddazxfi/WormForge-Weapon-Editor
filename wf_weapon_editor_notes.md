@@ -1263,3 +1263,109 @@ purpose.
 
 Test pack **WF 30 Builder Size Angle** (grenade, `size = 1.6`, `angle = -90`)
 covers both.
+
+### Reading installed mods
+
+A reader for bundles that are already installed, so their records can be
+inspected (and, next, imported) without decoding a `.wep`. It lives in
+`src/utils/modLib/`:
+
+- `luaTable.ts` — a Lua **data** reader, not an evaluator. It walks a file's
+  tokens and keeps every table literal it can see: `a.b = { … }`,
+  `a.b{ … }`, `a.b({ … })`, `a.b(name)` (the table looked up by that name) and
+  the file's `return { … }`. Function bodies are skipped *as values*, but the
+  linear pass still walks through them, because `return { install = function()
+  wa.weapons.replace{ … } end }` is exactly how this editor's own bundles are
+  written. Non-literal values (calls, arithmetic, functions) become `null`
+  rather than aborting, so one odd field cannot lose a record.
+- `modToml.ts` — scalars, string arrays, `[[components]]` and
+  `[sprites."path"]`, tolerant of anything it does not model.
+- `scan.ts` — `readBundles` finds every `mod.toml` in a file map (nested
+  bundles like `wf-lib/px` included) and `readWeapons` resolves each weapon
+  component to its Lua module: the component's own entry when it is unique,
+  else `weapons/index.lua` (PX's ports share one `components/weapon.lua` and
+  map ids to modules there), else `weapons/<id after the dot>.lua`. When a
+  module has no record it follows that module's `require("lib/…")` one level
+  deep — PX's Ninja Star keeps its `wa.weapons.replace{ … }` in
+  `lib/px_ninja_star.lua`. A record is recognised by its shape (`missile`,
+  `clusters`, `handling`, `gun`, `mine`, `strike`) as a last resort, which
+  catches `weapon.definition` and locals.
+- `loadFiles.ts` — folder picker (`webkitdirectory`, which also opens Tauri's
+  native dialog), `.zip` through the JSZip the exporter already uses, and
+  dropped folders/files through `webkitGetAsEntry`. Nothing is uploaded.
+
+`ModBrowserModal` (sidebar → **Read installed mods**, also the mobile bar) shows
+the bundles, filters their weapons, and prints the flattened record of the
+selected one with **Copy tables** / **Copy id**.
+
+Corpus check (`bun run tools/scan_mods.ts`, folders and `.zip`):
+
+| source | weapons | records read |
+| --- | --- | --- |
+| `D:/Worms Armageddon/WormForge/Mods` | 262 | 240 |
+| of which `px.ports` | 92 | 83 |
+
+The 22 misses are `example.tools` (70 components that place stock weapons and
+Keep no Lua record), the Holdable Uzi template (no record yet) and a handful of
+PX weapons whose record lives in a `.wep` file (`pyro.replace` passes
+`wep = "…wep"`) — reading those means handing the bundled `.wep` to the
+existing decoder, which is the natural next step.
+
+The editor's own ids are now namespaced: `weaponId.ts` fixes the `wfws.` prefix
+and the ID field edits only the part after the dot, so an id can never collide
+with a mod the reader shows (`px.*`, `wf.sdk`, …). `sanitizeModFolder` already
+used the last segment, so export folder names are unchanged.
+
+### Importing a bundle weapon: the `.wep` first, the declared tables over it
+
+`readWeapons` now also resolves a bundled `.wep`: any string literal ending in
+`.wep` in the weapon module (or in the `lib/` module it defers to) is matched
+against the bundle's own files by base name, because PyroMan assembles it by
+concatenation (`M.WEP .. o.wep`, with the literal in the weapon file). Result:
+41 of the dev machine's 262 weapons carry a `.wep`, and `px.pyroman_grenades`
+went from 0/7 to 7/7 readable even though those modules declare no record at
+all.
+
+`importBundleWeapon` then builds the project the way the engine would load it:
+
+1. `.wep` found → `parseWepBinary` decodes it, and the import keeps the file
+   (`useWepFile`, `wepFile`, `wepFileName`) so the export writes
+   `wep = "weps/<file>.wep"` plus the original bytes, exactly like a `.wep`
+   import. `wepBaseline` is the decoded record, so untouched typed fields emit
+   nothing.
+2. No `.wep` → the base is `copy_from = "stock.<donor>"` and the declared tables
+   are the whole record.
+3. `defaults` (ammo/delay/crate/after_use) map into the project's `defaults`;
+   `missile.action` / `missile.burst` map to `action` / `burst`.
+
+The module's tables are carried as **`recordExtra`** and emitted over the base
+record, so the export is faithful before the typed panels know every key:
+
+```lua
+    local rec = {
+      name = "Banana Express",
+      copy_from = "stock.grenade",
+      ...
+    }
+    -- Values the source bundle declared, over the base record.
+    rec.missile = rec.missile or {}
+    rec.missile.animation = 1
+    rec.missile.bounce = rec.missile.bounce or {}
+    rec.missile.bounce.bounciness = 60
+    ...
+    wa.weapons.replace(rec)
+```
+
+Explicit assignments, not a `pairs` merge: the order is fixed in the file
+(wfcheck's `lockstep-pairs` note), parents are guarded so a group the generated
+record never created still exists, and the output reads like the record it came
+from. Only the six native record groups are carried (`missile`, `clusters`,
+`handling`, `gun`, `mine`, `strike`): a bundle's `wa.weapons.replace{ … }` also
+holds claim keys (`sprites`, `hold`, `params`, `worm_sprites`, `sounds`,
+callbacks) that name art inside *that* bundle, and writing those into an export
+would point at files we do not copy.
+
+A bundle's Lua code is never carried either: its callbacks require that
+bundle's own libraries, so the import sets `enableCustomLua = false`. Full
+mapping of `recordExtra` into the typed panels is the next step; until then the
+panels show the `.wep`/donor values while the export writes the real record.

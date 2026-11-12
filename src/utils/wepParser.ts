@@ -10,6 +10,7 @@ import {
 } from '../types/weapon';
 import { COLLISION_FLAGS } from '../data/recordSchema';
 import { decodeRecordId } from '../data/stockSprites';
+import { withWfwsPrefix } from './weaponId';
 
 export interface WepParseResult {
   success: boolean;
@@ -732,7 +733,9 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
   if (shots > 0) recordOverrides['handling.shots'] = shots;
   if (retreat > 0) recordOverrides['handling.retreat'] = retreat;
 
-  const cleanId = 'px.' + weaponName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  // The editor's own namespace is fixed: a decoded `.wep` becomes a `wfws.`
+  // bundle, never one that could look like a mod it reads.
+  const cleanId = withWfwsPrefix(weaponName);
 
   const projectState: Partial<WeaponProject> = {
     id: cleanId,
