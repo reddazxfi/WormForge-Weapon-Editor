@@ -58,7 +58,7 @@ export const RECORD_TABS: RecordTabDef[] = [
     parent: 'action',
   },
   { id: 'callbacks', label: 'Lua Callbacks', hint: 'Custom event handlers', icon: Code2 },
-  { id: 'gun_mine', label: 'Gun / Mine Specifics', hint: 'Hitscan, mine, strike', icon: Cpu },
+  { id: 'gun_mine', label: 'Family Specifics', hint: 'Gun, mine, strike, special, arrow', icon: Cpu },
 ];
 
 /** The cluster bit's action, from the same expression the editor uses. */

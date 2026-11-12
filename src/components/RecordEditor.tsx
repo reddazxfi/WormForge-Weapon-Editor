@@ -106,6 +106,30 @@ import { bitActionOf, type RecordTabId } from '../data/recordTabs';
 import { bitBuilderMode } from '../data/spriteBuilder';
 import { PackSpriteUpload } from './PackSpriteUpload';
 
+/** `fires.subtype` values with a native behaviour the record can configure. */
+const SPECIAL_SUBTYPES: { value: number; label: string }[] = [
+  { value: 1, label: '1 — Fire Punch' },
+  { value: 2, label: '2 — Baseball Bat' },
+  { value: 8, label: '8 — Pneumatic Drill' },
+  { value: 12, label: '12 — Parachute' },
+  { value: 19, label: '19 — Turn utility' },
+  { value: 23, label: '23 — Jet Pack' },
+  { value: 0, label: '0 — other / inherited' },
+];
+
+/** `utility.effect` values, in the engine's order. */
+const UTILITY_EFFECTS = [
+  'low_gravity',
+  'fast_walk',
+  'laser_sight',
+  'invisibility',
+  'damage_x2',
+  'crate_spy',
+  'double_turn_time',
+  'crate_shower',
+  'scripted',
+];
+
 interface RecordEditorProps {
   project: WeaponProject;
   onChange: (updated: Partial<WeaponProject>) => void;
@@ -2667,10 +2691,12 @@ end,`,
         <div className="p-6 space-y-6">
           <div>
             <h3 className="font-heading text-sm font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
-              Gun, Mine & Air Strike Families
+              Family Specifics
             </h3>
             <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
-              Parameters for hitscan firearms (`gun`), proximity explosives (`mine`), and aerial strikes (`strike`).
+              Parameters for hitscan firearms (`gun`), proximity explosives (`mine`), aerial strikes
+              (`strike`), and the native behaviour of arrows and specials (`fires`, `arrow`,
+              `fire_punch`, `drill`, `jet_pack`, `parachute`, `utility`).
             </p>
           </div>
 
@@ -2778,6 +2804,118 @@ end,`,
                   </select>
                 </div>
               </div>
+            </div>
+            {/* Native family parameters: the firing header's launch power, and
+                the per-family / per-special-subtype groups. */}
+            <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-4">
+              <div className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
+                Native Behaviour (`fires`, `arrow`, `fire_punch`, `drill`, `jet_pack`, `parachute`, `utility`)
+              </div>
+
+              {(project.fireType === 'power' || project.fireType === 'drop') && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {numField(
+                    'fires.launch_power_pct',
+                    'Launch Power (`launch_power_pct`)',
+                    100,
+                    'Missile launch power as a percentage; 50 is half. 0 is the engine sentinel for "charged", not "no power".',
+                    { min: 0, max: 400, unit: '%' },
+                  )}
+                </div>
+              )}
+
+              {project.fireType === 'arrow' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {numField('arrow.damage', 'Arrow Damage (`arrow.damage`)', 0, 'Native arrow hit damage, as the Longbow uses it.', { min: 0, max: 200 })}
+                </div>
+              )}
+
+              {project.fireType === 'special' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="special-subtype"
+                        className="text-xs font-semibold text-stone-700 dark:text-stone-300"
+                      >
+                        Native Subtype (`fires.subtype`)
+                      </label>
+                      <select
+                        id="special-subtype"
+                        value={String(project.specialSubtype ?? 1)}
+                        onChange={(e) => onChange({ specialSubtype: Number(e.target.value) })}
+                        className="w-full text-xs px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                      >
+                        {SPECIAL_SUBTYPES.map((entry) => (
+                          <option key={entry.value} value={entry.value}>
+                            {entry.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[11px] text-stone-500">
+                        Selects which native behaviour the record drives. The fields below belong to
+                        the selected subtype; the others share the same offsets.
+                      </p>
+                    </div>
+                  </div>
+
+                  {project.specialSubtype === 1 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {numField('fire_punch.damage', 'Punch Damage (`fire_punch.damage`)', 0, 'Hit damage of the Fire Punch behaviour.', { min: 0, max: 200 })}
+                      {numField('fire_punch.knockback', 'Punch Knockback (`fire_punch.knockback`)', 0, 'Victim hit strength in pixels/frame, in steps of 0.1.', { min: 0, max: 50, step: 0.1 })}
+                    </div>
+                  )}
+                  {project.specialSubtype === 2 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {numField('baseball_bat.damage', 'Bat Damage (`baseball_bat.damage`)', 0, 'Hit damage of the Baseball Bat behaviour.', { min: 0, max: 200 })}
+                      {numField('baseball_bat.knockback_scale', 'Bat Knockback (`baseball_bat.knockback_scale`)', 1, 'Multiplier on the native firing vector, in steps of 0.1.', { min: 0, max: 10, step: 0.1 })}
+                    </div>
+                  )}
+                  {project.specialSubtype === 8 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {numField('drill.duration_ms', 'Drill Duration (`drill.duration_ms`)', 0, 'How long the Pneumatic Drill runs.', { min: 0, max: 20000, step: 100, unit: 'ms' })}
+                    </div>
+                  )}
+                  {project.specialSubtype === 12 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {numField('parachute.wind_pct', 'Parachute Wind (`parachute.wind_pct`)', 100, 'Wind response percentage; 100 is normal, 0 ignores wind. Steering and momentum are unchanged.', { min: 0, max: 400, unit: '%' })}
+                    </div>
+                  )}
+                  {project.specialSubtype === 23 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {numField('jet_pack.fuel', 'Jet Pack Fuel (`jet_pack.fuel`)', 0, 'Native fuel setting, 0 to 255; 0 means unlimited.', { min: 0, max: 255 })}
+                    </div>
+                  )}
+                  {project.specialSubtype === 19 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div className="space-y-1.5">
+                        <label
+                          htmlFor="utility-effect"
+                          className="text-xs font-semibold text-stone-700 dark:text-stone-300"
+                        >
+                          Utility Effect (`utility.effect`)
+                        </label>
+                        <select
+                          id="utility-effect"
+                          value={String(project.recordOverrides['utility.effect'] ?? 'low_gravity')}
+                          onChange={(e) => updateOverride('utility.effect', e.target.value)}
+                          className="w-full text-xs px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                        >
+                          {UTILITY_EFFECTS.map((effect) => (
+                            <option key={effect} value={effect}>
+                              {effect.replace(/_/g, ' ')}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[11px] text-stone-500">
+                          The native effect the weapon toggles for the team. Use `scripted` when Lua
+                          supplies it, as Wind Changer and Gravity Control do.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

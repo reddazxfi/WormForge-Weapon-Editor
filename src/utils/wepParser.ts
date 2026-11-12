@@ -115,6 +115,23 @@ function readUint32LE(view: DataView, offset: number): number {
   return view.getUint32(offset, true);
 }
 
+/**
+ * `utility.effect` values, in the engine's order
+ * (`crates/weapons/src/record.rs` `UTILITY_EFFECTS`). Index 8 is the
+ * placeholder PX uses while Lua supplies the effect.
+ */
+const UTILITY_EFFECTS = [
+  'low_gravity',
+  'fast_walk',
+  'laser_sight',
+  'invisibility',
+  'damage_x2',
+  'crate_spy',
+  'double_turn_time',
+  'crate_shower',
+  'scripted',
+] as const;
+
 export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseResult {
   const bytes = new Uint8Array(buffer);
   if (bytes.length < 4 + WEAPON_ENTRY_SIZE) {
@@ -659,6 +676,39 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
   }
 
   const recordOverrides: Record<string, any> = {};
+
+  // Firing header (`fires.*`). `launch_power_pct` is the missile launch power;
+  // 0 is the engine's "charged" sentinel, not "no power". `type`/`method` are
+  // the family selectors and stay out of the model: the archetype owns them.
+  if (isMissile) {
+    recordOverrides['fires.launch_power_pct'] = rawOffsets[0x40] ?? 0;
+  }
+  recordOverrides['fires.creates_projectile'] = (rawOffsets[0x20] ?? 0) !== 0;
+
+  // Family-specific native parameters. Each group belongs to one family or one
+  // special subtype (`crates/weapons/src/record.rs`), so only the matching one
+  // is decoded -- the others share the same offsets.
+  if (isArrow) {
+    recordOverrides['arrow.damage'] = rawOffsets[0x3c] ?? 0;
+  }
+  if (isSpecial) {
+    if (subtype === 1) {
+      recordOverrides['fire_punch.damage'] = rawOffsets[0x38] ?? 0;
+      recordOverrides['fire_punch.knockback'] = (rawOffsets[0x40] ?? 0) / 10;
+    } else if (subtype === 2) {
+      recordOverrides['baseball_bat.damage'] = rawOffsets[0x38] ?? 0;
+      recordOverrides['baseball_bat.knockback_scale'] = (rawOffsets[0x3c] ?? 0) / 10;
+    } else if (subtype === 8) {
+      recordOverrides['drill.duration_ms'] = rawOffsets[0x44] ?? 0;
+    } else if (subtype === 12) {
+      recordOverrides['parachute.wind_pct'] = rawOffsets[0x38] ?? 0;
+    } else if (subtype === 19) {
+      recordOverrides['utility.effect'] = UTILITY_EFFECTS[rawOffsets[0x3c] ?? 0] ?? 'low_gravity';
+    } else if (subtype === 23) {
+      recordOverrides['jet_pack.fuel'] = rawOffsets[0x38] ?? 0;
+    }
+  }
+
   if (isMissile || isStrike) {
     // Keep every decoded body value in the model. The generator compares
     // against `wepBaseline` and only writes the ones the user changes, so

@@ -684,6 +684,39 @@ export function mapRecord(
     };
   }
 
+  // ---- native family groups ----------------------------------------------
+  // `fires`, `arrow`, `baseball_bat`, `fire_punch`, `drill`, `jet_pack`,
+  // `parachute` and `utility` are flat tables of scalars. They go straight into
+  // the overrides, which is where the panels and the generator read them.
+  const NATIVE_GROUPS: Record<string, string[]> = {
+    fires: ['launch_power_pct', 'creates_projectile'],
+    arrow: ['damage'],
+    baseball_bat: ['damage', 'knockback_scale'],
+    fire_punch: ['damage', 'knockback'],
+    drill: ['duration_ms'],
+    jet_pack: ['fuel'],
+    parachute: ['wind_pct'],
+    utility: ['effect'],
+  };
+  // `fires.type` / `method` / `subtype` are the family and behaviour selectors:
+  // the archetype (`fireType`) and `specialSubtype` own them, so they are
+  // consumed and dropped rather than left in `recordExtra`, where they would be
+  // written after the record and override the archetype's own subtype.
+  const SELECTORS: Record<string, string[]> = {
+    fires: ['type', 'method', 'subtype'],
+  };
+  for (const [group, fields] of Object.entries(NATIVE_GROUPS)) {
+    const table = tape.take(group);
+    if (!isTable(table)) continue;
+    const g = new Tape(table);
+    for (const field of fields) {
+      const value = g.take(field);
+      if (value !== undefined && value !== null) overrides[`${group}.${field}`] = value;
+    }
+    for (const field of SELECTORS[group] ?? []) g.take(field);
+    keep([group], g.remaining);
+  }
+
   // ---- on_select (a cursor record's teleport flag) ------------------------
   const onSelect = tape.take('on_select');
   if (isTable(onSelect) && onSelect.cursor === true) teleport = true;

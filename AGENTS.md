@@ -541,6 +541,20 @@ bundle, its weapon components and the record tables each one keeps in Lua.
   record, then `wa.weapons.replace(rec)` — never a `pairs` merge, which wfcheck
   reports as `lockstep-pairs`. Full mapping of these values into the typed
   panels is the next step.
+- **Record audit**: `bun run tools/audit_records.ts [ModsFolder]` — coverage of
+  every record group `record.rs` names, engine invariants (mask conflicts, burst
+  without its table, sprite fields holding paths), 28 stock-slot behaviour
+  expectations against the decoded donors, and the editor's own output
+  (import → generate → check the record the engine would end up with). Keep it
+  at zero findings.
+- **Native family groups** (`fires`, `arrow`, `baseball_bat`, `fire_punch`,
+  `drill`, `jet_pack`, `parachute`, `utility`) are flat scalar tables: decoded
+  by the parser, mapped into `recordOverrides`, emitted by the generator's
+  `NATIVE_GROUPS` loop, and edited in the record page's **Family Specifics**
+  tab. `fires.type`/`method`/`subtype` are selectors the archetype and
+  `specialSubtype` own — the mapper consumes them so they cannot leak into
+  `recordExtra` and override the archetype. `clusters.bit.sprite_count` is
+  floored at 1: the engine divides by it.
 - Corpus: `bun run tools/scan_mods.ts [ModsFolder]` — 240 of 262 weapons read
   from the dev machine. Misses are stock-copy examples, templates, and records
   that only exist in a bundled `.wep`.

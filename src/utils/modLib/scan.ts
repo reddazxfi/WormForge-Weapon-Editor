@@ -61,6 +61,12 @@ export interface ModWeapon {
   modulePath: string;
   /** The record tables (`missile`, `clusters`, `handling`, …). */
   record?: LuaTable;
+  /**
+   * The module's whole spec table, before it was filtered to the record groups:
+   * claim-level keys (`sprites`, `hold`, `sounds`, callbacks) included. Used by
+   * the audit to see what a bundle declares that the editor does not model.
+   */
+  source?: LuaTable;
   /** `defaults` (ammo, delay, crate) when the module spells a table. */
   defaults?: LuaTable;
   /** `copy_from = "stock.grenade"`, when the module names a donor. */
@@ -159,8 +165,22 @@ export function readBundles(files: ModFile[]): ModBundle[] {
 }
 
 const RECORD_KEYS = ['missile', 'clusters', 'handling', 'gun', 'mine', 'strike'];
-/** The groups the engine reads as the native record, in spec order. */
-const RECORD_GROUPS = RECORD_KEYS;
+/**
+ * The groups the engine reads as the native record, in spec order. The flat
+ * family groups (`fires`, `arrow`, `fire_punch`, …) are record fields too, not
+ * claim keys, so they are carried as well.
+ */
+const RECORD_GROUPS = [
+  ...RECORD_KEYS,
+  'fires',
+  'arrow',
+  'baseball_bat',
+  'fire_punch',
+  'drill',
+  'jet_pack',
+  'parachute',
+  'utility',
+];
 
 /** True when a table looks like a weapon record rather than a config blob. */
 function looksLikeRecord(table: LuaTable | undefined): boolean {
@@ -198,6 +218,7 @@ function requiresOf(text: string): string[] {
 /** The record tables a weapon module spells, whichever style it uses. */
 function readRecord(text: string): {
   record?: LuaTable;
+  source?: LuaTable;
   defaults?: LuaTable;
   copyFrom?: string;
   sprite?: string;
@@ -247,7 +268,7 @@ function readRecord(text: string): {
     if (source[group] !== undefined) record[group] = source[group];
   }
 
-  return { record, defaults, copyFrom, sprite, clusterSprite, wepNames };
+  return { record, source, defaults, copyFrom, sprite, clusterSprite, wepNames };
 }
 
 /**

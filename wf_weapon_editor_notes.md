@@ -1480,3 +1480,51 @@ trail (`sprite = 0`, so its power/speed draw nothing), a `strike` group on a
 missile-family record (the engine only reads `strike` for strike weapons, and
 PX's ports keep one beside the missile for the plane variant), or a `clusters`
 table on a record whose `burst` is not clusters.
+
+### Record audit: every field the engine names, and what the editor could not say
+
+`bun run tools/audit_records.ts [ModsFolder]` is the audit. Four passes:
+
+1. **Coverage** — every *record* group `crates/weapons/src/record.rs` names,
+   checked against what the editor can express. Claim-level keys (`sprites`,
+   `hold`, `sounds`, callbacks) are deliberately not imported: they name art
+   inside the source bundle.
+2. **Invariants** — `worms` beside its own constituent groups (the engine
+   refuses it), a burst without its table, a record sprite field holding a path,
+   a sprite name that is not stock.
+3. **Implicit behaviour** — 28 stock slots whose native behaviour implies a
+   shape, checked against the decoded donors: the sheep roams and does not gas,
+   the skunk's *bits* gas, the petrol bomb spreads fire, the mole bomb walks and
+   burrows (WA's record is `action = "roam"`, as PX's Gravler port declares),
+   the utilities toggle their own effect, the drill has a duration, and so on.
+4. **The editor's own output** — import each corpus weapon, generate its Lua,
+   and check the record the engine would end up with (donor + emitted diffs):
+   action/group agreement, burst/table agreement, mask conflicts, sprite
+   validity, `sprite_count`, homing windows, armed-but-harmless gas, and that
+   `fires.launch_power_pct` survives the round trip.
+
+What it found, and what changed:
+
+- **`fires.*` was not modelled at all.** `launch_power_pct` is the missile
+  launch power (0 is the engine's "charged" sentinel, not "no power") and PX's
+  ports set it on nearly every weapon; `creates_projectile` is the firing flag.
+  Both are decoded, mapped, emitted and editable now. `fires.type` / `method` /
+  `subtype` stay out of the model: the archetype and `specialSubtype` own them,
+  and the mapper consumes them so they cannot leak into `recordExtra` and
+  override the archetype's subtype.
+- **The family groups were missing**: `arrow.damage`, `baseball_bat.damage` /
+  `knockback_scale`, `fire_punch.damage` / `knockback`, `drill.duration_ms`,
+  `jet_pack.fuel`, `parachute.wind_pct` and `utility.effect`. All are decoded,
+  mapped, emitted and shown in the record page's **Family Specifics** tab, with
+  a subtype selector that reveals the matching group. `utility.effect` covers
+  the eight native turn utilities plus `scripted`.
+- **`clusters.bit.sprite_count = 0` divides by zero.** The engine's own note on
+  `c_sprite_count` says a record that makes bits must set it. Two PX ports
+  declare 0; the generator now floors it at 1 (the builder path already did).
+- **`copy_from` was dropped before it could be read** (fixed earlier in this
+  session): bundles that keep it beside `weapon.definition` now get the right
+  donor.
+
+Still not modelled, on purpose: `projectile` (a separate launch record) and
+`raw` (offset writes), plus the claim-level keys. `fires.type`/`method` are not
+editable — changing the archetype is the supported way to change the family.

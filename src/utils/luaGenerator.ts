@@ -1005,8 +1005,10 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push('      on_select = { cursor = true },');
   } else if (project.fireType === 'special') {
     // Special subtypes have per-subtype layouts; only the selector is generic.
-    if (!baseline || project.specialSubtype !== baseline.specialSubtype) {
-      lines.push(`      fires = { subtype = ${project.specialSubtype} },`);
+    // An explicit `fires.subtype` override wins over the archetype's number.
+    const subtype = override('fires.subtype') ?? project.specialSubtype;
+    if (!baseline || subtype !== baseline.specialSubtype) {
+      lines.push(`      fires = { subtype = ${subtype} },`);
     }
   } else if (
     project.fireType === 'power' ||
@@ -1707,7 +1709,10 @@ export function generateLuaCode(project: WeaponProject): string {
           else lines.push(`          sprite = ${luaQuote(String(s))},`);
         }
         if (!bitRoleActive && clustletChanged('sprite_count')) {
-          lines.push(`          sprite_count = ${c.sprite_count ?? 0},`);
+          // `sprite_count` counts sprite ids, and WA divides by it: a record
+          // that makes bits with 0 here divides by zero (the engine's own note
+          // on `c_sprite_count`). One sheet is the safe floor.
+          lines.push(`          sprite_count = ${Math.max(1, c.sprite_count ?? 0)},`);
         }
         if (clustletChanged('animation')) {
           lines.push(`          animation = ${c.animation ?? 0},`);
@@ -2127,6 +2132,42 @@ export function generateLuaCode(project: WeaponProject): string {
         lines.push('      },');
       }
     }
+  }
+
+  // Native family parameters that are not part of `missile`/`clusters`: the
+  // firing header's launch power, and the per-family or per-special-subtype
+  // groups (`arrow`, `fire_punch`, `drill`, `jet_pack`, `parachute`,
+  // `baseball_bat`, `utility`). Each is a flat table of scalars, so one loop
+  // covers them; a value equal to the baseline is left to the engine.
+  const nativeGroupRows = (group: string, fields: string[]): string[] => {
+    const rows: string[] = [];
+    for (const field of fields) {
+      const value = override(`${group}.${field}`);
+      if (value === undefined) continue;
+      if (typeof value === 'string') rows.push(`        ${field} = ${luaQuote(value)},`);
+      else if (typeof value === 'boolean') rows.push(`        ${field} = ${value ? 'true' : 'false'},`);
+      else if (typeof value === 'number' && Number.isFinite(value)) {
+        rows.push(`        ${field} = ${formatNumber(value)},`);
+      }
+    }
+    return rows;
+  };
+  const NATIVE_GROUPS: { group: string; fields: string[] }[] = [
+    { group: 'fires', fields: ['launch_power_pct', 'creates_projectile'] },
+    { group: 'arrow', fields: ['damage'] },
+    { group: 'baseball_bat', fields: ['damage', 'knockback_scale'] },
+    { group: 'fire_punch', fields: ['damage', 'knockback'] },
+    { group: 'drill', fields: ['duration_ms'] },
+    { group: 'jet_pack', fields: ['fuel'] },
+    { group: 'parachute', fields: ['wind_pct'] },
+    { group: 'utility', fields: ['effect'] },
+  ];
+  for (const { group, fields } of NATIVE_GROUPS) {
+    const rows = nativeGroupRows(group, fields);
+    if (rows.length === 0) continue;
+    lines.push(`      ${group} = {`);
+    lines.push(...rows);
+    lines.push('      },');
   }
 
   // Hold Art
