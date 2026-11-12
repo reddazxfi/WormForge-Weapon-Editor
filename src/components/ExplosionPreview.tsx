@@ -1,14 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ExplosionEffectConfig } from '../types/weapon';
+import { assetUrl } from '../utils/assetUrl';
 
 /**
  * 50 Hz playback of the effects SDK's `px_effects` burst, which is what the
  * engine draws for the electric mine (`DrawExplosion` + `DrawEllipse` in
- * `utils_red/px_effects.c`). The real draw uses `wa.draw.ribbon` with the
- * beam/glow sheets; this preview strokes the same two noise-jittered
- * polygons additively so the envelope, thickness and ellipse read correctly.
+ * `utils_red/px_effects.c`).
+ *
+ * The game draws the ring and the squashed lens as `wa.draw.ribbon` passes over
+ * the SDK's own sheets — `beam.png` for the sharp core and `beam_glow.png` for
+ * the soft halo, both additive, so the art is white-on-black. This preview
+ * draws the same sheets the same way: each polygon edge becomes a textured quad
+ * stretched along the edge, tinted by the effect colour and composited with
+ * `lighter`. The smoke uses the SDK's `cloud.png`.
  */
 const TICK_MS = 20; // WA's game frame is 20 ms.
+
+/** The SDK's sheets, copied from `spec/lua_sdk/effects_sdk/sprites/px_effects/`. */
+const SHEETS = {
+  beam: assetUrl('assets/effects/beam.png'),
+  glow: assetUrl('assets/effects/beam_glow.png'),
+  cloud: assetUrl('assets/effects/cloud.png'),
+};
 
 /** Park-Miller hashes are stable across redraws, so the ring does not boil. */
 function rand01(seed: number, epoch: number, index: number): number {
@@ -99,6 +112,24 @@ function parseHex(color: string): { r: number; g: number; b: number } {
   return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
 }
 
+/**
+ * The sheets are white-on-black and the game multiplies them by the effect
+ * colour, so a tinted copy is made once per colour and reused: `multiply` keeps
+ * the texture's shading, and the black background adds nothing under `lighter`.
+ */
+function tintedSheet(image: HTMLImageElement, color: string): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth || image.width;
+  canvas.height = image.naturalHeight || image.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+  ctx.drawImage(image, 0, 0);
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
 interface ExplosionPreviewProps {
   config: ExplosionEffectConfig;
 }
@@ -108,9 +139,36 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
   const [playing, setPlaying] = useState(true);
   const [frame, setFrame] = useState(0);
   const [replay, setReplay] = useState(0);
+  // 1:1 by default: the game draws the ring in pixels, so the preview shows
+  // the same size it will have in game. `Fit` is for radii larger than the canvas.
+  const [zoom, setZoom] = useState<'fit' | '1x'>('1x');
+  const [sheets, setSheets] = useState<Record<string, HTMLImageElement>>({});
   const configKey = JSON.stringify(config);
   const live = Math.max(1, Math.round(config.live));
   const total = live + 14;
+
+  // The SDK's own art, loaded once.
+  useEffect(() => {
+    let cancelled = false;
+    const loaded: Record<string, HTMLImageElement> = {};
+    let pending = Object.keys(SHEETS).length;
+    for (const [key, url] of Object.entries(SHEETS)) {
+      const image = new Image();
+      image.onload = () => {
+        loaded[key] = image;
+        pending -= 1;
+        if (pending === 0 && !cancelled) setSheets({ ...loaded });
+      };
+      image.onerror = () => {
+        pending -= 1;
+        if (pending === 0 && !cancelled) setSheets({ ...loaded });
+      };
+      image.src = url;
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // A settings change starts a fresh burst; the loop restarts itself when the
   // envelope and its smoke have finished.
@@ -125,6 +183,14 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
     }, TICK_MS);
     return () => window.clearInterval(id);
   }, [playing, total]);
+
+  const tinted = useMemo(() => {
+    const cache: Record<string, HTMLCanvasElement> = {};
+    for (const [key, image] of Object.entries(sheets)) {
+      cache[key] = tintedSheet(image, config.color);
+    }
+    return cache;
+  }, [sheets, config.color]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -167,8 +233,14 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
     const grow = Math.max(0, config.grow);
     const ellipseX = Math.max(0.05, config.ellipseX);
     const ellipseY = Math.max(0.05, config.ellipseY);
-    const extent = radius * (1 + grow) * Math.max(1, ellipseX, ellipseY);
-    const scale = Math.min((width / 2 - 18) / extent, (height / 2 - 18) / extent);
+    // The game draws in pixels. `fit` sizes the canvas to the *initial* ring so
+    // the burst starts at a readable size and then grows and clips exactly as it
+    // does in game; `1x` is one canvas pixel per game pixel.
+    const fitExtent = radius * Math.max(1, ellipseX, ellipseY);
+    const scale =
+      zoom === '1x'
+        ? 1
+        : Math.min((width / 2 - 14) / fitExtent, (height / 2 - 14) / fitExtent);
     const cx = width / 2;
     const cy = height / 2;
     const seed = 1337 + replay * 7919;
@@ -190,10 +262,40 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
     const progress = clamp01(timer / duration);
     const env = 1 - progress;
 
+    /** One ribbon pass: a textured quad per polygon edge, additive. */
+    const ribbon = (
+      points: { x: number; y: number }[],
+      sheet: HTMLCanvasElement | undefined,
+      lineWidth: number,
+      alpha: number,
+    ) => {
+      if (!sheet || lineWidth <= 0 || alpha <= 0) return;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.min(1, alpha);
+      for (let i = 0; i < points.length; i += 1) {
+        const a = points[i];
+        const next = points[(i + 1) % points.length];
+        const dx = next.x - a.x;
+        const dy = next.y - a.y;
+        const length = Math.hypot(dx, dy);
+        if (length < 0.01) continue;
+        ctx.save();
+        ctx.translate((a.x + next.x) / 2, (a.y + next.y) / 2);
+        ctx.rotate(Math.atan2(dy, dx));
+        // No overlap: the sheets are uniform along their length, so adjacent
+        // quads tile seamlessly, and an overlap would double the additive
+        // brightness into a bright bar at every joint.
+        ctx.drawImage(sheet, -length / 2, -lineWidth / 2, length, lineWidth);
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    };
+
     // Smoke lives under the ring, as the SDK draws it first.
     if (config.smoke && age <= live) {
       const particles = smokeParticles(seed, color.r, color.g, color.b);
       const drag = 0.1;
+      const cloud = tinted.cloud;
       for (const particle of particles) {
         if (age >= particle.life) continue;
         const travel = (1 - Math.pow(1 - drag, age)) / drag;
@@ -201,14 +303,21 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
         const py = cy + (particle.y + particle.vy * travel) * scale;
         const alpha = 1 - age / particle.life;
         const size = Math.max(2, particle.size * scale);
-        const gradient = ctx.createRadialGradient(px, py, 1, px, py, size / 2);
-        gradient.addColorStop(0, rgba(particle.r, particle.g, particle.b, alpha * 0.5));
-        gradient.addColorStop(1, rgba(particle.r, particle.g, particle.b, 0));
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(px, py, size / 2, 0, Math.PI * 2);
-        ctx.fill();
+        if (cloud) {
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = alpha * 0.55;
+          ctx.drawImage(cloud, px - size / 2, py - size / 2, size, size);
+          ctx.globalAlpha = 1;
+        } else {
+          const gradient = ctx.createRadialGradient(px, py, 1, px, py, size / 2);
+          gradient.addColorStop(0, rgba(particle.r, particle.g, particle.b, alpha * 0.5));
+          gradient.addColorStop(1, rgba(particle.r, particle.g, particle.b, 0));
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.fillStyle = gradient;
+          ctx.beginPath();
+          ctx.arc(px, py, size / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
 
@@ -221,37 +330,33 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
         noiseValues.push(randRange(seed, epoch, i, -1, 1));
       }
 
-      const path = (lens: boolean): void => {
-        ctx.beginPath();
+      const ring = (lens: boolean): { x: number; y: number }[] => {
+        const points: { x: number; y: number }[] = [];
         for (let i = 0; i <= segments; i += 1) {
           const angle = (i / segments) * Math.PI * 2;
           const jitter = (noiseValues[i % noiseValues.length] ?? 0) * currentRadius * 0.08 * noise;
           const rx = lens ? currentRadius * ellipseX + jitter : currentRadius + jitter;
           const ry = lens ? currentRadius * ellipseY + jitter : currentRadius + jitter;
-          const px = cx + Math.cos(angle) * rx * scale;
-          const py = cy + Math.sin(angle) * ry * scale;
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
+          points.push({ x: cx + Math.cos(angle) * rx * scale, y: cy + Math.sin(angle) * ry * scale });
         }
-        ctx.closePath();
+        return points;
       };
 
       const thickness = Math.max(0.5, config.thickness);
-      const passes: { lens: boolean; width: number; alpha: number }[] = [
-        { lens: false, width: 2 * Math.max(0.9 * thickness * env, 1.8), alpha: 0.95 },
-        { lens: false, width: 2 * thickness * env, alpha: 0.34 },
-        { lens: true, width: 2 * Math.max(thickness * env, 1.4), alpha: 0.9 },
-        { lens: true, width: 2 * thickness * env, alpha: 0.3 },
-      ];
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      for (const pass of passes) {
-        path(pass.lens);
-        ctx.strokeStyle = rgba(r, g, b, env * pass.alpha);
-        ctx.lineWidth = Math.max(1, pass.width * scale);
-        ctx.stroke();
-      }
+      // The sharp core pass. The SDK derives it from `thickness` (0.9 x for the
+      // ring, 1.0 x for the lens) and floors it at 1.8 / 1.4 half-width; an
+      // explicit `core` replaces the derived width and keeps a 2.5 px floor,
+      // below which the beam texture's bright band stops reading as a line.
+      const core = config.core && config.core > 0 ? Math.max(2.5, config.core) : 0;
+      const half = core > 0 ? Math.max(core * env, 1.25) : Math.max(0.9 * thickness * env, 1.8);
+      const lensHalf = core > 0 ? Math.max(core * env, 1.25) : Math.max(thickness * env, 1.4);
+      const ringPoints = ring(false);
+      const lensPoints = ring(true);
+      // The SDK's order: ring core, ring glow, lens core, lens glow.
+      ribbon(ringPoints, tinted.beam, 2 * half * scale, env);
+      ribbon(ringPoints, tinted.glow, 2 * thickness * env * scale, env);
+      ribbon(lensPoints, tinted.beam, 2 * lensHalf * scale, env);
+      ribbon(lensPoints, tinted.glow, 2 * thickness * env * scale, env);
     }
 
     // Centre mark and a scale readout keep the proportions honest.
@@ -267,7 +372,10 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
     ctx.fillStyle = 'rgba(226, 232, 240, 0.55)';
     ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
     ctx.fillText(`${Math.round(currentRadiusForLabel(config, frame))}px`, 10, height - 10);
-  }, [frame, configKey, replay, live, config, total]);
+    if (zoom === 'fit') {
+      ctx.fillText(`${scale.toFixed(2)}×`, 10, height - 24);
+    }
+  }, [frame, configKey, replay, live, config, total, tinted, zoom]);
 
   return (
     <div className="space-y-2">
@@ -296,12 +404,25 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
           >
             Replay
           </button>
+          <button
+            type="button"
+            onClick={() => setZoom((value) => (value === 'fit' ? '1x' : 'fit'))}
+            aria-pressed={zoom === '1x'}
+            title="Fit sizes the canvas to the starting ring; 1× is one canvas pixel per game pixel."
+            className={`px-2.5 py-1 text-[11px] font-semibold rounded border ${
+              zoom === '1x'
+                ? 'bg-forge-600 text-white border-forge-600'
+                : 'bg-white dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700'
+            }`}
+          >
+            {zoom === 'fit' ? 'Fit' : '1×'}
+          </button>
           <span className="text-[10px] font-mono text-stone-400">
             {String(Math.min(frame, live)).padStart(2, '0')} / {live} frames · 50 Hz
           </span>
         </div>
         <p className="text-[10px] text-stone-400">
-          Approximates the beam/glow ribbon; the game draws the real sheets.
+          Draws the SDK&apos;s own `beam`/`beam_glow` sheets additively, as the game does.
         </p>
       </div>
     </div>

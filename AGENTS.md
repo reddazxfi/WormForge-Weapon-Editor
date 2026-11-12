@@ -389,6 +389,15 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   gains `px.fire_seq`. A custom Lua `on_fire` owns the trigger, so the card is
   skipped then (the UI says so). Air strikes are excluded: their munitions are
   created by the strike entity, so the slot never fires.
+- **The burst preview draws the SDK's sheets.** `ExplosionPreview.tsx` loads
+  `beam.png` / `beam_glow.png` / `cloud.png` from `public/assets/effects/`
+  (copied from `spec/lua_sdk/effects_sdk/sprites/px_effects/`), tints a copy by
+  the effect colour and composites with `lighter`, because the game draws them
+  with `wa.draw.ribbon{ blend = "add" }` over white-on-black art. Each polygon
+  edge is one textured quad with no overlap (an overlap doubles the additive
+  brightness into a bar at every joint). It is 1:1 by default — the game draws
+  in pixels — with a `Fit` toggle, and the electric preset's radius follows
+  PX's `(damage + 2) * 2`.
 - **Explosion burst (`project.explosionEffect`).** `px_effects`' electric ring +
   squashed lens, drawn from a claim `on_explode` (the engine emits it before
   WA's own blast). `effect` mode keeps the native blast; `blast` mode zeroes

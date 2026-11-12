@@ -451,22 +451,32 @@ export function ExplosionEffectCard({ project, onChange }: CardProps) {
             <NumberField
               id="explosion-radius"
               label="Radius (`radius`)"
-              hint="Game pixels before growth."
+              hint="Game pixels before growth. PX's custom explosion uses (damage + 2) × 2, so a 45-damage blast is 94 px."
               value={fx.radius}
               min={1}
-              max={200}
+              max={400}
               step={1}
               onChange={(radius) => update({ radius, preset: 'custom' })}
             />
             <NumberField
               id="explosion-thickness"
               label="Thickness (`thickness`)"
-              hint="Beam width of the ring."
+              hint="Beam width of the ring: the glow pass, and the core when no sharpness is set."
               value={fx.thickness}
               min={0.5}
               max={80}
               step={0.5}
               onChange={(thickness) => update({ thickness, preset: 'custom' })}
+            />
+            <NumberField
+              id="explosion-core"
+              label="Sharpness (`core`)"
+              hint="Sharp core pass width in game pixels. 0 derives it from the thickness (0.9 ×, as the SDK does); the floor is 2.5 px, below which the beam's bright band stops reading as a line."
+              value={fx.core ?? 0}
+              min={0}
+              max={80}
+              step={0.5}
+              onChange={(core) => update({ core, preset: 'custom' })}
             />
             <NumberField
               id="explosion-noise"

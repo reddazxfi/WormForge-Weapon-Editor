@@ -2340,6 +2340,12 @@ export function generateLuaCode(project: WeaponProject): string {
           fxField(indent, 'radius', formatNumber(Math.max(1, e.radius))),
           `${indent}r = ${r}, g = ${g}, b = ${b},`,
           fxField(indent, 'thickness', formatNumber(Math.max(0.5, e.thickness))),
+          // The sharp core pass. The SDK derives it from `thickness` today
+          // (0.9 x, floored at 1.8 half-width); the key is written when the
+          // author sets one so a build that reads it draws the same ring.
+          ...(e.core && e.core > 0
+            ? [fxField(indent, 'core', formatNumber(Math.max(2.5, e.core)))]
+            : []),
           fxField(indent, 'noise', formatNumber(Math.max(0, e.noise))),
           fxField(indent, 'duration', String(Math.max(1, Math.round(e.duration)))),
           fxField(indent, 'fade', formatNumber(e.fade)),

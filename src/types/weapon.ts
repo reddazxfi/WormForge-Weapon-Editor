@@ -355,6 +355,12 @@ export interface ExplosionEffectConfig {
   color: string;
   /** Beam half-width of both passes (`thickness`). */
   thickness: number;
+  /**
+   * Sharp core pass width in game pixels. `0` derives it from `thickness` the
+   * way the SDK does (`0.9 × thickness`); the floor is 2.5 px, below which the
+   * beam texture's bright band stops reading as a line.
+   */
+  core: number;
   noise: number;
   /** Frames the envelope takes to fade (`duration`). */
   duration: number;

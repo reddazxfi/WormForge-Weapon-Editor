@@ -1528,3 +1528,31 @@ What it found, and what changed:
 Still not modelled, on purpose: `projectile` (a separate launch record) and
 `raw` (offset writes), plus the claim-level keys. `fires.type`/`method` are not
 editable — changing the archetype is the supported way to change the family.
+
+### The explosion preview draws the SDK's own sheets
+
+The burst preview used to stroke two plain polygons, which read as a generic
+line: no sharp core, no halo, and the ring was sized to fit the canvas instead
+of to the game's pixels. It now draws what `px_effects.lua` draws:
+
+- **The sheets.** `beam.png` (a thin bright band with a small halo) and
+  `beam_glow.png` (a soft wide band) are the SDK's own art, copied from
+  `spec/lua_sdk/effects_sdk/sprites/px_effects/` into `public/assets/effects/`
+  and loaded through `assetUrl()`. `cloud.png` is the SDK's smoke sheet
+  (`fx.SMOKE`), so the smoke uses it too. `glow.png` is the SDK's `fx.glow`
+  (the mine's pulsing glow), not part of the burst, so it is not shipped.
+- **The blend.** The game draws them with `wa.draw.ribbon{ blend = "add" }`, and
+  the art is white-on-black, so the preview tints a copy of each sheet by the
+  effect colour (`multiply`) and composites with `lighter`. The black
+  background adds nothing.
+- **The ribbon.** Each polygon edge becomes one textured quad stretched along
+  the edge, with no overlap: the sheets are uniform along their length, so
+  adjacent quads tile seamlessly, and an overlap would double the additive
+  brightness into a bright bar at every joint (the first attempt looked like a
+  chain of crosses).
+- **The size.** The game draws in pixels, so the preview is **1:1 by default**
+  (`Fit` is there for radii larger than the canvas) and the readout shows the
+  live radius. The electric preset's radius is PX's own formula,
+  `(damage + 2) * 2` (`lib/custom_explosion.lua`), so a 45-damage blast is a
+  94 px ring — the old preset's 30 px was why the preview looked small next to
+  the in-game screenshot (the electric mine's 56-damage blast is 116 px).
