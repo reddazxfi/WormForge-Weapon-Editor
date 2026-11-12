@@ -1369,3 +1369,60 @@ A bundle's Lua code is never carried either: its callbacks require that
 bundle's own libraries, so the import sets `enableCustomLua = false`. Full
 mapping of `recordExtra` into the typed panels is the next step; until then the
 panels show the `.wep`/donor values while the export writes the real record.
+
+### Full mapping: a bundle's record tables become the editor's fields
+
+`src/utils/modLib/mapRecord.ts` is the inverse of the generator's record
+emission. It reads a bundle's `missile` / `clusters` / `handling` / `gun` /
+`mine` / `strike` tables into the typed model, so an imported weapon shows its
+real values in the panels instead of the donor's:
+
+| record | editor |
+| --- | --- |
+| `missile.explosion.power` | `body.damage` |
+| `missile.gravity_pct` / `wind_pct` | `body.gravity_pct` / `wind_pct` |
+| `missile.fuse` / `countdown` | `body.fuse` + `fuse_time_ms` / `countdown_ms` |
+| `missile.sprite` | `body.sprite` **and** `recordOverrides['missile.sprite']` (the generator writes the override) |
+| `missile.action` / `burst` | `action` / `burst` |
+| `missile.bounce.bounciness` | `body.bounce_pct` |
+| `missile.homing.kind/arm/time` | `body.homing` / `homing_arm_ms` / `homing_time_ms` |
+| `missile.roam.*` / `dig.*` | `roamConfig` / `digConfig` |
+| `missile.fire.*` | `fireConfig` |
+| `clusters.count/angle/spread/launch_power_pct` | `body.clustlet.count/angle/spread/power` |
+| `clusters.bit.*` | `body.clustlet.*` (action, sprite, trail, explosion, bounce, homing, roam, dig) |
+| `mine.proximity/arm/fuse` | `body.proximity` / `arm_delay_ms` / `trigger_delay_ms` |
+| `mine.explosion.power` | `body.damage` |
+| `sheep.flight_1/2` | `roamConfig.flight_1/2` |
+| everything else | `recordOverrides['<group>.<field>']` |
+
+Three rules the mapper has to get right, all learned from the corpus:
+
+- **A group implies its action.** PX's records often declare `bounce` / `homing`
+  / `roam` / `dig` fields without naming `missile.action`; the engine's
+  `refuse` only compares them when both are known, and the slab the fields land
+  in is read *as* the action. So a record carrying `roam` means `action = roam`,
+  and the same inference runs for `clusters.bit.action`. Likewise a record with
+  a `clusters` table is a cluster burst, and a `mine` group means
+  `body.fuse = false` (the generator picks the `mine` group over `missile` on
+  exactly that test).
+- **A trail path is claim art.** `missile.trail.sprite` /
+  `clusters.bit.trail.sprite` may hold a bundle path
+  (`sprites/tele_arrow/trail.png`); that goes to `packArt.missile_trail` /
+  `packArt.cluster_trail`, not into a stock-sprite override, which would fall
+  back to `smklt25`.
+- **Unknown fields are kept.** The reader is destructive (`take()` deletes what
+  it consumed), and whatever is left inside a group it did consume is put back
+  under the same path in `recordExtra` — a clustlet's `random_motion` or
+  `impact_particles` has no panel, but it still reaches the export.
+
+`importBundleWeapon` now also keeps the decoded `.wep` as the diff base
+(`wepBaseline`) while the mapped values are the project, so a `.wep`-backed
+weapon exports `wep = "weps/<file>.wep"` plus only the edits its module
+declared. `App.handleApplyWepImport` honours a supplied baseline
+(`parsed.wepBaseline ?? …`).
+
+Corpus round trip (`import → generate → read the generated Lua back → compare
+with the source tables`): **130 of 152** readable weapons reproduce every
+declared field exactly; the rest differ only in inert trail fields (a record
+with `trail.sprite = 0` draws nothing, so its power/speed are dropped) and in
+values the Lua reader cannot follow (a call or a function, stored as `null`).

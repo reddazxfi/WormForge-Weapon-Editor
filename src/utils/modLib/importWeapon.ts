@@ -14,6 +14,8 @@
 import type { WeaponProject } from '../../types/weapon';
 import { parseWepBinary } from '../wepParser';
 import { withWfwsPrefix } from '../weaponId';
+import { mapRecord } from './mapRecord';
+import { DEFAULT_BODY, DEFAULT_DIG, DEFAULT_FIRE, DEFAULT_ROAM } from '../../data/defaults';
 import type { LuaTable } from './luaTable';
 import type { ModFile, ModWeapon } from './scan';
 
@@ -52,11 +54,16 @@ function defaultsFrom(table: LuaTable | undefined): Partial<WeaponProject['defau
   return out;
 }
 
-/** Which fire family a record's own tables describe. */
+/**
+ * Which fire family a record's own tables describe. `missile` is checked before
+ * `strike`: PX's records often keep a `strike` group beside the missile body
+ * (the same weapon fired from a plane), and the missile is the weapon itself.
+ */
 function fireTypeOf(record: LuaTable | undefined): WeaponProject['fireType'] {
   if (!record) return 'power';
   if (record.gun) return 'hitscan';
   if (record.mine) return 'drop';
+  if (record.missile) return 'power';
   if (record.strike) return 'cursor';
   return 'power';
 }
@@ -69,6 +76,8 @@ export function importBundleWeapon(weapon: ModWeapon, files: ModFile[]): BundleI
 
   const wepFile = weapon.wepPath ? files.find((file) => file.path === weapon.wepPath) : undefined;
   let project: Partial<WeaponProject> = {};
+  /** The decoded `.wep` before the module's edits, so the export writes only them. */
+  let baseline: WeaponProject['wepBaseline'];
 
   if (wepFile?.bytes) {
     const fileName = weapon.wepPath!.split('/').pop() || 'weapon.wep';
@@ -80,6 +89,19 @@ export function importBundleWeapon(weapon: ModWeapon, files: ModFile[]): BundleI
       project.useWepFile = true;
       project.wepFileName = fileName;
       project.wepFile = new File([bytes as BlobPart], fileName, { type: 'application/octet-stream' });
+      // Snapshot the decoded record: the module's tables are edits on top, and
+      // the generator diffs against this so only those edits are written.
+      baseline = {
+        body: { ...(project.body as WeaponProject['body']) },
+        action: project.action as WeaponProject['action'],
+        burst: project.burst as WeaponProject['burst'],
+        recordOverrides: { ...(project.recordOverrides ?? {}) },
+        missileSprite: { ...(project.missileSprite as WeaponProject['missileSprite']) },
+        roamConfig: { ...(project.roamConfig as WeaponProject['roamConfig']) },
+        digConfig: { ...(project.digConfig as WeaponProject['digConfig']) },
+        fireConfig: { ...(project.fireConfig as WeaponProject['fireConfig']) },
+        specialSubtype: project.specialSubtype ?? 1,
+      };
       notes.push(`record from ${fileName}`);
     } else {
       notes.push(`could not decode ${fileName}: ${decoded.error ?? 'unknown error'}`);
@@ -100,10 +122,24 @@ export function importBundleWeapon(weapon: ModWeapon, files: ModFile[]): BundleI
     notes.push(`base record: stock.${donor}`);
   }
 
-  const record = weapon.record;
-  const missile = record?.missile as LuaTable | undefined;
-  const action = str(missile?.action);
-  const burst = str(missile?.burst);
+  // The module's tables become the typed fields, so the panels show the real
+  // weapon. Whatever the mapper does not model stays in `recordExtra` and is
+  // still emitted verbatim.
+  const mapped = mapRecord(weapon.record, {
+    // A `.wep` supplies the base record; without one the editor's defaults do,
+    // so a record that declares only some fields still exports complete values.
+    body: (project.body ?? { ...DEFAULT_BODY, clustlet: { ...DEFAULT_BODY.clustlet } }) as WeaponProject['body'],
+    action: (project.action ?? 'none') as WeaponProject['action'],
+    burst: (project.burst ?? 'nothing') as WeaponProject['burst'],
+    roamConfig: (project.roamConfig ?? { ...DEFAULT_ROAM }) as WeaponProject['roamConfig'],
+    digConfig: (project.digConfig ?? { ...DEFAULT_DIG }) as WeaponProject['digConfig'],
+    fireConfig: (project.fireConfig ?? { ...DEFAULT_FIRE }) as WeaponProject['fireConfig'],
+    recordOverrides: { ...(project.recordOverrides ?? {}) },
+  });
+  if (weapon.record) {
+    const mappedKeys = Object.keys(mapped.recordOverrides).length;
+    notes.push(`${mappedKeys} record fields mapped`);
+  }
 
   return {
     project: {
@@ -115,10 +151,28 @@ export function importBundleWeapon(weapon: ModWeapon, files: ModFile[]): BundleI
       author: weapon.author ?? 'WormForge Author',
       panel_icon: project.panel_icon ?? donor,
       defaults: { ...(project.defaults ?? ({} as WeaponProject['defaults'])), ...defaultsFrom(weapon.defaults) },
-      action: (action as WeaponProject['action']) ?? project.action,
-      burst: (burst as WeaponProject['burst']) ?? project.burst,
-      // The module's own tables, emitted over the base record.
-      recordExtra: record && Object.keys(record).length > 0 ? record : undefined,
+      body: mapped.body,
+      action: mapped.action,
+      burst: mapped.burst,
+      roamConfig: mapped.roamConfig,
+      digConfig: mapped.digConfig,
+      fireConfig: mapped.fireConfig,
+      recordOverrides: mapped.recordOverrides,
+      recordExtra: mapped.recordExtra,
+      // A trail sheet the record points at inside its own bundle: the engine
+      // loads it and writes its id into the record field, so it is claim art.
+      packArt: {
+        ...(project.packArt ?? {}),
+        ...Object.fromEntries(
+          Object.entries(mapped.packArt).map(([slot, path]) => [
+            slot,
+            { fileName: path.split('/').pop(), frames: 1, fps: 15, play: 'loop' },
+          ]),
+        ),
+      },
+      teleport: mapped.teleport ?? project.teleport,
+      // The decoded `.wep` is the diff base; without one the donor is.
+      wepBaseline: baseline,
       // A bundle import never carries the module's Lua code: its callbacks
       // reference that bundle's own libraries.
       enableCustomLua: false,

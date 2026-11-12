@@ -518,6 +518,20 @@ bundle, its weapon components and the record tables each one keeps in Lua.
   `missile.action` / `missile.burst` to `action` / `burst`. The bundle's Lua
   code is never carried (`enableCustomLua = false`) — its callbacks require
   that bundle's own libraries.
+- **Full mapping** (`mapRecord.ts`) is the inverse of the generator's emission:
+  `missile`/`clusters`/`handling`/`gun`/`mine`/`strike` become the typed fields
+  (`body`, `clustlet`, `roamConfig`, `digConfig`, `fireConfig`, `action`,
+  `burst`) and everything else becomes `recordOverrides`. Three rules:
+  a declared group implies its action (`roam`/`dig`/`homing`/`bounce`, and the
+  same for `clusters.bit.action`), a `clusters` table implies the cluster burst,
+  and a `mine` group means `body.fuse = false` (the generator picks `mine` over
+  `missile` on that test). A trail value that is a bundle path goes to
+  `packArt.missile_trail` / `packArt.cluster_trail`, never into a stock-sprite
+  override. Fields the mapper does not model are put back under their group in
+  `recordExtra`, so nothing is lost. `importBundleWeapon` keeps the decoded
+  `.wep` as `wepBaseline` while the mapped values are the project, so a
+  `.wep`-backed weapon exports the file plus only its module's edits
+  (`App.handleApplyWepImport` honours `parsed.wepBaseline`).
 - **`recordExtra` emission** (`luaGenerator`): only the six native record groups
   (`missile`, `clusters`, `handling`, `gun`, `mine`, `strike`) are carried; a
   bundle's spec table also holds claim keys (`sprites`, `hold`, `params`,

@@ -300,8 +300,10 @@ export default function App() {
         wepFile: parsed.wepFile,
         wepFileName: parsed.wepFileName,
         // The decoded model at import time. Fields that still match it are
-        // inherited from the .wep; only edits become named overrides.
-        wepBaseline: useWepFile
+        // inherited from the .wep; only edits become named overrides. A bundle
+        // import supplies its own baseline (the decoded `.wep` *before* the
+        // module's declared tables), so those edits are what gets written.
+        wepBaseline: parsed.wepBaseline ?? (useWepFile
           ? {
               body: { ...body, clustlet: { ...body.clustlet } },
               action,
@@ -313,7 +315,7 @@ export default function App() {
               fireConfig: { ...fireConfig },
               specialSubtype,
             }
-          : undefined,
+          : undefined),
       };
     });
     showToast(
