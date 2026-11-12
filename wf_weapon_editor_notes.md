@@ -1426,3 +1426,57 @@ with the source tables`): **130 of 152** readable weapons reproduce every
 declared field exactly; the rest differ only in inert trail fields (a record
 with `trail.sprite = 0` draws nothing, so its power/speed are dropped) and in
 values the Lua reader cannot follow (a call or a function, stored as `null`).
+
+### Per-donor presets, and a plain Grenade default
+
+A bundle weapon usually declares a handful of fields and lets `copy_from` do the
+rest. That worked badly before: with no `.wep` the editor had no baseline, so
+the generator wrote *every* typed field — and the open project was the Moon
+Grenade preset, so a sparse import inherited gravity 35%, damage 20 and a
+crater-cutting `on_explode` it never asked for.
+
+Two pieces fix it:
+
+- **`src/data/stockDonors.json`** — one decoded record per panel slot, 70 of
+  them, from PX's default scheme (`python tools/px_scheme_weps.py <scheme>.pxs
+  OUT --all`, then `bun run tools/gen_stock_donors.ts [folder]`). It holds the
+  record fields only: `body`, `action`, `burst`, `fireType`, `specialSubtype`
+  and `recordOverrides`. `body.sprite` is taken from
+  `recordOverrides['missile.sprite']`, because the parser's `body.sprite` is a
+  family guess ("missile" for anything that is not a mine/gun/timed explosive)
+  while the record's real id is decoded into the override — the same rule the
+  bundle importer follows.
+- **`project.donorBaseline`** — the donor as a `WepBaseline`. The generator now
+  picks its baseline with `useWepFile ? wepBaseline : donorBaseline`, so with
+  `copy_from` the donor's record is the diff base: untouched fields are left to
+  the engine and only real edits are written. An untouched new project exports
+
+  ```lua
+  wa.weapons.replace{
+    name = "Grenade",
+    copy_from = "stock.grenade",
+    panel_icon = "grenade",
+  }
+  ```
+
+  (three lines), and an imported Chilli Bomb writes its 16 real edits instead of
+  a whole record built from the previous weapon's preset.
+
+The importer also reads `copy_from` from the *source* table before filtering it
+to record groups, so a bundle that keeps it beside `weapon.definition`
+(`chilli_bomb` → `stock.super_banana`, `wfws.toxic_thrower` → `stock.mortar`)
+gets the right donor instead of the Grenade default.
+
+`INITIAL_PROJECT` is now WA's Grenade, built from that donor table, with hold
+art, the sprite builder, effects, sounds and custom Lua all switched off. A
+bundle import sets `replaceProject` so it starts from that project instead of
+merging into whatever was open — the previous weapon's art and builder settings
+used to leak into the new one.
+
+Round trip with the stricter check (donor record + emitted diffs + `rec.*`
+leftovers vs. the declared tables): **88 of 115** donor-based weapons reproduce
+every declared field exactly. The rest are behaviourally identical: an inert
+trail (`sprite = 0`, so its power/speed draw nothing), a `strike` group on a
+missile-family record (the engine only reads `strike` for strike weapons, and
+PX's ports keep one beside the missile for the plane variant), or a `clusters`
+table on a record whose `burst` is not clusters.

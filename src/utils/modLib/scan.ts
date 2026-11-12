@@ -234,21 +234,18 @@ function readRecord(text: string): {
   // `worm_sprites`, `sounds`, callbacks), and those name art that lives in that
   // bundle. Writing them into an exported weapon would point at files we do not
   // copy, and the install would fail.
+  // The claim-level keys are read from the source first -- they are not record
+  // fields but they say which donor the weapon builds on and what art it names.
+  const copyFrom = typeof source.copy_from === 'string' ? source.copy_from : undefined;
+  const sprite = typeof source.sprite === 'string' ? source.sprite : undefined;
+  const cluster = isTable(source.cluster) ? (source.cluster as LuaTable) : undefined;
+  const clusterSprite =
+    cluster && typeof cluster.sprite === 'string' ? cluster.sprite : undefined;
+
   const record: LuaTable = {};
   for (const group of RECORD_GROUPS) {
     if (source[group] !== undefined) record[group] = source[group];
   }
-  const copyFrom = typeof record.copy_from === 'string' ? record.copy_from : undefined;
-  const sprite = typeof record.sprite === 'string' ? record.sprite : undefined;
-  const cluster = isTable(record.cluster) ? (record.cluster as LuaTable) : undefined;
-  const clusterSprite =
-    cluster && typeof cluster.sprite === 'string' ? cluster.sprite : undefined;
-  delete record.copy_from;
-  delete record.sprite;
-  delete record.cluster;
-  delete record.name;
-  delete record.panel_icon;
-  delete record.defaults;
 
   return { record, defaults, copyFrom, sprite, clusterSprite, wepNames };
 }

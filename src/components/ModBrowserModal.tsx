@@ -20,7 +20,7 @@ interface Props {
   onClose: () => void;
   showToast: (message: string) => void;
   /** Applies an imported weapon to the editor's project. */
-  onImport: (project: Partial<WeaponProject>) => void;
+  onImport: (project: Partial<WeaponProject> & { replaceProject?: boolean }) => void;
 }
 
 type Phase = 'idle' | 'reading' | 'ready' | 'error';
@@ -366,8 +366,11 @@ export function ModBrowserModal({ onClose, showToast, onImport }: Props) {
                             <button
                               type="button"
                               onClick={() => {
-                                const { project, notes } = importBundleWeapon(selectedWeapon, files);
-                                onImport(project);
+                                const { project, notes, replaceProject } = importBundleWeapon(
+                                  selectedWeapon,
+                                  files,
+                                );
+                                onImport({ ...project, replaceProject });
                                 showToast(
                                   `Imported ${selectedWeapon.name}${notes.length > 0 ? ` — ${notes.join(', ')}` : ''}`,
                                 );

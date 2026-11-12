@@ -12,22 +12,41 @@ import { BundleDependencies } from './components/BundleDependencies';
 import { exportModZip, downloadBlob } from './utils/modExporter';
 import { sanitizeModFolder } from './utils/luaGenerator';
 import { DEFAULT_EXPLOSION_EFFECT } from './data/explosionPresets';
+import { stockDonor, stockDonorBaseline } from './data/stockDonors';
+import { DEFAULT_BODY, DEFAULT_DIG, DEFAULT_FIRE, DEFAULT_ROAM } from './data/defaults';
 import { DEFAULT_CUSTOM_SOUNDS } from './data/soundPresets';
 import { DEFAULT_ROLE_ART } from './data/spriteBuilder';
 import type { RecordTabId } from './data/recordTabs';
 import { CheckCircle2 } from 'lucide-react';
 
+/**
+ * A fresh project is WA's own Grenade.
+ *
+ * The record is the decoded stock donor (`stockDonors.json`), and the donor is
+ * also the diff baseline: the panels show the values the engine really uses,
+ * and an untouched export writes `copy_from = "stock.grenade"` plus nothing
+ * else. Everything outside the record (hold art, the sprite builder, effects)
+ * starts switched off.
+ */
 const INITIAL_PROJECT: WeaponProject = {
-  id: 'wfws.moon_grenade',
-  name: 'Moon Grenade',
-  description: "WA's Grenade with about a third of gravity and small burst, which digs three craters in the ground.",
+  ...(stockDonor('grenade') as Partial<WeaponProject>),
+  donorBaseline: stockDonorBaseline('grenade'),
+  // `parseWepBinary` always fills these for a missile; the cast above keeps
+  // TypeScript from narrowing them to `undefined`.
+  body: { ...DEFAULT_BODY, ...(stockDonor('grenade')?.body ?? {}) },
+  action: stockDonor('grenade')?.action ?? 'bounce',
+  burst: stockDonor('grenade')?.burst ?? 'nothing',
+  recordOverrides: { ...(stockDonor('grenade')?.recordOverrides ?? {}) },
+  fireType: 'power',
+  specialSubtype: 1,
+  teleport: false,
+  id: 'wfws.grenade',
+  name: 'Grenade',
+  description: "WormForge's stock Grenade record, ready to be changed.",
   version: '0.1.0',
   author: 'WormForge Author',
   slot: 'grenade',
   based_on: 'grenade',
-  fireType: 'power',
-  specialSubtype: 1,
-  teleport: false,
   panel_icon: 'grenade',
   defaults: {
     ammo: 3,
@@ -36,54 +55,9 @@ const INITIAL_PROJECT: WeaponProject = {
     crateType: 'weapon',
     afterUse: 'retreat',
   },
-  body: {
-    sprite: 'grenade',
-    damage: 20,
-    gravity_pct: 35,
-    wind_pct: 100,
-    bounce_pct: 15,
-    fuse: true,
-    fuse_time_ms: 3000,
-    countdown_ms: 3000,
-    homing: 'off',
-    // WA's own homing records use arm 0-1500 ms and time 2000-5000; 0/0 is what
-    // a project used to carry by accident (the fields displayed 1000/8000
-    // regardless), and a zero duration means no guidance at all.
-    homing_arm_ms: 1000,
-    homing_time_ms: 8000,
-    cluster: true,
-    custom_cluster: false,
-    custom_site: 'explode',
-    proximity: 25,
-    arm_delay_ms: 3000,
-    trigger_delay_ms: 2000,
-    detect_mask: 0,
-    clustlet: {
-      sprite: 'clustlet',
-      sprite_count: 1,
-      count: 3,
-      angle: 0,
-      spread: 60,
-      power: 20,
-      power_variation: 0,
-      damage: 15,
-      trail: 'smklt25',
-      contact: 'bounce',
-      bounce_explode: true,
-      bounce_power: 15,
-      bounces: 0,
-      fuse: 2500,
-      proximity: 0,
-      homing: 'off',
-      homing_arm_ms: 1000,
-      homing_time_ms: 8000,
-      gravity_pct: 40,
-      wind_pct: 100,
-      bounciness: 25,
-    },
-  },
-  action: 'bounce',
-  burst: 'nothing',
+  roamConfig: { ...DEFAULT_ROAM },
+  digConfig: { ...DEFAULT_DIG },
+  fireConfig: { ...DEFAULT_FIRE },
   missileSprite: {
     enabled: false,
     mode: 'stock',
@@ -103,38 +77,7 @@ const INITIAL_PROJECT: WeaponProject = {
   },
   bitFlight: { ...DEFAULT_ROLE_ART },
   behaviorArt: {},
-  roamConfig: {
-    walk_speed: 2,
-    step_height: 4,
-    terrain_offset: -10,
-    edge_jump_angle_deg: 0,
-    edge_jump_speed: 0,
-    edge_jump_sound: 0,
-    jump_angle_deg: 25,
-    jump_speed: 6,
-    jump_sound: 50,
-    gas_start_delay_ms: 0,
-    gas_poison_power: 0,
-    gas_animal_sprite: 0,
-    flight_1: 0,
-    flight_2: 0,
-    hits: { land: true, worms: true, mines: true, crates: true, water: true },
-    flight_hits: { land: true, worms: true, mines: true, crates: true, water: true },
-  },
   roamSheets: { flight1: {}, flight2: {} },
-  digConfig: {
-    sound: 90,
-    dive_sprite: 0,
-    sprite_1: 0,
-    sprite_2: 0,
-    sprite_3: 0,
-  },
-  fireConfig: {
-    spread_delay_ms: 30,
-    burn_time_ms: 1500,
-    spread_generations: 10,
-    decay_mode: 'resting',
-  },
   ribbonTrail: {
     enabled: false,
     max: 12,
@@ -149,13 +92,11 @@ const INITIAL_PROJECT: WeaponProject = {
   customSounds: { ...DEFAULT_CUSTOM_SOUNDS },
   extraDependencies: [],
   hold: {
-    enabled: true,
+    enabled: false,
     sheet: '',
     handType: 'mid',
     handRadius: 10,
-    // PX holds are authored right-facing: at level aim a negative radius puts
-    // the weapon on the forward side. Positive radii are the rear-hand side.
-    weapRadius: 6,
+    weapRadius: -8,
     weapRotation: 0,
     scale: 1,
     handScale: 1,
@@ -172,26 +113,9 @@ const INITIAL_PROJECT: WeaponProject = {
   },
   packArt: {},
   customSprites: {},
-  recordOverrides: {
-    'missile.explosion.push_pct': 80,
-    'missile.explode_on_space': false,
-  },
   enableCustomLua: false,
+  customLuaSnippet: '',
   useWepFile: false,
-  customLuaSnippet: `on_explode = function(ev)
-  -- Excavate three craters in the ground below burst
-  for i = 0, 2 do
-    local angle = math.rad(20 + 60 * i + wa.random(0, 20))
-    local distance = wa.random(60, 85)
-    wa.land.cut{
-      x = ev.x + distance * wa.math.cos(angle),
-      y = ev.y + distance * wa.math.sin(angle),
-      shape = "circle",
-      radius = wa.random(12, 18),
-    }
-  end
-  wa.log("craters cut below burst")
-end,`,
 };
 
 export default function App() {
@@ -252,7 +176,12 @@ export default function App() {
   };
 
   const handleApplyWepImport = (parsed: Partial<WeaponProject>) => {
-    setProject((prev) => {
+    // A bundle import is a new weapon (`replaceProject`): it starts from the
+    // default project, so the open weapon's record, art and builder settings
+    // cannot leak into it. A `.wep` import still merges into what is open.
+    const replace = !!(parsed as { replaceProject?: boolean }).replaceProject;
+    setProject((open) => {
+      const prev = replace ? INITIAL_PROJECT : open;
       const body: WeaponProject['body'] = {
         ...prev.body,
         ...(parsed.body || {}),

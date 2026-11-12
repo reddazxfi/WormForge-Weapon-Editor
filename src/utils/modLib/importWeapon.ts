@@ -16,6 +16,7 @@ import { parseWepBinary } from '../wepParser';
 import { withWfwsPrefix } from '../weaponId';
 import { mapRecord } from './mapRecord';
 import { DEFAULT_BODY, DEFAULT_DIG, DEFAULT_FIRE, DEFAULT_ROAM } from '../../data/defaults';
+import { stockDonor, stockDonorBaseline } from '../../data/stockDonors';
 import type { LuaTable } from './luaTable';
 import type { ModFile, ModWeapon } from './scan';
 
@@ -23,6 +24,12 @@ export interface BundleImport {
   project: Partial<WeaponProject>;
   /** What the import did, for the toast and the panel. */
   notes: string[];
+  /**
+   * Replace the whole project instead of merging into the open one: an import
+   * starts a new weapon, so the previous one's art, effects and builder
+   * settings must not leak into it.
+   */
+  replaceProject: boolean;
 }
 
 const num = (value: unknown): number | undefined =>
@@ -108,18 +115,29 @@ export function importBundleWeapon(weapon: ModWeapon, files: ModFile[]): BundleI
     }
   }
 
+  let donorBaseline: WeaponProject['donorBaseline'];
   if (!project.useWepFile) {
+    // `copy_from` asks the engine for the donor's own record, so the donor's
+    // decoded values are the starting point *and* the diff baseline. A record
+    // that declares a handful of fields therefore exports those fields only.
+    const donorRecord = stockDonor(donor) ?? {};
+    donorBaseline = stockDonorBaseline(donor);
     project = {
-      ...project,
+      ...donorRecord,
       slot: donor,
       based_on: donor,
-      fireType: fireTypeOf(weapon.record),
+      fireType: fireTypeOf(weapon.record) ?? donorRecord.fireType,
       useWepFile: false,
       wepFile: undefined,
       wepFileName: undefined,
       wepBaseline: undefined,
+      donorBaseline,
     };
-    notes.push(`base record: stock.${donor}`);
+    notes.push(
+      donorRecord.body
+        ? `base record: stock.${donor}`
+        : `base record: stock.${donor} (no decoded donor, editor defaults)`,
+    );
   }
 
   // The module's tables become the typed fields, so the panels show the real
@@ -142,6 +160,7 @@ export function importBundleWeapon(weapon: ModWeapon, files: ModFile[]): BundleI
   }
 
   return {
+    replaceProject: true,
     project: {
       ...project,
       id,
@@ -173,6 +192,7 @@ export function importBundleWeapon(weapon: ModWeapon, files: ModFile[]): BundleI
       teleport: mapped.teleport ?? project.teleport,
       // The decoded `.wep` is the diff base; without one the donor is.
       wepBaseline: baseline,
+      donorBaseline,
       // A bundle import never carries the module's Lua code: its callbacks
       // reference that bundle's own libraries.
       enableCustomLua: false,

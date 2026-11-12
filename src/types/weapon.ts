@@ -549,6 +549,12 @@ export interface WeaponProject {
   wepFile?: File;
   wepFileName?: string;
   wepBaseline?: WepBaseline;
+  /**
+   * The `copy_from` donor's own decoded record. With no `.wep` the engine
+   * applies the donor itself, so this is the diff baseline: untouched fields
+   * are left to it and only real edits are written.
+   */
+  donorBaseline?: WepBaseline;
 }
 
 export interface SimulationWorm {

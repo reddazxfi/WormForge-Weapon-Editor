@@ -814,7 +814,11 @@ export function generateLuaCode(project: WeaponProject): string {
   const body = project.body;
   // With an imported .wep the file is the record. Compare against the decoded
   // baseline so untouched fields are inherited and only real edits are written.
-  const baseline = project.useWepFile ? project.wepBaseline : undefined;
+  // With a `.wep` the file is the record; with `copy_from` the engine applies
+  // the donor's record, so the donor's decoded values are the baseline. Untouched
+  // fields are then left to the engine instead of being written over with the
+  // editor's defaults (which is how a donor weapon used to inherit a preset).
+  const baseline = project.useWepFile ? project.wepBaseline : project.donorBaseline;
   const baseBody = baseline?.body;
   const baseOverrides = baseline?.recordOverrides || {};
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);

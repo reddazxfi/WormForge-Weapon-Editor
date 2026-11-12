@@ -544,6 +544,17 @@ bundle, its weapon components and the record tables each one keeps in Lua.
 - Corpus: `bun run tools/scan_mods.ts [ModsFolder]` — 240 of 262 weapons read
   from the dev machine. Misses are stock-copy examples, templates, and records
   that only exist in a bundled `.wep`.
+- **Per-donor presets** (`src/data/stockDonors.json`): one decoded record per
+  panel slot, 70 of them, from PX's default scheme
+  (`python tools/px_scheme_weps.py <scheme>.pxs OUT --all` then
+  `bun run tools/gen_stock_donors.ts [folder]`). `body.sprite` comes from
+  `recordOverrides['missile.sprite']` — the parser's `body.sprite` is a family
+  guess, the record's real id is in the override. `project.donorBaseline` is the
+  donor as a `WepBaseline`, and the generator picks
+  `useWepFile ? wepBaseline : donorBaseline`, so a `copy_from` weapon diffs
+  against the donor and writes only its real edits (an untouched new project
+  exports three lines). A bundle import sets `replaceProject`, so it starts from
+  the default Grenade project instead of inheriting the open weapon's art.
 
 Ids are namespaced: `src/utils/weaponId.ts` fixes `wfws.` and the ID field
 edits the suffix only, so no id can collide with a mod the reader shows.
