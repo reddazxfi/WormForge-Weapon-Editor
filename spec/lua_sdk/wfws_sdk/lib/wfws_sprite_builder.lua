@@ -25,6 +25,8 @@
 --   sb.flight(ctx, {
 --     weapon = ctx.id,
 --     sheet = "...", anim = "track", ...        -- primary art
+--     size  = 1.25,                             -- every sheet, every role
+--     angle = 90,                               -- degrees added to the draw
 --     bits  = { sheet = "...", ... } | "inherit" | nil/false (native)
 --     is_bit = function(m) ... end,             -- optional classifier override
 --     roles  = { { name = "x", match = function(m) ... end, sheet = "..." } },
@@ -126,6 +128,19 @@ local function dig_settings(o)
   }
 end
 
+-- ---------------------------------------------------------------------------
+-- Weapon-wide builder parameters, applied to every role (the primary, the
+-- bits, each state and any `roles` entry):
+--
+--   size  = 1.25   what the panel's Size field multiplies each role's `scale`
+--                  by, so one number resizes the whole weapon.
+--   angle = 90     degrees added to whatever rotation the role's `anim` asked
+--                  for, for art that does not point up. Tracked art stays
+--                  tracked; it just gains the offset.
+--
+-- There is no glow here on purpose: WA only glows its own whitelisted sprites
+-- (`wa.assets.load{ wa_sprites }`), and a pack sheet has no glow copy.
+-- ---------------------------------------------------------------------------
 -- Heading of the round, normalized; the last one when it is at rest.
 local function heading_of(m, last)
   local vx, vy = m.vx or 0, m.vy or 0
@@ -171,7 +186,7 @@ end
 -- Sentinel: a missile (or state) the builder leaves to WA.
 local NATIVE = {}
 
-local function resolve(o)
+local function resolve(o, size)
   local anim = o.anim or "none"
   local cfg = {
     sheet = o.sheet,
@@ -181,7 +196,7 @@ local function resolve(o)
     cyclical = o.cyclical or 0,
     anim_speed = o.anim_speed or 1.0,
     z = o.z or 5.0,
-    scale = o.scale or 1.0,
+    scale = (o.scale or 1.0) * (size or 1.0),
     mirror = o.mirror ~= false,
     frame_fn = o.frame_fn,
     turn_fn = o.turn_fn,
@@ -189,7 +204,7 @@ local function resolve(o)
   -- `homing = { arm = ms, time = ms, sheet = "...", ... }`: art for the
   -- homing window, resolved once at install like every other role.
   if type(o.homing) == "table" then
-    local h = resolve(o.homing)
+    local h = resolve(o.homing, size)
     h.arm = o.homing.arm or 0
     h.time = o.homing.time or 0
     cfg.homing = h
@@ -228,12 +243,15 @@ function M.flight(ctx, opts)
     return
   end
 
-  local main = resolve(opts)
+  local size = opts.size or 1.0
+  local angle = opts.angle or 0.0
+
+  local main = resolve(opts, size)
 
   local bit_cfg = NATIVE
   local bit_art = false
   if type(opts.bits) == "table" then
-    bit_cfg = resolve(opts.bits)
+    bit_cfg = resolve(opts.bits, size)
     bit_art = true
   elseif opts.bits == "inherit" then
     bit_cfg = main
@@ -242,7 +260,7 @@ function M.flight(ctx, opts)
   local extra = {}
   if type(opts.roles) == "table" then
     for i, r in ipairs(opts.roles) do
-      extra[i] = { name = r.name or ("role" .. i), match = r.match, cfg = resolve(r) }
+      extra[i] = { name = r.name or ("role" .. i), match = r.match, cfg = resolve(r, size) }
     end
   end
 
@@ -253,7 +271,7 @@ function M.flight(ctx, opts)
         scope = s.scope or "any",
         sigs = sigset(s.sig),
         when = s.when,
-        cfg = s.native and NATIVE or resolve(s),
+        cfg = s.native and NATIVE or resolve(s, size),
       }
     end
   end
@@ -471,7 +489,14 @@ function M.flight(ctx, opts)
 
     b.facing = cfg.mirror and (m.vx < 0 and -1 or 1) or 1
     b:frame(frame)
-    b:gfx({ angle = math.deg(rot) % 360, depth = cfg.z, scale = cfg.scale })
+    -- `angle` is added in the drawn frame, and a mirrored sheet is flipped
+    -- about the vertical axis, so the offset is negated on the left side to
+    -- keep the art pointing the same way either way.
+    b:gfx({
+      angle = (math.deg(rot) + (b.facing < 0 and -angle or angle)) % 360,
+      depth = cfg.z,
+      scale = cfg.scale,
+    })
   end)
 end
 

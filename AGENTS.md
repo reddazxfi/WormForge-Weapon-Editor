@@ -105,8 +105,8 @@ Node 26.x, Vite 8.3.x, React 19.3.x, Tailwind 4.3.x, TypeScript 7.0.x.
 
 `App.tsx` owns the single `WeaponProject` and all navigation state:
 
-- `activeTab: 'editor' | 'hold' | 'code'` (hotkeys `1` / `2` / `3`, ignored
-  while typing in an input/textarea/select);
+- `activeTab: 'editor' | 'hold' | 'effects' | 'code'` (hotkeys `1` / `2` / `3` /
+  `4`, ignored while typing in an input/textarea/select);
 - `activeSubTab: RecordTabId` (the record sections, shared with the sidebar and
   mobile `<select>`); `recordTabs.tsx` nests a section under another with
   `parent`. Collision Bitmask sits under Missile Action, and Burst Payload owns
@@ -122,11 +122,13 @@ Node 26.x, Vite 8.3.x, React 19.3.x, Tailwind 4.3.x, TypeScript 7.0.x.
   sections unless the payload is clusters and an action entry unless that action
   is selected; `bitActionOf()` is the single bit-action expression. Other tabs
   (Flight, Action, …) stay exclusive — do not mix the two models.
-- The **Effects** section (`effects` in `recordTabs.tsx`) is one page with two
-  cards from `EffectsCards.tsx`: the ribbon trail (moved here from Indices &
-  Trail) and the explosion burst with its `ExplosionPreview` canvas. It shows an
-  empty state for families with no claim-owned round or blast (guns, arrows,
-  sprays, specials, air strikes).
+- The **Effects & Libraries** workspace (`EffectsWorkspace.tsx`) is where every
+  claim hook and library bundle lives, not a record section: the ribbon trail,
+  the explosion burst with its `ExplosionPreview` canvas, the custom WAVs and
+  the sequential-fire card. It shows an empty state for families with no
+  claim-owned round or blast (guns, arrows, sprays, specials, air strikes) and a
+  "More libraries" note for anything not modelled yet. A new library gets a card
+  here instead of a record tab.
 - `isDark` with `localStorage['wf_theme_v2']`; **light is the default** unless a
   stored value says dark. `index.html` applies the stored class before paint.
 - modals: `.wep` import and the inline bundle-code view.
@@ -333,6 +335,14 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
     reads that `record::fields()` still does not name, so the editor cannot
     write them (PX fills them with its own ids: 76 and `0x10000 + 77`). That is
     an engine field to add, not a generator omission.
+  - **Weapon-wide builder parameters.** `size` multiplies every role's own
+    `scale` (primary, cluster bits, each behaviour sheet), and `angle` is a
+    rotation offset in degrees for art that does not point up, added in the
+    drawn frame and negated on a mirrored sheet. Both come from the Hold page's
+    **Builder Parameters** card (`MissileSpriteConfig.size` / `.angle`) and only
+    reach the builder, never the record. There is **no glow**: WA glows only
+    the natives whitelisted in `wa.assets.load{ wa_sprites }`, and a pack sheet
+    has no glow copy.
   - `states = { { scope, sig, sheet/native, … } }` is **legacy**: `sig` assumed
     WA writes behaviour sprites into `m.sprite`, which it does not (that field is
     the flight sprite only). Nothing in the editor emits a state any more —
@@ -363,6 +373,22 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   `all` trails a whole burst. Live trail ids are kept in an array, never with
   `pairs` (wfcheck `lockstep-pairs`). Only missile families get the card: strike
   bombs have no `m.weapon`, so their rounds cannot be matched this way.
+- **Sequential fire (`project.fireSequence`, `px.fire_seq`).** `wf-lib/fire_seq`
+  fires a burst from one `on_fire`: the first shot leaves immediately, a hidden
+  timer actor fires the rest `delay` frames apart and holds WA's
+  `shots_fired`/`shots_to_fire` at 0/1, so the worm stays in its firing pose
+  until the last shot. The generator emits `require("wf-lib/fire_seq")`, a
+  module-level `seq_dir(w)` (aim 0 down, 1 up, mirrored by `facing`, through
+  `wa.math`), `fires = { subtype = 4 }` (WA's repeat-fire pose; without it WA
+  leaves the fire method after the first shot) and
+  `on_fire = function(ev) seq.fire_seq_mis{...} end` (or
+  `fire_sequential_actor` for Lua actors). Keys: `weapon`, `owner`,
+  `cancel_weapon`, `count`, `delay`, `spread`, `standoff`, `x`/`y`/`vx`/`vy`
+  (functions of `(i, w)` when live aim is on, plain numbers locked at the
+  trigger otherwise) and `on_shot` for the uploaded shot WAV. `dependencies`
+  gains `px.fire_seq`. A custom Lua `on_fire` owns the trigger, so the card is
+  skipped then (the UI says so). Air strikes are excluded: their munitions are
+  created by the strike entity, so the slot never fires.
 - **Explosion burst (`project.explosionEffect`).** `px_effects`' electric ring +
   squashed lens, drawn from a claim `on_explode` (the engine emits it before
   WA's own blast). `effect` mode keeps the native blast; `blast` mode zeroes
@@ -525,7 +551,8 @@ never declare it without writing the file.
   folder. `packArtPath` returns null for `cluster_homing_sprite` on a strike
   (see `packArtSlotApplies`).
 - `mod.toml` `dependencies` merges the features' own entries (`wf.sdk` for
-  holds, `wfws.sdk` for the flight builder, `effects.sdk` for effects) with
+  holds, `wfws.sdk` for the flight builder, `effects.sdk` for effects,
+  `px.fire_seq` for sequential fire) with
   `project.extraDependencies` (deduped). The Bundle Code page's
   `BundleDependencies` panel edits that list; other bundles are resolved from
   `Mods/` at load.

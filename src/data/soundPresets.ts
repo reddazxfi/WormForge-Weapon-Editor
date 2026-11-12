@@ -13,6 +13,9 @@ import type { CustomSoundsConfig } from '../types/weapon';
 export const DEFAULT_CUSTOM_SOUNDS: CustomSoundsConfig = {
   explosionEnabled: false,
   explosionPriority: 10,
+  shotEnabled: false,
+  shotEvery: 1,
+  shotPriority: 8,
   intervalEnabled: false,
   intervalMs: 400,
   intervalDelayMs: 0,

@@ -10,6 +10,7 @@ import {
 } from '../types/weapon';
 import { getStockPanelPosition } from '../data/stockWeapons';
 import { resolveStockSprite } from '../data/stockSprites';
+import { supportsFireSequence } from '../data/fireSequence';
 import { COLLISION_FLAGS } from '../data/recordSchema';
 import {
   bitActionOf,
@@ -439,12 +440,18 @@ export function reindentCode(code: string, targetIndent: string): string[] {
  */
 export function customSoundPath(
   project: WeaponProject,
-  role: 'explosion' | 'interval',
+  role: 'explosion' | 'interval' | 'shot',
 ): string | null {
   const sounds = project.customSounds;
   if (!sounds) return null;
-  const enabled = role === 'explosion' ? sounds.explosionEnabled : sounds.intervalEnabled;
-  const asset = role === 'explosion' ? sounds.explosion : sounds.interval;
+  const enabled =
+    role === 'explosion'
+      ? sounds.explosionEnabled
+      : role === 'shot'
+        ? sounds.shotEnabled
+        : sounds.intervalEnabled;
+  const asset =
+    role === 'explosion' ? sounds.explosion : role === 'shot' ? sounds.shot : sounds.interval;
   if (!enabled || !asset?.file) return null;
   return `sounds/${sanitizeModFolder(project.id)}/${role}.wav`;
 }
@@ -536,6 +543,14 @@ export function generateLuaCode(project: WeaponProject): string {
     !!intervalSoundPath &&
     (project.fireType === 'power' || (project.fireType === 'drop' && !!project.body.fuse));
   const hasCustomExplodeCode = project.enableCustomLua && !!parsedLua.onExplodeBody.trim();
+  // `wf-lib/fire_seq` (px.fire_seq): one `on_fire` fires a burst. A custom
+  // `on_fire` in the snippet owns the trigger, so the card is skipped then.
+  const fireSequence = project.fireSequence;
+  const hasCustomOnFire =
+    project.enableCustomLua && /(?:^|\n)[ \t]*on_fire\s*=/.test(project.customLuaSnippet || '');
+  const usesFireSequence =
+    !!fireSequence?.enabled && !hasCustomOnFire && supportsFireSequence(project);
+  const shotSoundPath = usesFireSequence ? customSoundPath(project, 'shot') : null;
   // The effects SDK's ribbon trail follows a missile WA builds from this
   // record, so it only applies to the missile families (a strike's bombs are
   // not one: their `m.weapon` is nil).
@@ -551,6 +566,16 @@ export function generateLuaCode(project: WeaponProject): string {
     // WFWS's fork: primary + cluster-bit + per-behaviour art in one call.
     lines.push(`local sb = require(${luaQuote(WFWS_BUILDER_MODULE)})`);
   }
+  if (usesFireSequence) {
+    lines.push('local seq = require("wf-lib/fire_seq")');
+    // The worm's live aim as a unit vector: aim 0 is straight down, 1 straight
+    // up, and `facing` mirrors it. `wa.math` keeps it deterministic.
+    lines.push('local function seq_dir(w)');
+    lines.push('  local ang = (1 - w.aim) * math.pi');
+    lines.push('  if w.facing < 0 then ang = 2 * math.pi - ang end');
+    lines.push('  return wa.math.sin(ang), -wa.math.cos(ang)');
+    lines.push('end');
+  }
   if (usesRibbonTrail) {
     lines.push('local trail = require("wf-lib/effects/trail")');
   }
@@ -564,7 +589,7 @@ export function generateLuaCode(project: WeaponProject): string {
       lines.push('local blast = require("wf-lib/effects/custom_explosion")');
     }
   }
-  if (usesHold || usesMissileSprite || usesRibbonTrail || usesExplosionEffect) {
+  if (usesHold || usesMissileSprite || usesRibbonTrail || usesExplosionEffect || usesFireSequence) {
     lines.push('');
   }
 
@@ -704,6 +729,7 @@ export function generateLuaCode(project: WeaponProject): string {
   const packSounds: string[] = [];
   if (usesExplosionSound) packSounds.push(luaQuote(explosionSoundPath!));
   if (usesIntervalSound) packSounds.push(luaQuote(intervalSoundPath!));
+  if (shotSoundPath) packSounds.push(luaQuote(shotSoundPath));
   if (packSounds.length > 0) {
     lines.push(`      sounds = { ${packSounds.join(', ')} },`);
   }
@@ -2038,7 +2064,6 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push('        hand_rotation = 1,');
     lines.push('        hand_radial_rotation = 1,');
     lines.push(`        weap_radius = ${h.weapRadius ?? 6},`);
-    lines.push(`        weap_radius_y = ${h.weapRadiusY ?? h.weapRadius ?? 6},`);
     lines.push(`        weap_rotation = ${(1 + (h.weapRotation || 0) / 180).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')},`);
     lines.push('        weap_radial_rotation = 1,');
     lines.push(`        weap_scale = ${h.scale ?? 1},`);
@@ -2055,7 +2080,6 @@ export function generateLuaCode(project: WeaponProject): string {
         lines.push(`        anim_speed = ${formatNumber(animSpeed)},`);
       }
     }
-    if (h.scale && h.scale !== 1) lines.push(`        weap_scale = ${h.scale},`);
     if (h.handScale && h.handScale !== 1) lines.push(`        hand_scale = ${h.handScale},`);
     if (!h.drawHand) lines.push('        draw_hand = false,');
     if (h.keepWhileFiring) lines.push('        keep_while_firing = true,');
@@ -2073,6 +2097,93 @@ export function generateLuaCode(project: WeaponProject): string {
         .map((l) => (l ? `      ${l}` : ''))
         .join('\n')
     );
+  }
+
+  // Sequential fire: the first shot leaves from `on_fire`, the rest from
+  // fire_seq's hidden timer, which holds WA's shot counters so the worm stays
+  // in its firing pose. `fires = { subtype = 4 }` is the minigun's repeat-fire
+  // pose; without it WA leaves the fire method after the first shot.
+  if (usesFireSequence) {
+    const f = fireSequence!;
+    const count = Math.max(1, Math.round(f.count));
+    const delay = Math.max(1, Math.round(f.delay));
+    const speed = formatNumber(f.speed);
+    const standoff = formatNumber(Math.max(0, f.standoff));
+    const spreadX = formatNumber(Math.max(0, f.spreadX));
+    const spreadY = formatNumber(Math.max(0, f.spreadY));
+    // `w.x + 0` / `w.y + -3` read badly; emit a signed term only when nonzero.
+    const offsetTerm = (value: number) => {
+      const n = Number(value) || 0;
+      if (n === 0) return '';
+      return n > 0 ? ` + ${formatNumber(n)}` : ` - ${formatNumber(-n)}`;
+    };
+    const offX = offsetTerm(f.offsetX);
+    const offY = offsetTerm(f.offsetY);
+    const live = f.liveAim;
+    const shotSound = shotSoundPath
+      ? {
+          path: shotSoundPath,
+          every: Math.max(1, Math.round(customSounds?.shotEvery ?? 1)),
+          priority: Math.max(0, Math.round(customSounds?.shotPriority ?? 8)),
+        }
+      : null;
+    lines.push('      -- Sequential fire (`wf-lib/fire_seq`): one trigger, a burst.');
+    if (f.repeatFirePose && project.fireType !== 'special') {
+      lines.push('      fires = { subtype = 4 },');
+    }
+    lines.push('      on_fire = function(ev)');
+    if (!live) {
+      // Lock the aim to the moment the trigger was pulled.
+      lines.push('        local dx, dy = seq_dir(ev.worm)');
+    }
+    const call = f.mode === 'actors' ? 'fire_sequential_actor' : 'fire_seq_mis';
+    lines.push(`        seq.${call}{`);
+    if (f.mode !== 'actors') {
+      lines.push('          weapon = ctx.id,');
+    }
+    lines.push('          owner = ev.worm,');
+    if (f.cancelOnWeaponChange || f.mode === 'actors') {
+      // Actors have no default: without it the burst ends on the first tick.
+      lines.push('          cancel_weapon = ctx.id,');
+    }
+    lines.push(`          count = ${count}, delay = ${delay},`);
+    if (f.mode === 'actors') {
+      if (f.actorSprite.trim()) {
+        lines.push(`          sprite = ${luaQuote(f.actorSprite.trim())},`);
+      }
+      lines.push(
+        `          gravity = ${f.actorGravity ? 'true' : 'false'}, collide = ${
+          f.actorCollide ? 'true' : 'false'
+        }, persist = ${f.actorPersist ? 'true' : 'false'},`,
+      );
+    }
+    if (f.spreadX > 0 || f.spreadY > 0) {
+      lines.push(`          spread = { x = ${spreadX}, y = ${spreadY} },`);
+    }
+    if (f.standoff > 0) {
+      lines.push(`          standoff = ${standoff},`);
+    }
+    if (live) {
+      lines.push(`          x = function(i, w) return w.x${offX} end,`);
+      lines.push(`          y = function(i, w) return w.y${offY} end,`);
+      lines.push(`          vx = function(i, w) local dx = seq_dir(w) return dx * ${speed} end,`);
+      lines.push(`          vy = function(i, w) local _, dy = seq_dir(w) return dy * ${speed} end,`);
+    } else {
+      lines.push(`          x = ev.worm.x${offX}, y = ev.worm.y${offY},`);
+      lines.push(`          vx = dx * ${speed}, vy = dy * ${speed},`);
+    }
+    if (shotSound) {
+      const every = shotSound.every;
+      const guard = every > 1 ? `if i % ${every} == 0 then ` : '';
+      const close = every > 1 ? ' end' : '';
+      lines.push(
+        `          on_shot = function(i, w) ${guard}wa.sound.play(w, ${luaQuote(
+          shotSound.path,
+        )}, ${shotSound.priority})${close} end,`,
+      );
+    }
+    lines.push('        }');
+    lines.push('      end,');
   }
 
   // Unified explosion hook: merges effects-SDK burst, custom WAV, and custom Lua logic.
@@ -2312,6 +2423,14 @@ export function generateLuaCode(project: WeaponProject): string {
     if (m.z !== undefined && m.z !== 5.0) {
       lines.push(`      z = ${m.z},`);
     }
+    // Weapon-wide builder parameters: one size multiplier for every role's
+    // sheet, and a rotation offset for art that does not point up.
+    if (m.size !== undefined && m.size !== 1) {
+      lines.push(`      size = ${formatNumber(m.size)},`);
+    }
+    if (m.angle) {
+      lines.push(`      angle = ${formatNumber(m.angle)},`);
+    }
 
     // Cluster-bit art. `inherit` gives the bits the primary sheet; a builder
     // role gets its own. Anything else leaves WA's bit sprite alone.
@@ -2421,6 +2540,11 @@ export function generateModToml(project: WeaponProject): string {
   const explodesNatively = project.fireType === 'power' || project.fireType === 'drop';
   const usesExplosionEffect =
     !!project.explosionEffect?.enabled && explodesNatively;
+  // `wf-lib/fire_seq` is its own library bundle (`px.fire_seq`).
+  const usesFireSequence =
+    !!project.fireSequence?.enabled &&
+    !(project.enableCustomLua && /(?:^|\n)[ \t]*on_fire\s*=/.test(project.customLuaSnippet || '')) &&
+    supportsFireSequence(project);
 
   const lines: string[] = [
     `id = ${luaQuote(project.id)}`,
@@ -2435,6 +2559,7 @@ export function generateModToml(project: WeaponProject): string {
   if (usesHold) dependencies.push('wf.sdk');
   if (usesWfws) dependencies.push('wfws.sdk');
   if (usesRibbonTrail || usesExplosionEffect) dependencies.push('effects.sdk');
+  if (usesFireSequence) dependencies.push('px.fire_seq');
   // Extra library bundles the author asked for (they may be used from the
   // custom Lua snippet, or by a component this editor does not model).
   for (const dependency of project.extraDependencies || []) {

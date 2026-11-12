@@ -105,15 +105,6 @@ import {
 import { bitActionOf, type RecordTabId } from '../data/recordTabs';
 import { bitBuilderMode } from '../data/spriteBuilder';
 import { PackSpriteUpload } from './PackSpriteUpload';
-import {
-  CustomSoundsCard,
-  ExplosionEffectCard,
-  RibbonTrailCard,
-  supportsExplosionEffect,
-  supportsExplosionSound,
-  supportsIntervalSound,
-  supportsRibbonTrail,
-} from './EffectsCards';
 
 interface RecordEditorProps {
   project: WeaponProject;
@@ -261,17 +252,6 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
     if (!target) return;
     document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [activeSubTab]);
-
-  // Effects-SDK cards live on the Effects tab. The ribbon trail needs a missile
-  // round; the explosion burst needs a native blast (missile or mine). Custom
-  // sounds split the same way: a blast sound needs `on_explode`, the interval
-  // needs flight frames. None apply to strikes: their bombs are not fired from
-  // a weapon-table slot.
-  const effectsAvailable =
-    supportsRibbonTrail(project) ||
-    supportsExplosionEffect(project) ||
-    supportsExplosionSound(project) ||
-    supportsIntervalSound(project);
 
   // Two independent selections. `ends_on_contact` stops the projectile;
   // `bounce.hits` only adds targets the bounce action reacts to (the engine
@@ -2353,44 +2333,6 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Tab 5: Effects-SDK trail and explosion burst */}
-      {activeSubTab === 'effects' && (
-        <div className="p-6 space-y-6 animate-in fade-in">
-          <div>
-            <h3 className="font-heading text-sm font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-forge-500" />
-              Effects (`wf-lib/effects`, `wa.sound`)
-            </h3>
-            <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
-              Claim hooks rather than native record fields: the Project X ribbon trail, the
-              electric-style explosion burst, and uploaded WAVs played with `wa.sound.play` — at the
-              blast or on an interval. Their colour, shape, sound and timing are free.
-            </p>
-          </div>
-
-          {effectsAvailable ? (
-            <>
-              <RibbonTrailCard project={project} onChange={onChange} />
-              <ExplosionEffectCard project={project} onChange={onChange} />
-              <CustomSoundsCard project={project} onChange={onChange} />
-            </>
-          ) : (
-            <div className="p-6 rounded-xl border border-dashed border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/20 text-center space-y-2">
-              <Sparkles className="w-8 h-8 text-stone-400 mx-auto" />
-              <div className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-                This record family has no native effect to decorate
-              </div>
-              <p className="text-xs text-stone-500 max-w-xl mx-auto">
-                Guns, arrows, sprays, specials and air strikes do not fire a missile this claim owns,
-                so the ribbon trail, the explosion burst and the sound hooks cannot run. Air-strike
-                bombs are built by the strike entity from its own record copy, which the engine never
-                maps to a weapon slot.
-              </p>
-            </div>
-          )}
         </div>
       )}
 

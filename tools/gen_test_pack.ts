@@ -36,6 +36,7 @@ import {
 } from '../src/utils/luaGenerator';
 import { DEFAULT_EXPLOSION_EFFECT, EXPLOSION_PRESETS } from '../src/data/explosionPresets';
 import { DEFAULT_CUSTOM_SOUNDS } from '../src/data/soundPresets';
+import { DEFAULT_FIRE_SEQUENCE } from '../src/data/fireSequence';
 import {
   DEFAULT_ROLE_ART,
   bitBuilderMode,
@@ -366,6 +367,8 @@ function makeOp(partial: {
   packArt?: Partial<WeaponProject['packArt']>;
   /** The roaming animal's two flying sheets (`sheep_sprites`). */
   roamSheets?: WeaponProject['roamSheets'];
+  /** `wf-lib/fire_seq` burst from one `on_fire`. */
+  fireSequence?: Partial<NonNullable<WeaponProject['fireSequence']>>;
   defaults?: Partial<WeaponProject['defaults']>;
 }): WeaponProject {
   return {
@@ -438,6 +441,7 @@ function makeOp(partial: {
     ribbonTrail: { ...DEFAULTS.ribbon, ...partial.trailer },
     explosionEffect: { ...DEFAULT_EXPLOSION_EFFECT, ...partial.explosion },
     customSounds: { ...DEFAULT_CUSTOM_SOUNDS, ...partial.customSounds },
+    fireSequence: { ...DEFAULT_FIRE_SEQUENCE, ...partial.fireSequence },
     extraDependencies: [],
     hold: {
       enabled: false,
@@ -923,6 +927,68 @@ const TESTS: TestCase[] = [
     watch:
       'A missing walk pose (`sprite` zeroed by the builder), stock flown art under ours (`sheep.flight_1/2` not zeroed), our art while still walking (Space detection firing early), or nothing after Space (`wa.world.keys().space`/turn worm).',
   },
+  {
+    project: makeOp({
+      id: 'wftest.29_fire_seq',
+      name: 'WF 29 Sequential Fire',
+      slot: 'mortar',
+      // A mortar record fired as a burst: the first shell from `on_fire`, the
+      // rest from fire_seq's timer, which holds WA's shot counters so the worm
+      // stays in its firing pose. Live aim means the player can keep steering
+      // the stream while it runs.
+      fireSequence: {
+        enabled: true,
+        mode: 'missiles',
+        count: 12,
+        delay: 3,
+        speed: 14,
+        standoff: 24,
+        spreadX: 0.3,
+        spreadY: 0.3,
+        offsetY: -3,
+        liveAim: true,
+        cancelOnWeaponChange: true,
+        repeatFirePose: true,
+      },
+      // One report per shot, from `on_shot(i, w)`.
+      customSounds: {
+        shotEnabled: true,
+        shot: soundAsset(INTERVAL_WAV, 'shot.wav'),
+        shotEvery: 1,
+        shotPriority: 8,
+      },
+    }),
+    intent:
+      '`wf-lib/fire_seq` (`px.fire_seq`): one trigger fires twelve mortar shells three frames apart, with live aim and a repeat-fire pose.',
+    expect:
+      'One Space press fires a stream of twelve shells; the worm keeps its firing pose until the last one, the aim follows the arrow keys during the burst, and the turn ends after the burst.',
+    watch:
+      'Only one shell (the `on_fire` block missing or `fires.subtype` not set), the worm leaving its pose after the first shot, shells spawning inside the worm (standoff), a burst that never ends (counters not released), or a second burst starting from WA’s queued re-fire.',
+  },
+  {
+    project: makeOp({
+      id: 'wftest.30_builder_size_angle',
+      name: 'WF 30 Builder Size Angle',
+      slot: 'grenade',
+      // The grenade sheet points up; `angle = -90` turns it to point right, so
+      // the two weapon-wide builder parameters are visible on one round: the
+      // sprite is 1.6x its own size and lying on its side.
+      missileSprite: {
+        enabled: true,
+        mode: 'custom',
+        anim: 'none',
+        size: 1.6,
+        angle: -90,
+        hideStock: true,
+      },
+    }),
+    intent:
+      '`sb.flight` weapon-wide parameters: `size = 1.6` scales the sheet, `angle = -90` rotates it.',
+    expect:
+      'The grenade flies 1.6x its normal size and points sideways (right, then mirrored left), not up.',
+    watch:
+      'Sheet drawn at its own size (`size` not reaching the builder), still pointing up (`angle` ignored), or the offset applied twice on the mirrored side.',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -945,6 +1011,7 @@ const usedSheets = new Set<string>();
 let usesBuilders = false;
 let usesRibbon = false;
 let usesExplosion = false;
+let usesFireSeq = false;
 
 for (const test of TESTS) {
   const project = test.project;
@@ -1038,8 +1105,13 @@ for (const test of TESTS) {
     mkdirSync(join(BUNDLE, 'sounds', folder), { recursive: true });
     writeFileSync(join(BUNDLE, 'sounds', folder, 'interval.wav'), INTERVAL_WAV);
   }
+  if (project.customSounds.shotEnabled && project.customSounds.shot?.file) {
+    mkdirSync(join(BUNDLE, 'sounds', folder), { recursive: true });
+    writeFileSync(join(BUNDLE, 'sounds', folder, 'shot.wav'), INTERVAL_WAV);
+  }
 
   if (project.ribbonTrail.enabled) usesRibbon = true;
+  if (project.fireSequence?.enabled) usesFireSeq = true;
   if (
     project.explosionEffect?.enabled &&
     (project.fireType === 'power' || project.fireType === 'drop')
@@ -1068,6 +1140,7 @@ const dependencies: string[] = [];
 // The WFWS builder is its own bundle; `wf.sdk` is only needed for holds.
 if (usesBuilders) dependencies.push('wfws.sdk');
 if (usesRibbon || usesExplosion) dependencies.push('effects.sdk');
+if (usesFireSeq) dependencies.push('px.fire_seq');
 
 const toml: string[] = [
   `id = ${quote(MOD_ID)}`,

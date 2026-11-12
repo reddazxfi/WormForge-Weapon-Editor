@@ -874,8 +874,11 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
 
       const anim = missile.anim || 'rotation';
       const numFrames = Math.max(1, missile.frames || 1);
-      const scaleMult = missile.scale || 1.0;
+      const scaleMult = (missile.scale || 1.0) * (missile.size ?? 1);
       const mirror = missile.mirror !== false;
+      // `angle` is added to the drawn rotation, negated on a mirrored sheet, as
+      // the builder does it.
+      const angleOffset = (((missile.angle ?? 0) * Math.PI) / 180) * (mirror && vx < 0 ? -1 : 1);
 
       // DRAW CANVAS
       ctx.clearRect(0, 0, width, height);
@@ -935,7 +938,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       ctx.save();
       ctx.imageSmoothingEnabled = false;
       ctx.translate(posX, posY);
-      ctx.rotate(rot);
+      ctx.rotate(rot + angleOffset);
 
       // `b.facing = mirror and (m.vx < 0 and -1 or 1) or 1`
       const facing = mirror && vx < 0 ? -1 : 1;
@@ -2182,6 +2185,68 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
               </div>
             </div>
 
+            {/* 3b. Weapon-wide builder parameters: one size for every role and a
+                rotation offset for art that does not point up. */}
+            <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
+                  Builder Parameters
+                </span>
+                <span className="font-mono text-[10px] text-stone-400">size · angle</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label
+                    htmlFor="builder-size"
+                    className="text-xs font-medium text-stone-600 dark:text-stone-400"
+                  >
+                    Size (all roles)
+                  </label>
+                  <input
+                    id="builder-size"
+                    type="number"
+                    step={0.05}
+                    min={0.1}
+                    max={4}
+                    value={missile.size ?? 1}
+                    onChange={(e) => updateMissile({ size: Math.max(0.1, Number(e.target.value)) })}
+                    className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                  />
+                  <p className="text-[11px] text-stone-500">
+                    Multiplies every role&apos;s own scale — the primary, the cluster bits and each
+                    behaviour sheet — so one number resizes the whole weapon. `size = 1` is the
+                    sheet&apos;s own pixels.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label
+                    htmlFor="builder-angle"
+                    className="text-xs font-medium text-stone-600 dark:text-stone-400"
+                  >
+                    Angle offset (degrees)
+                  </label>
+                  <input
+                    id="builder-angle"
+                    type="number"
+                    step={15}
+                    min={-180}
+                    max={180}
+                    value={missile.angle ?? 0}
+                    onChange={(e) => updateMissile({ angle: Number(e.target.value) })}
+                    className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                  />
+                  <p className="text-[11px] text-stone-500">
+                    Added to whatever rotation the role&apos;s animation asked for, for art that does
+                    not point up: a sheet drawn pointing right needs `-90`. Tracked art stays
+                    tracked, it just gains the offset, and the offset is mirrored on the left so the
+                    art points the same way both ways.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {/* 4. Generated Lua Code Preview */}
             <div className="space-y-1.5">
               <span className="text-[11px] font-mono font-semibold text-stone-500 uppercase tracking-wider">
@@ -2199,6 +2264,8 @@ sb.flight(ctx, {
   }${
     missile.scale && missile.scale !== 1 ? `\n  scale = ${missile.scale},` : ''
   }${missile.z !== undefined && missile.z !== 5 ? `\n  z = ${missile.z},` : ''}${
+    missile.size !== undefined && missile.size !== 1 ? `\n  size = ${missile.size},` : ''
+  }${missile.angle ? `\n  angle = ${missile.angle},` : ''}${
     missile.mirror !== false ? '' : '\n  mirror = false,'
   }${previewRoles ? `\n${previewRoles}` : ''}
 })`}

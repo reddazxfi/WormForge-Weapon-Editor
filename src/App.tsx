@@ -4,6 +4,7 @@ import { Sidebar, MobileBar } from './components/Sidebar';
 import { WeaponSettings } from './components/WeaponSettings';
 import { RecordEditor } from './components/RecordEditor';
 import { HoldPreview } from './components/HoldPreview';
+import { EffectsWorkspace } from './components/EffectsWorkspace';
 import { WepImportModal } from './components/WepImportModal';
 import { LuaPreviewModal } from './components/LuaPreviewModal';
 import { BundleDependencies } from './components/BundleDependencies';
@@ -194,7 +195,7 @@ end,`,
 
 export default function App() {
   const [project, setProject] = useState<WeaponProject>(INITIAL_PROJECT);
-  const [activeTab, setActiveTab] = useState<'editor' | 'hold' | 'code'>('editor');
+  const [activeTab, setActiveTab] = useState<'editor' | 'hold' | 'effects' | 'code'>('editor');
   const [activeSubTab, setActiveSubTab] = useState<RecordTabId>('missile');
   const [isWepModalOpen, setIsWepModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -224,7 +225,7 @@ export default function App() {
     }
   }, [isDark]);
 
-  // Keyboard navigation hotkeys (1: Record, 2: Hold & Sprite Builder, 3: Code)
+  // Keyboard navigation hotkeys (1: Record, 2: Hold, 3: Effects, 4: Code)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
@@ -232,7 +233,8 @@ export default function App() {
 
       if (e.key === '1') setActiveTab('editor');
       else if (e.key === '2') setActiveTab('hold');
-      else if (e.key === '3') setActiveTab('code');
+      else if (e.key === '3') setActiveTab('effects');
+      else if (e.key === '4') setActiveTab('code');
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -349,6 +351,11 @@ export default function App() {
       title: 'Aim and flight art',
       description: 'Check the worm hold at every aim angle and the 50 Hz missile animation.',
     },
+    effects: {
+      eyebrow: 'Effects & Libraries',
+      title: 'Advanced libraries',
+      description: 'Ribbon trail, explosion burst, custom sounds and sequential fire.',
+    },
     code: {
       eyebrow: 'Bundle Code',
       title: 'Review the bundle',
@@ -420,6 +427,10 @@ export default function App() {
             <div className="space-y-6">
               <HoldPreview project={project} onChange={updateProject} />
             </div>
+          )}
+
+          {activeTab === 'effects' && (
+            <EffectsWorkspace project={project} onChange={updateProject} />
           )}
 
           {activeTab === 'code' && (

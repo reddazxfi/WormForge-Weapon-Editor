@@ -661,7 +661,7 @@ interface SoundUploadProps {
 }
 
 /** One WAV slot: a validated upload, its name/size and an `<audio>` preview. */
-function SoundUpload({ id, asset, disabled, onPick, onRemove }: SoundUploadProps) {
+export function SoundUpload({ id, asset, disabled, onPick, onRemove }: SoundUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
 

@@ -1184,3 +1184,82 @@ gas numbers live on the clustlet (`clusters.bit.roam.gas` = delay 1 ms, poison
 5, `animal_sprite` 174 = `skunk2`, bits 1× `skunk1` at 173). The editor shows the
 gas group in both places with a stock picker, and the Hold page's roam card
 shows the same pose choice next to the two `sheep_sprites` uploads.
+
+### Effects & Libraries workspace, and sequential fire
+
+The Effects cards moved out of the record sections into a fourth workspace tab
+(`EffectsWorkspace.tsx`, hotkey 3; Bundle Code is now 4). It hosts the ribbon
+trail, the explosion burst, the custom WAVs and the new sequential-fire card,
+plus a "More libraries" note: a library that needs a claim hook or a bundle gets
+a card there instead of a record tab.
+
+`wf-lib/fire_seq` (`px.fire_seq`, PX's Ripper Star / Megashark / FAMAS base) is
+now a card. The generator emits:
+
+```lua
+local seq = require("wf-lib/fire_seq")
+local function seq_dir(w) ... end          -- aim 0 down, 1 up, mirrored by facing
+...
+      fires = { subtype = 4 },             -- WA's repeat-fire pose
+      on_fire = function(ev)
+        seq.fire_seq_mis{ weapon = ctx.id, owner = ev.worm, cancel_weapon = ctx.id,
+          count = 12, delay = 3, spread = { x = 0.3, y = 0.3 }, standoff = 24,
+          x = function(i, w) return w.x end, y = function(i, w) return w.y - 3 end,
+          vx = function(i, w) local dx = seq_dir(w) return dx * 14 end,
+          vy = function(i, w) local _, dy = seq_dir(w) return dy * 14 end }
+      end,
+```
+
+- `fires = { subtype = 4 }` is the minigun's repeat-fire pose. Without it WA
+  leaves the fire method after the first shot, so the burst's held counters
+  never keep the worm in its firing animation (the toxic_thrower sets it for the
+  same reason).
+- Live aim emits `x`/`y`/`vx`/`vy` as functions of `(i, w)`; with it off the
+  direction is computed once from `ev.worm` and passed as numbers, which locks
+  the aim to the trigger pull.
+- `fire_sequential_actor` has no default `cancel_weapon`, so the generator always
+  emits it in actor mode; without it the burst ends on the timer's first tick.
+- The shot WAV is a third custom-sound role (`sounds/<mod>/shot.wav`), played
+  from `on_shot(i, w)` every Nth shot.
+- A custom Lua `on_fire` owns the trigger, so the card is skipped and says so.
+  Air strikes are excluded: their munitions are created by the strike entity, so
+  the slot never fires.
+
+Test pack **WF 29 Sequential Fire** (mortar, 12 shells, 3-frame delay, live aim)
+covers it; `wfcheck` is clean on the 29-weapon pack.
+
+### Weapon-wide sprite-builder parameters: `size` and `angle`
+
+Two knobs that belong to the weapon, not to a role: one multiplier for every
+sheet the builder draws (primary, cluster bits, each behaviour sheet) and a
+rotation offset for art that does not point up. They live on
+`MissileSpriteConfig` and are emitted on the `sb.flight` call only, never into
+the record:
+
+```lua
+sb.flight(ctx, {
+  sheet = "sprites/<mod>/missile.png", anim = "track",
+  size = 1.6,      -- multiplies each role's own `scale`
+  angle = -90,     -- added to the drawn rotation
+  ...
+})
+```
+
+- `size` is a multiplier, not an absolute: a role's `scale` and `size`
+  compound, so a bit sheet can stay smaller than the primary.
+- `angle` is applied in the drawn frame and negated on a mirrored sheet
+  (`b.facing < 0`), because the mirror flips the rotated sprite about the
+  vertical axis; without the negation a `-90` sheet points up on one side.
+  Tracked art keeps tracking, it just gains the offset.
+- The Hold page shows both under **Builder Parameters**, and the flight preview
+  applies them (rotation offset before the facing flip, scale on the draw), so
+  what the preview shows is what the builder draws.
+
+**Glow is not part of this.** WA glows only the natives it whitelists in
+`wa.assets.load{ wa_sprites }` (its own full-colour copies plus half-resolution
+glow sheets); a pack sheet has no glow copy, so `a:gfx{ tint, blend = "add" }`
+on a follower actor would only tint the pack art, not bloom it. Left out on
+purpose.
+
+Test pack **WF 30 Builder Size Angle** (grenade, `size = 1.6`, `angle = -90`)
+covers both.

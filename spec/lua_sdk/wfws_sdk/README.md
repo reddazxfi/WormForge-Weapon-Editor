@@ -39,6 +39,16 @@ roaming animal's flight.
 
 ## API
 
+`size` and `angle` are the weapon-level knobs the editor's Hold page shows
+under **Builder Parameters**: one multiplier for every sheet so one number
+resizes the whole weapon, and a rotation offset for art that does not point up
+(a sheet drawn pointing right needs `-90`). The offset is applied in the drawn
+frame and negated on a mirrored sheet, so the art points the same way on both
+sides; tracked art stays tracked and simply gains the offset.
+
+There is no glow: WA glows only the natives listed in
+`wa.assets.load{ wa_sprites }`, and a pack sheet has no glow copy.
+
 ```lua
 sb.flight(ctx, {
   weapon = ctx.id,
@@ -46,6 +56,11 @@ sb.flight(ctx, {
   anim   = "track",              -- track | rotation | slow | medium | fast | none
   cyclical = 32,                 -- frames in the sheet (optional)
   anim_speed = 1.0, spin = 1.0, scale = 1.0, mirror = true, z = 5.0,
+
+  -- weapon-wide, applied to every role (primary, bits, states, roles):
+  size  = 1.25,                  -- multiplies each role's own `scale`
+  angle = -90,                   -- degrees added to the drawn rotation
+
   roam = true,                   -- roaming animal: wait for Space, then draw
 
   bits = {                       -- cluster-bit art

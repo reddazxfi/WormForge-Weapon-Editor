@@ -7,6 +7,7 @@ import {
   FileCode2,
   Layers,
   Sparkles,
+  Wand2,
   ChevronRight,
   ChevronDown,
 } from 'lucide-react';
@@ -14,7 +15,7 @@ import { WeaponProject } from '../types/weapon';
 import { bitActionOf, visibleRecordTabs, RecordTabDef, RecordTabId } from '../data/recordTabs';
 import { assetUrl } from '../utils/assetUrl';
 
-type WorkspaceTab = 'editor' | 'hold' | 'code';
+type WorkspaceTab = 'editor' | 'hold' | 'effects' | 'code';
 
 interface SidebarProps {
   project: WeaponProject;
@@ -32,7 +33,8 @@ interface SidebarProps {
 const WORKSPACE: { id: WorkspaceTab; label: string; hint: string; icon: React.ElementType; key: string }[] = [
   { id: 'editor', label: 'Weapon Record', hint: 'Type, flight, payload', icon: Layers, key: '1' },
   { id: 'hold', label: 'Hold & Sprite Builder', hint: 'Worm grip and flight art', icon: Sparkles, key: '2' },
-  { id: 'code', label: 'Bundle Code', hint: 'Lua, mod.toml, profile', icon: FileCode2, key: '3' },
+  { id: 'effects', label: 'Effects & Libraries', hint: 'Trail, burst, sequential fire', icon: Wand2, key: '3' },
+  { id: 'code', label: 'Bundle Code', hint: 'Lua, mod.toml, profile', icon: FileCode2, key: '4' },
 ];
 
 const chip =
@@ -385,7 +387,14 @@ export const MobileBar: React.FC<MobileBarProps> = ({
     </div>
     <div className="grid grid-cols-3 gap-1 px-3 pb-2">
       {WORKSPACE.map(({ id, icon: Icon }) => {
-        const short = id === 'editor' ? 'Record' : id === 'hold' ? 'Hold & Sprite' : 'Bundle';
+        const short =
+          id === 'editor'
+            ? 'Record'
+            : id === 'hold'
+              ? 'Hold & Sprite'
+              : id === 'effects'
+                ? 'Effects'
+                : 'Bundle';
         return (
           <button
             key={id}

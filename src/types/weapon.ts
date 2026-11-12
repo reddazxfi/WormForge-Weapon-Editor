@@ -283,6 +283,12 @@ export interface CustomSoundAsset {
 export interface CustomSoundsConfig {
   explosionEnabled: boolean;
   explosion?: CustomSoundAsset;
+  /** One WAV per shot of a `fire_seq` burst (`on_shot`). */
+  shotEnabled: boolean;
+  shot?: CustomSoundAsset;
+  /** Play on every Nth shot; 1 is every shot. */
+  shotEvery: number;
+  shotPriority: number;
   /** Higher priorities replace lower ones in a full voice pool. */
   explosionPriority: number;
   intervalEnabled: boolean;
@@ -294,6 +300,42 @@ export interface CustomSoundsConfig {
   /** Plays before it stops; 0 keeps it going for the whole flight. */
   intervalLimit: number;
   intervalPriority: number;
+}
+
+/**
+ * `wf-lib/fire_seq` (`px.fire_seq`): one `on_fire` fires a burst. The first shot
+ * leaves immediately; a hidden timer actor fires the rest `delay` frames apart
+ * and holds WA's shot counters, so the worm stays in its firing pose.
+ */
+export interface FireSequenceConfig {
+  enabled: boolean;
+  /** Real WA missiles (`fire_seq_mis`) or Lua actors (`fire_sequential_actor`). */
+  mode: 'missiles' | 'actors';
+  /** Total shots per trigger pull, the first one included. */
+  count: number;
+  /** Frames between shots (50 Hz). */
+  delay: number;
+  /** Launch speed in px/frame along the worm's aim. */
+  speed: number;
+  /** Pixels along each shot's velocity, so it does not start inside the worm. */
+  standoff: number;
+  /** Random velocity jitter, ± per axis. */
+  spreadX: number;
+  spreadY: number;
+  /** Spawn offset from the worm, in pixels. */
+  offsetX: number;
+  offsetY: number;
+  /** Read aim again for every shot (functions of `(i, w)`) instead of locking it. */
+  liveAim: boolean;
+  /** End the burst when the worm stops holding this weapon. */
+  cancelOnWeaponChange: boolean;
+  /** `fires = { subtype = 4 }`: WA's repeat-fire pose, so the worm keeps aiming. */
+  repeatFirePose: boolean;
+  /** Actors mode: the spawned sheet and its physics. */
+  actorSprite: string;
+  actorGravity: boolean;
+  actorCollide: boolean;
+  actorPersist: boolean;
 }
 
 export interface ExplosionEffectConfig {
@@ -381,6 +423,14 @@ export interface MissileSpriteConfig {
   animate: boolean;
   spin: boolean;
   hideStock: boolean;
+  /**
+   * Weapon-wide builder parameters (PX's sprite builder has no equivalent):
+   * one scale multiplier for every role's sheet -- primary, bits, states --
+   * and a rotation offset in degrees for art that does not point up. Emitted
+   * as `size` / `angle` on the `sb.flight` call.
+   */
+  size?: number;
+  angle?: number;
   /** Emit `log = true` in `sb.flight`: one log line per missile's first
    *  frames with what the identity test saw. A debugging aid. */
   logIdentity?: boolean;
@@ -471,6 +521,8 @@ export interface WeaponProject {
   ribbonTrail: RibbonTrailConfig;
   /** Effects-SDK explosion burst, added to or replacing WA's own blast. */
   explosionEffect: ExplosionEffectConfig;
+  /** `wf-lib/fire_seq` burst from one `on_fire`. Optional for older projects. */
+  fireSequence?: FireSequenceConfig;
   /** Uploaded WAVs played with `wa.sound.play` (blast and flight interval). */
   customSounds: CustomSoundsConfig;
   /** Extra library bundles (`effects.sdk`, …) the exported mod.toml depends on. */
