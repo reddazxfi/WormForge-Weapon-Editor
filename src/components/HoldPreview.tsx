@@ -270,7 +270,6 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [isPlaying, setIsPlaying] = useState(false);
   const [currentFrame, setCurrentFrame] = useState(0);
   const [aimAngleIndex, setAimAngleIndex] = useState(16); // 0 (down) to 31 (up), 16 = forward horizontal
   const [facingRight, setFacingRight] = useState(true);
@@ -313,6 +312,17 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
   const defaultArt = defaultArtFor(project);
   const updateHold = (patch: Partial<typeof hold>) => {
     onChange({ hold: { ...hold, ...patch } });
+  };
+
+  const currentHandType = hold.handType || 'mid';
+  const currentHandTypeLabel =
+    currentHandType === 'lower' ? 'Lower' : currentHandType === 'upper' ? 'Upper' : 'Mid';
+
+  const cycleHandType = () => {
+    const order: HandType[] = ['lower', 'mid', 'upper'];
+    const idx = order.indexOf(currentHandType);
+    const next = order[(idx + 1) % order.length];
+    updateHold({ handType: next });
   };
 
   // worm_hold.rs advances `phase` by anim_speed * 0.03 every 50 Hz game frame,
@@ -518,15 +528,18 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     };
   }, [defaultArt.url, missile.sheetPreview]);
 
-  // Worm Hold frame animation timer
+  // Worm Hold frame animation timer (always plays when hold.frames > 1)
   useEffect(() => {
-    if (!isPlaying || hold.frames <= 1) return;
+    if (hold.frames <= 1) {
+      setCurrentFrame(0);
+      return;
+    }
     const intervalMs = 1000 / (hold.fps || 15);
     const timer = setInterval(() => {
       setCurrentFrame((prev) => (prev + 1) % hold.frames);
     }, intervalMs);
     return () => clearInterval(timer);
-  }, [isPlaying, hold.frames, hold.fps]);
+  }, [hold.frames, hold.fps]);
 
   // ---------------------------------------------------------------------------
   // WORM HOLD CANVAS RENDER LOOP
@@ -1112,41 +1125,184 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       {/* ======================================================================= */}
       <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl p-5 shadow-xs transition-colors">
         {/* Header */}
-        <div className="flex flex-wrap items-center justify-between pb-4 mb-5 border-b border-stone-100 dark:border-stone-800 gap-3">
-          <div>
-            <h2 className="font-heading text-base font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-2">
-              <span>Worm Aim & Hold Art Builder</span>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-forge-50 dark:bg-forge-950/60 text-forge-600 dark:text-forge-400 font-semibold border border-forge-200 dark:border-forge-800/60">
-                Native aim.png & hand_rad Assets
-              </span>
+        <div className="pb-3 mb-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-heading text-base font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
+              Worm Aim & Hold Art Builder
             </h2>
-            <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
-              Genuine Worms Armageddon 32-angle aim postures with authentic hand radius and weapon pivot positioning.
-            </p>
+            <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-forge-50 dark:bg-forge-950/60 text-forge-600 dark:text-forge-400 font-semibold border border-forge-200 dark:border-forge-800/60">
+              Native aim.png & hand_rad Assets
+            </span>
+          </div>
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+            Genuine Worms Armageddon 32-angle aim postures with authentic hand radius and weapon pivot positioning.
+          </p>
+        </div>
+
+        {/* Row 2: Held Sprite Sheet Bar + Enable Custom Held Art Pill */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-5">
+          {/* Bordered Bar */}
+          <div className="flex-1 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 px-3.5 py-2 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 min-w-0">
+            <div className="flex items-center gap-2 min-w-0 truncate">
+              <Upload className="w-4 h-4 text-forge-600 dark:text-forge-400 shrink-0" />
+              <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide shrink-0">
+                Held Sprite Sheet
+              </span>
+              {hold.sheetFile ? (
+                <span
+                  className="font-mono text-xs text-forge-600 dark:text-forge-400 font-medium truncate"
+                  title={`${hold.sheetFile.name} (${(hold.sheetFile.size / 1024).toFixed(1)} KB)`}
+                >
+                  {hold.sheetFile.name} ({(hold.sheetFile.size / 1024).toFixed(1)} KB)
+                </span>
+              ) : (
+                <span
+                  className="text-xs text-stone-500 dark:text-stone-400 truncate"
+                  title={`Using default ${defaultArt.label} art`}
+                >
+                  Using default {defaultArt.label} art
+                </span>
+              )}
+              {hold.sheetPreview && (
+                <button
+                  type="button"
+                  onClick={removeCustomSheet}
+                  className="text-xs text-rose-500 hover:text-rose-600 font-medium shrink-0 ml-1 cursor-pointer"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+
+            <div className="shrink-0">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/gif"
+                onChange={handleUploadSheet}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="px-3 py-1.5 text-xs font-semibold text-stone-800 dark:text-stone-200 bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-700 shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5 text-forge-600 dark:text-forge-400" />
+                <span>{hold.sheetFile ? 'Change PNG Sheet' : 'Upload PNG'}</span>
+              </button>
+            </div>
           </div>
 
-          <label className="flex items-center gap-2 cursor-pointer bg-stone-100 dark:bg-stone-800 px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700">
+          {/* Bordered Pill with Enable Custom Held Art */}
+          <label
+            htmlFor="hold-enable-custom-art"
+            className="flex items-center gap-2 cursor-pointer bg-white dark:bg-stone-800 px-3.5 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 shadow-2xs shrink-0 self-start sm:self-auto"
+          >
             <input
+              id="hold-enable-custom-art"
               type="checkbox"
               checked={hold.enabled}
               onChange={(e) => updateHold({ enabled: e.target.checked })}
-              className="rounded text-forge-600 focus:ring-forge-500"
+              className="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer"
             />
-            <span className="text-xs font-semibold text-stone-900 dark:text-stone-100">
+            <span className="text-xs font-semibold text-stone-900 dark:text-stone-100 whitespace-nowrap">
               Enable Custom Held Art
             </span>
           </label>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left: Pixel-Perfect Canvas Viewport */}
-          <div className="lg:col-span-6 flex flex-col items-center gap-3">
-            <div className="relative w-full max-w-[600px] border-2 border-stone-800 rounded-xl overflow-hidden shadow-lg bg-stone-950">
+        {/* 3-Column Main Area: lg:grid-cols-[1fr_1.4fr_1.9fr] */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr_1.9fr] gap-4 items-start">
+          {/* LEFT COLUMN: Hand controls (order-3 on mobile, order-1 on lg) */}
+          <div className="order-3 lg:order-1 flex flex-col gap-4">
+            {/* Draw Hand checkbox card + Hand Type cycling box */}
+            <div className="grid grid-cols-2 gap-3 items-end">
+              <label
+                htmlFor="hold-draw-hand"
+                className="h-10 flex items-center justify-between px-3 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 cursor-pointer shadow-2xs hover:bg-stone-50 dark:hover:bg-stone-750 transition-colors"
+              >
+                <span className="text-xs font-semibold text-stone-800 dark:text-stone-200 select-none">
+                  Draw Hand
+                </span>
+                <input
+                  id="hold-draw-hand"
+                  type="checkbox"
+                  checked={hold.drawHand !== false}
+                  onChange={(e) => updateHold({ drawHand: e.target.checked })}
+                  className="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer"
+                />
+              </label>
+
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold text-stone-700 dark:text-stone-300">
+                  Hand Type
+                </span>
+                <button
+                  type="button"
+                  onClick={cycleHandType}
+                  aria-label={`Hand type: ${currentHandTypeLabel}. Click to change`}
+                  title={`Hand type: ${currentHandTypeLabel}. Click to change`}
+                  className="h-10 px-3 flex items-center justify-center text-xs font-semibold rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 hover:bg-stone-50 dark:hover:bg-stone-750 transition-colors shadow-2xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forge-500"
+                >
+                  {currentHandTypeLabel}
+                </button>
+              </div>
+            </div>
+
+            {/* Hand Scale Multiplier Slider */}
+            <div className="space-y-1">
+              <div className="flex justify-between items-center text-xs">
+                <label htmlFor="hold-hand-scale" className="font-semibold text-stone-700 dark:text-stone-300">
+                  Hand Scale Multiplier
+                </label>
+                <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
+                  {(hold.handScale ?? 1).toFixed(2)}x
+                </span>
+              </div>
+              <input
+                id="hold-hand-scale"
+                type="range"
+                min={0.5}
+                max={2.0}
+                step={0.05}
+                value={hold.handScale ?? 1}
+                onChange={(e) => updateHold({ handScale: Number(e.target.value) })}
+                className="w-full accent-forge-500 cursor-pointer"
+              />
+            </div>
+
+            {/* Hand Radius Slider */}
+            <div className="space-y-1">
+              <div className="flex justify-between items-center text-xs">
+                <label htmlFor="hold-hand-radius" className="font-semibold text-stone-700 dark:text-stone-300">
+                  Hand Radius
+                </label>
+                <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
+                  {hold.handRadius} px
+                </span>
+              </div>
+              <input
+                id="hold-hand-radius"
+                type="range"
+                min={-10}
+                max={35}
+                step={1}
+                value={hold.handRadius}
+                onChange={(e) => updateHold({ handRadius: Number(e.target.value) })}
+                className="w-full accent-forge-500 cursor-pointer"
+              />
+            </div>
+          </div>
+
+          {/* CENTER COLUMN: Canvas + Posture + Flip (order-1 on mobile, order-2 on lg) */}
+          <div className="order-1 lg:order-2 flex flex-col items-center gap-3 w-full">
+            {/* 600x600 Pixel-Perfect Canvas Viewport */}
+            <div className="relative w-full max-w-[600px] aspect-square border-2 border-stone-800 rounded-xl overflow-hidden shadow-lg bg-stone-950">
               <canvas
                 ref={canvasRef}
                 width={600}
                 height={600}
-                className="block w-full cursor-crosshair"
+                className="block w-full h-full cursor-crosshair"
                 style={{ imageRendering: 'pixelated' }}
               />
 
@@ -1155,31 +1311,18 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                 <span>·</span>
                 <span>{aimAngleIndex === 16 ? 'Horizontal' : aimAngleIndex < 16 ? 'Down' : 'Up'}</span>
               </div>
-
-              <div className="absolute bottom-2 left-2 flex items-center gap-1 text-[10px] font-mono bg-black/70 backdrop-blur-xs text-stone-300 px-2 py-0.5 rounded border border-white/10">
-                <span>Facing: {facingRight ? 'Right' : 'Left'}</span>
-              </div>
             </div>
 
-            {/* Canvas Controls: Facing */}
-            <div className="flex items-center justify-center w-full max-w-[600px] gap-2">
-              <button
-                type="button"
-                onClick={() => setFacingRight(!facingRight)}
-                className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors"
-              >
-                <ArrowLeftRight className="w-3.5 h-3.5" />
-                <span>Flip ({facingRight ? 'Right' : 'Left'})</span>
-              </button>
-            </div>
-
-            {/* Aim Angle Scrubber (0 to 31) */}
+            {/* Worm Posture Card (0 to 31) */}
             <div className="w-full max-w-[600px] space-y-1.5 bg-stone-50 dark:bg-stone-800/50 p-3 rounded-lg border border-stone-200 dark:border-stone-800">
               <div className="flex items-center justify-between text-xs font-medium text-stone-700 dark:text-stone-300">
-                <span>Worm Posture (0–31)</span>
+                <label htmlFor="hold-aim-angle" className="font-semibold">
+                  Worm Posture (0–31)
+                </label>
                 <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">{aimAngleIndex}</span>
               </div>
               <input
+                id="hold-aim-angle"
                 type="range"
                 min={0}
                 max={31}
@@ -1194,108 +1337,64 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                 <span>31 (Up)</span>
               </div>
             </div>
+
+            {/* Flip Button */}
+            <button
+              type="button"
+              onClick={() => setFacingRight(!facingRight)}
+              aria-label={`Flip worm facing direction. Currently facing ${facingRight ? 'Right' : 'Left'}`}
+              className="w-full max-w-[600px] flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-700 shadow-2xs transition-colors cursor-pointer"
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5" />
+              <span>Flip ({facingRight ? 'Right' : 'Left'})</span>
+            </button>
           </div>
 
-          {/* Right: Controls & Properties */}
-          <div className="lg:col-span-6 space-y-5">
-            {/* Custom Sheet Upload Card */}
-            <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Upload className="w-4 h-4 text-forge-600 dark:text-forge-400" />
-                  <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
-                    Held Weapon Sprite Sheet
-                  </span>
-                </div>
-                {hold.sheetPreview && (
-                  <button
-                    type="button"
-                    onClick={removeCustomSheet}
-                    className="text-xs text-rose-500 hover:text-rose-600 font-medium"
-                  >
-                    Remove Art
-                  </button>
-                )}
-              </div>
-
-              <div className="flex items-center gap-3">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/png,image/gif"
-                  onChange={handleUploadSheet}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-3.5 py-2 text-xs font-semibold text-stone-800 dark:text-stone-200 bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-700 shadow-2xs transition-colors flex items-center gap-2 cursor-pointer"
-                >
-                  <Upload className="w-3.5 h-3.5 text-forge-600 dark:text-forge-400" />
-                  <span>{hold.sheetFile ? 'Change PNG Sheet' : 'Upload Held Weapon PNG'}</span>
-                </button>
-
-                <div className="text-xs text-stone-500 dark:text-stone-400">
-                  {hold.sheetFile ? (
-                    <span className="font-mono text-forge-600 dark:text-forge-400 font-medium">
-                      {hold.sheetFile.name} ({(hold.sheetFile.size / 1024).toFixed(1)} KB)
-                    </span>
-                  ) : (
-                    <span>Using default {defaultArt.label} art — upload a PNG to replace it</span>
-                  )}
-                </div>
-              </div>
+          {/* RIGHT COLUMN: Controls & Properties (order-2 on mobile, order-3 on lg) */}
+          <div className="order-2 lg:order-3 flex flex-col gap-4">
+            {/* Row: Launchable / Throwable buttons */}
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => updateHold({ thrown: false, putAway: true })}
+                title="Guns & bazookas (thrown = false). Held in hands; weapon can swing down into backpack on retreat."
+                aria-label="Launchable: Guns and bazookas (thrown = false). Held in hands; weapon can swing down into backpack on retreat."
+                className={`h-10 px-3 flex items-center justify-center text-xs rounded-lg border transition-all cursor-pointer ${
+                  !hold.thrown
+                    ? 'border-forge-500 bg-forge-50/40 dark:bg-forge-950/40 ring-1 ring-forge-500 text-stone-900 dark:text-white font-bold shadow-xs'
+                    : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-300 font-medium hover:bg-stone-50 dark:hover:bg-stone-750'
+                }`}
+              >
+                Launchable
+              </button>
+              <button
+                type="button"
+                onClick={() => updateHold({ thrown: true, putAway: false })}
+                title="Grenades & bananas (thrown = true). Leaves worm hand instantly on release; skips gun put-away."
+                aria-label="Throwable: Grenades and bananas (thrown = true). Leaves worm hand instantly on release; skips gun put-away."
+                className={`h-10 px-3 flex items-center justify-center text-xs rounded-lg border transition-all cursor-pointer ${
+                  hold.thrown
+                    ? 'border-forge-500 bg-forge-50/40 dark:bg-forge-950/40 ring-1 ring-forge-500 text-stone-900 dark:text-white font-bold shadow-xs'
+                    : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-300 font-medium hover:bg-stone-50 dark:hover:bg-stone-750'
+                }`}
+              >
+                Throwable
+              </button>
             </div>
 
-            {/* Positioning Parameters: Radius, Rotation, Scale */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Hand Type */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-                  Hand Type (`PX_HANDS`)
-                </label>
-                <div className="grid grid-cols-3 gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-lg border border-stone-200 dark:border-stone-700 text-xs">
-                  {(['lower', 'mid', 'upper'] as HandType[]).map((ht) => (
-                    <button
-                      key={ht}
-                      type="button"
-                      onClick={() => updateHold({ handType: ht })}
-                      className={`py-1.5 font-medium rounded-md capitalize transition-colors ${
-                        hold.handType === ht
-                          ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-bold'
-                          : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-                      }`}
-                    >
-                      {ht}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Hand Radius */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="font-semibold text-stone-700 dark:text-stone-300">Hand Radius</span>
-                  <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">{hold.handRadius} px</span>
+            {/* Row: Weapon Radius and Weapon Rotation side-by-side */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <div className="flex justify-between items-center text-xs">
+                  <label htmlFor="hold-weap-radius" className="font-semibold text-stone-700 dark:text-stone-300">
+                    Weapon Radius
+                  </label>
+                  <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
+                    {hold.weapRadius} px
+                  </span>
                 </div>
                 <input
-                  type="range"
-                  min={-10}
-                  max={35}
-                  step={1}
-                  value={hold.handRadius}
-                  onChange={(e) => updateHold({ handRadius: Number(e.target.value) })}
-                  className="w-full accent-forge-500 cursor-pointer"
-                />
-              </div>
-
-              {/* Weapon Radius */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="font-semibold text-stone-700 dark:text-stone-300">Weapon Radius</span>
-                  <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">{hold.weapRadius} px</span>
-                </div>
-                <input
+                  id="hold-weap-radius"
                   type="range"
                   min={-10}
                   max={35}
@@ -1306,13 +1405,17 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                 />
               </div>
 
-              {/* Weapon Rotation */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="font-semibold text-stone-700 dark:text-stone-300">Weapon Rotation</span>
-                  <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">{hold.weapRotation}°</span>
+              <div className="space-y-1">
+                <div className="flex justify-between items-center text-xs">
+                  <label htmlFor="hold-weap-rotation" className="font-semibold text-stone-700 dark:text-stone-300">
+                    Weapon Rotation
+                  </label>
+                  <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
+                    {hold.weapRotation}°
+                  </span>
                 </div>
                 <input
+                  id="hold-weap-rotation"
                   type="range"
                   min={-180}
                   max={180}
@@ -1322,14 +1425,21 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                   className="w-full accent-forge-500 cursor-pointer"
                 />
               </div>
+            </div>
 
-              {/* Scale */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="font-semibold text-stone-700 dark:text-stone-300">Scale Multiplier</span>
-                  <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">{hold.scale}x</span>
+            {/* Row: Scale Multiplier on left; Animate Put-Away and Keep While Firing on right */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+              <div className="space-y-1">
+                <div className="flex justify-between items-center text-xs">
+                  <label htmlFor="hold-scale" className="font-semibold text-stone-700 dark:text-stone-300">
+                    Scale Multiplier
+                  </label>
+                  <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
+                    {hold.scale}x
+                  </span>
                 </div>
                 <input
+                  id="hold-scale"
                   type="range"
                   min={0.5}
                   max={2.5}
@@ -1340,209 +1450,118 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                 />
               </div>
 
-              {/* Hand Scale Multiplier */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="font-semibold text-stone-700 dark:text-stone-300">Hand Scale Multiplier</span>
-                  <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">{(hold.handScale ?? 1).toFixed(2)}x</span>
-                </div>
-                <input
-                  type="range"
-                  min={0.5}
-                  max={2.0}
-                  step={0.05}
-                  value={hold.handScale ?? 1}
-                  onChange={(e) => updateHold({ handScale: Number(e.target.value) })}
-                  className="w-full accent-forge-500 cursor-pointer"
-                />
-              </div>
-
-              {/* Draw Hand Toggle */}
-              <div className="flex items-center justify-between p-3 rounded-lg border border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-800/40">
-                <div className="text-xs">
-                  <div className="font-semibold text-stone-800 dark:text-stone-200">Draw Worm Hand</div>
-                  <div className="text-[11px] text-stone-500">Uncheck for hands-free weapons</div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={hold.drawHand !== false}
-                  onChange={(e) => updateHold({ drawHand: e.target.checked })}
-                  className="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer"
-                />
-              </div>
-            </div>
-
-            {/* WormForge Hold Engine Lifecycle & Put-Away (worm_hold.rs) */}
-            <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-1.5">
-                    <Package className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Engine Hold Lifecycle & Put-Away (`worm_hold.rs`)</span>
-                  </span>
-                  <p className="text-[11px] text-stone-500 mt-0.5">
-                    Controls WA worm states: 0x65/0x66 retreat & backpack put-away vs 0x6A/0x6B fire poses.
-                  </p>
-                </div>
-                {hold.putAway && !hold.thrown && (
-                  <button
-                    type="button"
-                    disabled={putAwayCounter !== null}
-                    onClick={triggerPutAwayDemo}
-                    className="px-2.5 py-1 text-xs font-semibold rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 cursor-pointer flex items-center gap-1 disabled:opacity-50"
-                  >
-                    <Package className="w-3 h-3" />
-                    <span>{putAwayCounter !== null ? 'Putting Away...' : 'Test Put-Away (0x65)'}</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Delivery Category: Launchable vs Throwable */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-                  Weapon Category (`thrown`)
-                </label>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => updateHold({ thrown: false, putAway: true })}
-                    className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
-                      !hold.thrown
-                        ? 'border-forge-500 bg-forge-50/30 dark:bg-forge-950/30 ring-1 ring-forge-500'
-                        : 'border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-400'
-                    }`}
-                  >
-                    <div className="font-bold text-stone-900 dark:text-white">
-                      Launchable / Firearm
-                    </div>
-                    <div className="text-[11px] text-stone-500">
-                      Guns & bazookas (<code className="font-mono">thrown = false</code>). Held in hands; weapon can swing down into backpack on retreat.
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => updateHold({ thrown: true, putAway: false })}
-                    className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
-                      hold.thrown
-                        ? 'border-forge-500 bg-forge-50/30 dark:bg-forge-950/30 ring-1 ring-forge-500'
-                        : 'border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-400'
-                    }`}
-                  >
-                    <div className="font-bold text-stone-900 dark:text-white">
-                      Throwable
-                    </div>
-                    <div className="text-[11px] text-stone-500">
-                      Grenades & bananas (<code className="font-mono">thrown = true</code>). Leaves worm hand instantly on release; skips gun put-away.
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {/* Toggles: put_away & keep_while_firing */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <label className={`flex items-start gap-2.5 p-2.5 rounded-lg border transition-colors ${
-                  hold.thrown ? 'opacity-50 cursor-not-allowed border-stone-200 dark:border-stone-800 bg-stone-100/50 dark:bg-stone-900/50' : 'cursor-pointer border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900'
-                }`}>
+              <div className="grid grid-cols-2 gap-2">
+                <div
+                  title="Gun swings down and smoothly shrinks into backpack during retreat/walking (survives WA state 0x65 & 0x66) (put_away = true)"
+                  className={`h-10 flex items-center justify-between px-2.5 rounded-lg border transition-colors ${
+                    hold.thrown
+                      ? 'opacity-50 cursor-not-allowed border-stone-200 dark:border-stone-800 bg-stone-100/50 dark:bg-stone-900/50'
+                      : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <label
+                      htmlFor="hold-put-away"
+                      className={`text-xs font-semibold text-stone-800 dark:text-stone-200 truncate select-none ${
+                        hold.thrown ? 'cursor-not-allowed' : 'cursor-pointer'
+                      }`}
+                    >
+                      Animate Put-Away
+                    </label>
+                    {hold.putAway && !hold.thrown && (
+                      <button
+                        type="button"
+                        disabled={putAwayCounter !== null}
+                        onClick={triggerPutAwayDemo}
+                        title="Test put-away in preview canvas (0x65)"
+                        className="text-[10px] font-semibold px-1 py-0.5 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 cursor-pointer disabled:opacity-50 shrink-0"
+                      >
+                        {putAwayCounter !== null ? '...' : 'Test'}
+                      </button>
+                    )}
+                  </div>
                   <input
+                    id="hold-put-away"
                     type="checkbox"
                     disabled={hold.thrown}
                     checked={hold.putAway && !hold.thrown}
                     onChange={(e) => updateHold({ putAway: e.target.checked })}
-                    className="rounded text-forge-600 focus:ring-forge-500 mt-0.5"
+                    className="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer shrink-0 ml-1"
                   />
-                  <div>
-                    <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">
-                      Animate Put-Away (`put_away = true`)
-                    </div>
-                    <div className="text-[11px] text-stone-500">
-                      Gun swings down and smoothly shrinks into backpack during retreat/walking (survives WA state 0x65 & 0x66).
-                    </div>
-                  </div>
-                </label>
+                </div>
 
-                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 cursor-pointer">
+                <label
+                  htmlFor="hold-keep-firing"
+                  title="Weapon remains held and visible in worm hand throughout WA firing poses 0x6A & 0x6B (e.g. Crossbows, Miniguns) (keep_while_firing = true)"
+                  className="h-10 flex items-center justify-between px-2.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 cursor-pointer shadow-2xs hover:bg-stone-50 dark:hover:bg-stone-750 transition-colors"
+                >
+                  <span className="text-xs font-semibold text-stone-800 dark:text-stone-200 truncate select-none">
+                    Keep While Firing
+                  </span>
                   <input
+                    id="hold-keep-firing"
                     type="checkbox"
                     checked={hold.keepWhileFiring}
                     onChange={(e) => updateHold({ keepWhileFiring: e.target.checked })}
-                    className="rounded text-forge-600 focus:ring-forge-500 mt-0.5"
+                    className="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer shrink-0 ml-1"
                   />
-                  <div>
-                    <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">
-                      Keep While Firing (`keep_while_firing = true`)
-                    </div>
-                    <div className="text-[11px] text-stone-500">
-                      Weapon remains held and visible in worm hand throughout WA firing poses 0x6A & 0x6B (e.g. Crossbows, Miniguns).
-                    </div>
-                  </div>
                 </label>
               </div>
             </div>
 
-            {/* Animation & Sheet Frames */}
-            <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
-                  Hold Sheet Animation & Playback
+            {/* Hold Animation Card */}
+            <div className="p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-2.5">
+              <div className="text-center">
+                <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wider">
+                  Hold Animation
                 </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={hold.frames <= 1}
-                    onClick={() => setIsPlaying(!isPlaying)}
-                    className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
-                      hold.frames <= 1
-                        ? 'opacity-50 cursor-not-allowed bg-stone-200 dark:bg-stone-800 text-stone-400'
-                        : isPlaying
-                        ? 'bg-amber-600 text-white'
-                        : 'bg-forge-600 text-white'
-                    }`}
-                  >
-                    {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-                    <span>{isPlaying ? 'Pause' : 'Play Sheet'}</span>
-                  </button>
-                </div>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-stone-600 dark:text-stone-400">Total Frames</label>
+                <div className="space-y-1 text-center">
+                  <label htmlFor="hold-total-frames" className="block text-xs font-medium text-stone-600 dark:text-stone-400">
+                    Total Frames
+                  </label>
                   <input
+                    id="hold-total-frames"
                     type="number"
                     min={1}
                     max={64}
                     value={hold.frames}
                     onChange={(e) => updateHold({ frames: Math.max(1, Number(e.target.value)) })}
-                    className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                    className="w-full text-xs font-mono text-center px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-stone-600 dark:text-stone-400">In-game FPS</label>
+                <div className="space-y-1 text-center">
+                  <label
+                    htmlFor="hold-fps"
+                    className="block text-xs font-medium text-stone-600 dark:text-stone-400"
+                    title="In-game FPS: the engine advances 1.5 × frames × anim_speed frames per second"
+                  >
+                    FPS
+                  </label>
                   <input
+                    id="hold-fps"
                     type="number"
                     min={1}
                     max={60}
                     value={hold.fps}
+                    title="In-game FPS: the engine advances 1.5 × frames × anim_speed frames per second"
                     onChange={(e) => updateHold({ fps: Math.max(1, Number(e.target.value)) })}
-                    className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                    className="w-full text-xs font-mono text-center px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-stone-600 dark:text-stone-400">Current Frame</label>
-                  <div className="text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 font-semibold text-center">
+                <div className="space-y-1 text-center">
+                  <span className="block text-xs font-medium text-stone-600 dark:text-stone-400">
+                    Current
+                  </span>
+                  <div className="w-full text-xs font-mono text-center px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 font-semibold">
                     {currentFrame + 1} / {Math.max(1, hold.frames)}
                   </div>
                 </div>
               </div>
-
-              <p className="text-[11px] leading-relaxed text-stone-500 dark:text-stone-400">
-                {hold.frames > 1
-                  ? `Plays at ${holdAnimFps} FPS in game across ${hold.frames} frames, exported as anim_speed = ${holdAnimSpeedLabel}. The engine advances 1.5 × frames × anim_speed frames per second, so this preview matches the game.`
-                  : 'One frame — the sheet stays static in game.'}
-              </p>
             </div>
           </div>
         </div>
