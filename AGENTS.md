@@ -345,16 +345,18 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
     **The flight builder can own this state.** With `sb.flight` on for a roam
     record the generator zeroes `sheep.flight_1/2` (as the unassigned sentinel
     699, not 0: WA reads a zero `flight_1` as "this animal cannot fly" and the
-    Space press would do nothing) and passes `roam = true`. The walk pose then
-    depends on whether WA can draw it: `roamWalkPoseId()` accepts only a stock
-    id, so a record holding Project X's own sprite numbers (`34464` on the Super
-    Queen Bee, `713` on its sheep) gets `sprite = 0` and the builder draws the
-    walk too, upright and cycling the owning role's frames (`walking[id]`); a
-    stock pose (`sheepwlk`) is kept and its id passed as `walk = <id>` so the
-    classifier still knows the primary. Either way the Space press (synchronized
-    lockstep input) switches to the flight pose, which is where `track`/`spin`
-    start. While the builder owns the state the two `sheep_sprites` uploads are
-    dormant (not installed or declared).
+    Space press would do nothing) and passes `roam`. The walk pose then depends
+    on whether WA can draw it: `roamWalkPoseId()` accepts only a stock id, so a
+    record holding Project X's own sprite numbers (`34464` on the Super Queen
+    Bee, `713` on its sheep) gets `sprite = 0` and the builder draws the animal
+    from the first frame; a stock pose (`sheepwlk`) is kept, its id goes back as
+    `roam = { walk = <id>, fly = 699 }` so the classifier still knows the
+    primary, and the builder leaves the animal to WA until the takeoff (the
+    Space edge, or WA moving the flown sentinel into the render slot).
+    **`track`/`rotation` apply on the ground too** — the pose is never forced
+    upright, because that reads as "the main missile has no animation" until the
+    takeoff. While the builder owns the state the two `sheep_sprites` uploads
+    are dormant (not installed or declared).
     PX's sheep editor shows five sprites: flying / flying 2 are
     `sheep.flight_1/2` (0xE0/0xE4), farting is `roam.gas.animal_sprite` (0xDC),
     and taking off / during flight are 0xE8/0xEC — two sheep sprite fields WA

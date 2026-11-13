@@ -1786,3 +1786,31 @@ the action to `dig` or `roam` while every value of the destination group already
 equalled the *donor's* (unused) values emitted `action = "dig"` with no `dig`
 table at all. Those two branches now include `fullGroup`, like the bounce and
 homing groups already did.
+
+### Roam: the animation is the same on the ground and in the air
+
+The first version of the builder-drawn walk forced the animal upright while WA
+still had it walking (no `track`, no `spin`), on the theory that a walking
+animal does not point its nose along the ground. In practice that reads as "the
+main missile has no track animation": the Super Queen Bee stays upright for the
+whole ground phase and only starts tracking once the turn player takes off, so
+the weapon looks broken even though nothing is. The pose is no longer special-
+cased — `track`/`rotation`/the frame cycle are exactly the role's own.
+
+The `roam` option became a table to carry the ids: `roam = { walk = 153, fly =
+699 }`. `walk` is the stock ground pose WA draws (and the one nonzero
+`m.sprite` that means *primary*), `fly` is the sentinel in `sheep.flight_1`
+that WA moves into the render slot at the takeoff — an exact takeoff signal
+that does not depend on catching the Space press. A weapon whose ground pose
+cannot draw passes `roam = true` and the builder owns the animal from frame 1.
+
+### Test-pack art is per role now
+
+Every test used to draw the same grenade, so a test that rendered the wrong
+role looked plausible. The pack now uses `spec/` sheets, one per role: the
+bazooka for the held art and the primary's homing window, `wicestnd` for the
+flight sheet and the digging spin, the grenade for cluster bits, the drum for
+the homing *bit* (its own 20-cell strip at 20 fps, `frames` declared), and
+`sspsheep1` for roaming — which points up-left, so WF 28's `angle = 45` is what
+stands it up and the sheet is a live test of the angle modifier. The PNG reader
+in the tool grew palette support for it (most `spec/` sheets are colour type 3).

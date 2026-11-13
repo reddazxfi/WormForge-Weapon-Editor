@@ -317,6 +317,16 @@ export function roamSheetsOwnFlight(project: WeaponProject): boolean {
   return !!roamSheetPaths(project);
 }
 
+/**
+ * The sprite id the generator writes into a builder-owned roaming record's
+ * `sheep.flight_1/2`. WA reads a zero there as "this animal cannot fly" and the
+ * Space takeoff does nothing, so the fields need a nonzero value that draws
+ * nothing: 699 is not a stock sprite and no pack gets that slot. It is also the
+ * marker the builder watches for, since WA moves the flown sprite into the
+ * render slot at the takeoff.
+ */
+export const ROAM_FLY_SENTINEL = 699;
+
 /** WA keeps its own sprites below 800; packs are assigned slots from 800 up. */
 const STOCK_SPRITE_LIMIT = 800;
 
@@ -1811,12 +1821,12 @@ export function generateLuaCode(project: WeaponProject): string {
       // passes that check and draws nothing, so the builder's own sheet is the
       // only art once the animal is airborne.
       const flightOne = builderOwnsRoamFlight
-        ? 699
+        ? ROAM_FLY_SENTINEL
         : roamFlightState?.assigned.roam_flight_1 !== undefined
           ? roamFlightState.assigned.roam_flight_1
           : roamFlightOne;
       const flightTwo = builderOwnsRoamFlight
-        ? 699
+        ? ROAM_FLY_SENTINEL
         : roamFlightState?.assigned.roam_flight_2 !== undefined
           ? roamFlightState.assigned.roam_flight_2
           : roamFlightTwo;
@@ -2842,17 +2852,21 @@ export function generateLuaCode(project: WeaponProject): string {
     }
 
     // A roaming animal walks until the turn's player presses Space, then
-    // flies. The builder owns that flying state: it waits for the press and
-    // then draws the sheet (the record's `sheep.flight_1/2` are zeroed above).
+    // flies. The builder owns that state (the record's `sheep.flight_1/2` are
+    // zeroed above), and `roam` tells it what WA itself is drawing.
     //
-    // `walk` is the record sprite WA animates on the ground, and the classifier
-    // counts a missile carrying it as the primary (the record `sprite` is not
-    // zeroed then, so `m.sprite == 0` alone cannot identify the primary). A
-    // weapon whose walk pose cannot draw passes no `walk` and the builder draws
-    // that pose itself, upright.
+    // `walk` is the record sprite WA animates on the ground: with it the builder
+    // leaves the animal to WA until the takeoff, and it doubles as the identity
+    // signal for the primary (that sprite is not zeroed then, so `m.sprite == 0`
+    // alone cannot identify it). `fly` is the sentinel `sheep.flight_1` carries,
+    // which WA moves into the render slot as it takes off — an exact takeoff
+    // signal that does not depend on catching the key press.
     if (project.action === 'roam') {
-      lines.push('      roam = true,');
-      if (roamWalkPose !== 0) lines.push(`      walk = ${roamWalkPose},`);
+      if (roamWalkPose !== 0) {
+        lines.push(`      roam = { walk = ${roamWalkPose}, fly = ${ROAM_FLY_SENTINEL} },`);
+      } else {
+        lines.push('      roam = true,');
+      }
     }
 
     // Identity debugging: one log line per missile's first frames, so the

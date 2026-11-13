@@ -34,7 +34,7 @@
 --     is_bit = function(m) ... end,             -- optional classifier override
 --     roles  = { { name = "x", match = function(m) ... end, sheet = "..." } },
 --     dig    = true | { probe = 6, spread = 3, hold = 3, need = 2 },
---     roam   = true,                            -- roaming animal: wait for Space
+--     roam   = true | { walk = 153, fly = 699 }, -- roaming animal (see ROAM)
 --     states = {
 --       { scope = "main" | "bit" | "any" | <role name>,
 --         sig  = 245 | { 246, 247, 248 },       -- native sprite ids that mean
@@ -302,19 +302,24 @@ function M.flight(ctx, opts)
   local dig_dir = {}     -- [id] = last heading, for the terrain probes
   local dig_hold = {}    -- [id] = frames left of "digging"
   local dig = dig_settings(opts.dig, size)
-  -- Roaming animals: WA walks the animal until the turn's player presses
-  -- Space, and only then does it fly. The press is synchronized lockstep input
-  -- (`wa.world.keys().space`), so every peer draws the flight art from the
-  -- same frame. `walk` is the id of the record sprite WA animates on the
-  -- ground: when it is set WA keeps drawing that pose and the builder only
-  -- takes over in the air. A weapon whose walk pose cannot draw (an imported
-  -- Project X sprite number, or none) passes no `walk`, the generator zeroes
-  -- the record `sprite`, and the builder draws the walk itself: upright, with
-  -- the owning role's frames.
-  local roam = opts.roam == true
-  local walk_pose = tonumber(opts.walk) or nil
-  local flying = {}      -- [id] = true once the animal has taken off
-  local walking = {}     -- [id] = true while a roaming animal is on the ground
+  -- Roaming animals: WA draws the walk from the record `sprite` (the ground
+  -- pose) and the flown art from `sheep.flight_1/2`. `roam` carries the ids
+  -- the generator wrote, when there are any:
+  --
+  --   roam = { walk = 153, fly = 699 }
+  --
+  -- `walk` (a stock ground pose) means WA keeps drawing the animal itself until
+  -- it takes off: the press is the turn player's synchronized Space
+  -- (`wa.world.keys().space`, lockstep input, so every peer switches on the same
+  -- frame), or, if WA moves the flown id into the render slot, that id showing
+  -- up. `fly` is that id (the unassigned sentinel the generator writes so the
+  -- Space takeoff stays enabled). With neither, the builder draws the animal
+  -- from the first frame and `roam` only documents the record's action.
+  local roam = opts.roam == true or type(opts.roam) == "table"
+  local roam_ids = type(opts.roam) == "table" and opts.roam or nil
+  local walk_pose = roam_ids and tonumber(roam_ids.walk) or nil
+  local fly_pose = roam_ids and tonumber(roam_ids.fly) or nil
+  local flying = {}      -- [id] = true once WA has the animal airborne
   local armed = {}       -- [id] = Space was seen up since the missile appeared
   local age = {}         -- [id] = frames since first sight, for homing ms
   local logged = {}      -- [id] = frames logged so far (opts.log)
@@ -371,7 +376,6 @@ function M.flight(ctx, opts)
       dig_dir[id] = nil
       dig_hold[id] = nil
       flying[id] = nil
-      walking[id] = nil
       armed[id] = nil
       logged[id] = nil
       age[id] = nil
@@ -411,10 +415,10 @@ function M.flight(ctx, opts)
     end
 
     if m.phase == "pre" then
-      if roam and ent.ident == "main" then
-        -- Walking. The Space press that takes off is the turn's player's, so
-        -- the turn's worm has to exist; `wa.world.keys()` is synchronized, so
-        -- every peer agrees on the frame the art starts.
+      if roam and ent.ident == "main" and walk_pose and not flying[id] then
+        -- WA is still drawing the animal's ground pose, so the builder only
+        -- watches for the takeoff. The Space press that takes off is the turn
+        -- player's, so the turn's worm has to exist.
         local keys = wa.world.keys and wa.world.keys() or nil
         local held = keys and keys.space and true or false
         if not held then
@@ -422,12 +426,13 @@ function M.flight(ctx, opts)
         elseif armed[id] and current_worm() then
           flying[id] = true
         end
-        walking[id] = not flying[id]
-      end
-      if walking[id] and walk_pose then
-        -- WA animates the walk pose itself; our art starts when it takes off.
-        active[id] = NATIVE
-        return
+        -- WA moves its flown sprite in at the takeoff; if that lands in the
+        -- render slot, it is an exact signal that beats the key.
+        if fly_pose and m.sprite == fly_pose then flying[id] = true end
+        if not flying[id] then
+          active[id] = NATIVE
+          return
+        end
       end
       if m.sprite ~= 0 then sig[id] = m.sprite end   -- read BEFORE zeroing
       local cfg = pick(m, ent)
@@ -458,16 +463,13 @@ function M.flight(ctx, opts)
     end
     age[id] = (age[id] or 0) + 1
     local cfg = homing_art(base, age[id] * MS_PER_FRAME)
-    -- On the ground a roaming animal stands upright: no track, no spin (WA's
-    -- pointer only matters once it is in the air), and no terrain probes.
-    local on_ground = walking[id] and true or false
 
     -- Digging: terrain probes around the nose decide whether the round is in
     -- the land. When `dig = true`, it locks to `track` and cycles the owning
     -- sheet; any `anim`, `spin`, `anim_speed`, `cyclical`, `scale`, `mirror`,
     -- `z`, or `sheet` in `dig = { ... }` overrides the owning role while in
     -- the dirt and reverts smoothly in open air.
-    local digging = (not on_ground and dig and update_dig(m, dig, dig_dir, dig_hold)) or false
+    local digging = (dig and update_dig(m, dig, dig_dir, dig_hold)) or false
     if digging and dig.sheet and dig.sheet ~= cfg.sheet then
       local dig_cfg = {
         sheet = dig.sheet,
@@ -529,9 +531,7 @@ function M.flight(ctx, opts)
     local rot = 0
     local frame = 0
     local eff_vx = (digging and (m.vx or 0) == 0 and (m.vy or 0) ~= 0) and 0.001 or m.vx
-    if on_ground then
-      spin_ang[id] = nil
-    elseif cfg.turn_fn then
+    if cfg.turn_fn then
       rot = cfg.turn_fn(m, spin_ang[id])
       spin_ang[id] = rot
     elseif active_anim_type == 2 then

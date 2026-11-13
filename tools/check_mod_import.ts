@@ -57,7 +57,7 @@ const files: ModFile[] = walk(BUNDLE).map((full) => {
 const bundles = readBundles(files);
 const weapons = readWeapons(bundles, files);
 check('test pack has one bundle', bundles.length === 1, String(bundles.length));
-check('test pack has 32 weapons', weapons.length === 32, String(weapons.length));
+check('test pack has 33 weapons', weapons.length === 33, String(weapons.length));
 
 const byName = new Map(weapons.map((weapon) => [weapon.name, weapon]));
 const projects = new Map<string, WeaponProject>();
@@ -118,7 +118,7 @@ for (const weapon of weapons) {
   near('WF 31: hold put away', p.hold.putAway, true);
   near('WF 31: hold hand type', p.hold.handType, 'mid');
   near('WF 31: hold rotation', p.hold.weapRotation, 0);
-  near('WF 31: hold sheet width kept', p.hold.sheetWidth, 46);
+  near('WF 31: hold sheet width kept', p.hold.sheetWidth, 32);
   near('WF 31: fire mode', p.fireSequence?.mode, 'missiles');
   near('WF 31: fire count', p.fireSequence?.count, 6);
   near('WF 31: fire delay', p.fireSequence?.delay, 4);
@@ -160,6 +160,8 @@ for (const weapon of weapons) {
   const dig = project('WF 26 Builder Dig')!;
   near('WF 26: action', dig.action, 'dig');
   check('WF 26: dig is builder-owned', dig.behaviorArt.dig?.mode !== 'native');
+  near('WF 26: dig spins', dig.behaviorArt.dig?.anim, 'rotation');
+  near('WF 26: dig spin rate', dig.behaviorArt.dig?.spinRate, 2);
 
   const roam = project('WF 28 Roam Builder')!;
   near('WF 28: action', roam.action, 'roam');
@@ -171,7 +173,8 @@ for (const weapon of weapons) {
   near('WF 28: flight_1 sentinel 699', roam.roamConfig.flight_1, 699);
   near('WF 28: flight_2 sentinel 699', roam.roamConfig.flight_2, 699);
   near('WF 28: builder anim', roam.missileSprite.anim, 'track');
-  near('WF 28: builder frames', roam.missileSprite.frames, 32);
+  near('WF 28: builder frames', roam.missileSprite.frames, 1);
+  near('WF 28: builder angle (up-left sheet)', roam.missileSprite.angle, 45);
   check('WF 28: roam sheets dormant', !roam.roamSheets?.flight1?.file, 'sheep sheet attached');
 }
 

@@ -61,8 +61,8 @@ sb.flight(ctx, {
   size  = 1.25,                  -- multiplies each role's own `scale`
   angle = -90,                   -- degrees added to the drawn rotation
 
-  roam = true,                   -- roaming animal: wait for Space, then draw
-  walk = 153,                    -- WA's walk pose (`sheepwlk`), when it can draw
+  roam = true,                   -- roaming animal (see below)
+  -- roam = { walk = 153, fly = 699 }  -- WA draws the walk; the ids it uses
 
   bits = {                       -- cluster-bit art
     sheet = "sprites/<mod>/bit_flight.png",
@@ -160,19 +160,21 @@ draw underneath.
 
 The walk has two routes:
 
-- **`walk = <id>`** — WA can draw the pose (it is a stock sprite), so the record
-  keeps it and its id is passed along. It is the one nonzero `m.sprite` that
-  means *primary*, not bit, so the classifier needs it.
-- **no `walk`** — the pose cannot draw (unset, a bundle path, or an imported
+- **`roam = { walk = <id>, fly = <sentinel> }`** — WA can draw the ground pose
+  (it is a stock sprite), so the record keeps it and its id is passed along. It
+  is the one nonzero `m.sprite` that means *primary*, not bit, so the classifier
+  needs it, and the builder leaves the animal to WA until the takeoff: the turn
+  player's synchronized Space edge, or WA moving the flown sentinel into the
+  render slot.
+- **`roam = true`** — the pose cannot draw (unset, a bundle path, or an imported
   Project X number such as `34464`, which WA reads as an unassigned pack slot).
-  The generator zeroes the record `sprite` and the builder draws the walk itself:
-  upright (no `track`/`spin`; a walking animal does not point its nose along the
-  ground), cycling the role's frames, and switching to the configured flight
-  pose on the Space press.
+  The generator zeroes the record `sprite` and the builder draws the animal from
+  the first frame with the role's own animation.
 
-Pass `roam = true` and the builder waits for the synchronized Space press
-(`wa.world.keys().space`; the press belongs to the turn's worm) before using the
-flight pose:
+The animation is the same on the ground and in the air: `track` points the art
+along the vector, `rotation` spins it, the strip cycles. (A "walking" pose that
+stood upright would ignore `track` for however long it took to take off, which
+looks like the animation being broken.)
 
 ```lua
 sb.flight(ctx, { weapon = ctx.id,

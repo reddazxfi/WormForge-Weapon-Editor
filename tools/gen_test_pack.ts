@@ -3,16 +3,23 @@
  *
  * Writes one WormForge bundle with one component per test plus a profile that
  * places all of them, so an engine behaviour can be checked in one match.
- * Every sheet is derived from `spec/default_grenade.png`:
  *
- *   - the main missile art is the single grenade frame, drawn by the sprite
- *     builder (`sb.flight`) where the test uses it;
- *   - cluster bits use rotation strips baked here (full 360°, frame 0 up,
- *     clockwise) — the same convention `src/utils/rotateSheet.ts` produces in
- *     the editor;
- *   - native trail puffs use a four-frame rotation strip;
- *   - records that cannot simply draw stock sprite 50 (a strike's munition, a
- *     cluster bit, a claim-level body sheet) get a pack sheet instead.
+ * Every role draws a real WA sheet from `spec/`, so a test that draws the wrong
+ * role is obvious in the match instead of "another grenade":
+ *
+ *   held / aiming      `default_blue_zook.png` (32x32)
+ *   primary flight     `wicestnd.png`          (60x60)
+ *   homing (primary)   `default_blue_zook.png` (the timed 0.8 s / 6 s swap)
+ *   cluster bit        `default_grenade.png`   (46x46)
+ *   homing bit         `oildrum1.png`          (20 cells of 90x90, 20 fps)
+ *   roaming sheep      `sspsheep1.png`         (points up-LEFT: `angle`)
+ *   digging            `wicestnd.png`          (spins underground)
+ *
+ * Multi-frame roles bake a rotation strip from their base sheet (full 360°,
+ * frame 0 up, clockwise) — the same convention `src/utils/rotateSheet.ts`
+ * produces in the editor — or use the strip they already ship as (the drum).
+ * Records that cannot simply draw a stock sprite (a strike's munition, a
+ * cluster bit, a claim-level body sheet) get a pack sheet instead.
  *
  * Run: `bun run tools/gen_test_pack.ts`
  * Output: `test_pack/wftest_pack/` (git-ignored) — copy that folder into
@@ -23,7 +30,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync, inflateSync } from 'node:zlib';
-import { WeaponProject, PackArtSlot } from '../src/types/weapon';
+import { WeaponProject, PackArtSlot, ClustletConfig } from '../src/types/weapon';
 import {
   generateLuaCode,
   bitFlightSheetPath,
@@ -106,12 +113,17 @@ function encodePng(bitmap: Bitmap): Buffer {
   ]);
 }
 
-/** 8-bit, non-interlaced RGB/RGBA only (the grenade source is RGBA). */
+/**
+ * 8-bit, non-interlaced PNGs: RGB, RGBA, or palette with optional `tRNS`
+ * (WA's own `spec/` sheets are mostly palettized).
+ */
 function decodePng(bytes: Buffer): Bitmap {
   let offset = 8;
   let width = 0;
   let height = 0;
   let colour = 0;
+  let palette: Buffer = Buffer.alloc(0);
+  let alpha: Buffer = Buffer.alloc(0);
   const idat: Buffer[] = [];
   while (offset < bytes.length) {
     const length = bytes.readUInt32BE(offset);
@@ -123,9 +135,13 @@ function decodePng(bytes: Buffer): Bitmap {
       if (data[8] !== 8) throw new Error('only 8-bit PNGs are supported');
       if (data[12] !== 0) throw new Error('interlaced PNGs are not supported');
       colour = data[9];
-      if (colour !== 6 && colour !== 2) {
+      if (colour !== 6 && colour !== 2 && colour !== 3) {
         throw new Error(`unsupported PNG colour type ${colour}`);
       }
+    } else if (type === 'PLTE') {
+      palette = Buffer.from(data);
+    } else if (type === 'tRNS') {
+      alpha = Buffer.from(data);
     } else if (type === 'IDAT') {
       idat.push(Buffer.from(data));
     } else if (type === 'IEND') {
@@ -133,7 +149,7 @@ function decodePng(bytes: Buffer): Bitmap {
     }
     offset += 12 + length;
   }
-  const channels = colour === 6 ? 4 : 3;
+  const channels = colour === 6 ? 4 : colour === 2 ? 3 : 1;
   const raw = inflateSync(Buffer.concat(idat));
   const stride = width * channels;
   const out = new Uint8Array(width * height * 4);
@@ -173,6 +189,14 @@ function decodePng(bytes: Buffer): Bitmap {
     for (let x = 0; x < width; x += 1) {
       const src = x * channels;
       const dst = (y * width + x) * 4;
+      if (colour === 3) {
+        const index = line[src];
+        out[dst] = palette[index * 3] ?? 0;
+        out[dst + 1] = palette[index * 3 + 1] ?? 0;
+        out[dst + 2] = palette[index * 3 + 2] ?? 0;
+        out[dst + 3] = index < alpha.length ? alpha[index] : 255;
+        continue;
+      }
       out[dst] = line[src];
       out[dst + 1] = line[src + 1];
       out[dst + 2] = line[src + 2];
@@ -214,12 +238,49 @@ function rotationSheet(source: Bitmap, frames: number): Bitmap {
 
 // ---------------------------------------------------------------------------
 // Art shared by the tests.
+//
+// Every role draws a real WA sheet from `spec/`, so a test that draws the wrong
+// role is obvious in the match instead of "another grenade":
+//
+//   held (aiming)      default_blue_zook.png  32x32   the bazooka
+//   primary flight     wicestnd.png           60x60   (`missile.png`)
+//   homing (primary)   default_blue_zook.png  32x32   the 0.8 s / 6 s swap
+//   cluster bit        default_grenade.png    46x46
+//   homing bit         oildrum1.png           20 cells of 90x90, 20 fps
+//   roaming sheep      sspsheep1.png          60x60, points up-LEFT
+//   digging            wicestnd.png           spins underground
+//
+// Multi-frame roles bake a rotation strip from their base sheet (frame 0 up,
+// clockwise), the same convention `src/utils/rotateSheet.ts` produces.
 // ---------------------------------------------------------------------------
-const grenade = decodePng(readFileSync(join(fileURLToPath(new URL('..', import.meta.url)), 'spec', 'default_grenade.png')));
-const GRENADE_PNG = encodePng(grenade);
-const ROT_32 = encodePng(rotationSheet(grenade, 32));
-const ROT_16 = encodePng(rotationSheet(grenade, 16));
-const TRAIL_4 = encodePng(rotationSheet(grenade, 4));
+const specDir = join(fileURLToPath(new URL('..', import.meta.url)), 'spec');
+const specPng = (name: string) => decodePng(readFileSync(join(specDir, name)));
+
+const AIM_BMP = specPng('default_blue_zook.png');
+const GRENADE_BMP = specPng('default_grenade.png');
+const ICE_BMP = specPng('wicestnd.png');
+const DRUM_BMP = specPng('oildrum1.png');
+const SHEEP_BMP = specPng('sspsheep1.png');
+
+const AIM_PNG = encodePng(AIM_BMP);
+const GRENADE_PNG = encodePng(GRENADE_BMP);
+const ICE_PNG = encodePng(ICE_BMP);
+/** The drum ships as its own 20-cell strip: nothing to bake. */
+const DRUM_PNG = encodePng(DRUM_BMP);
+const SHEEP_PNG = encodePng(SHEEP_BMP);
+const TRAIL_4 = encodePng(rotationSheet(GRENADE_BMP, 4));
+
+/**
+ * The sheet one role plays: its own art at a single frame, a baked rotation
+ * strip above it, or the art it already ships as a strip (the drum's 20 cells).
+ * A declared `frames` always matches the cells written.
+ */
+function roleSheet(base: Bitmap, png: Buffer, frames: number): Buffer {
+  const count = Math.max(1, Math.round(frames));
+  if (count <= 1) return png;
+  if (base.height === base.width * count) return png;
+  return encodePng(rotationSheet(base, count));
+}
 
 const file = (bytes: Buffer, name: string) =>
   new File([new Uint8Array(bytes)], name, { type: 'image/png' });
@@ -301,14 +362,14 @@ const DEFAULTS = {
     bounces: 0,
     fuse: 3000,
     proximity: 0,
-    homing: 'off' as const,
+    homing: 'off' as ClustletConfig['homing'],
     homing_arm_ms: 0,
     homing_time_ms: 0,
     gravity_pct: 100,
     wind_pct: 100,
     bounciness: 0,
     animation: 0,
-    bit_action: 'none' as const,
+    bit_action: 'none' as ClustletConfig['bit_action'],
   },
   roam: {
     walk_speed: 2,
@@ -542,7 +603,7 @@ const TESTS: TestCase[] = [
       burst: 'clusters',
       clustlet: { count: 5, sprite_count: 1, bit_action: 'none', animation: 2 },
       missileSprite: { enabled: true, mode: 'custom', anim: 'rotation', hideStock: true },
-      packArt: { cluster_sprite: art('cluster_sprite', ROT_32, 32) },
+      packArt: { cluster_sprite: art('cluster_sprite', roleSheet(GRENADE_BMP, GRENADE_PNG, 32), 32) },
     }),
     intent: 'Cluster bit art through the claim: 32-frame 360° rotation sheet, bit animation 2 = direction.',
     expect: 'Five bits, each a grenade pointing along its own velocity (a compass).',
@@ -555,7 +616,7 @@ const TESTS: TestCase[] = [
       slot: 'banana_bomb',
       burst: 'clusters',
       clustlet: { count: 5, sprite_count: 1, bounciness: 60, animation: 1 },
-      packArt: { cluster_sprite: art('cluster_sprite', ROT_32, 32) },
+      packArt: { cluster_sprite: art('cluster_sprite', roleSheet(GRENADE_BMP, GRENADE_PNG, 32), 32) },
     }),
     intent: 'Same sheet as 05 but bit animation 1 = cycle.',
     expect: 'Bits spin through the 32 frames at a steady rate instead of facing their flight.',
@@ -568,7 +629,7 @@ const TESTS: TestCase[] = [
       slot: 'super_banana',
       burst: 'clusters',
       clustlet: { count: 4, sprite_count: 1, animation: 5 },
-      packArt: { cluster_sprite: art('cluster_sprite', ROT_16, 16) },
+      packArt: { cluster_sprite: art('cluster_sprite', roleSheet(GRENADE_BMP, GRENADE_PNG, 16), 16) },
     }),
     intent: '16-frame sheet with bit animation 5, PX calls "faster cycle".',
     expect: 'Bits spin noticeably faster than 06 with coarser steps (16 frames).',
@@ -625,7 +686,7 @@ const TESTS: TestCase[] = [
       slot: 'napalm_strike',
       fireType: 'cursor',
       body: { sprite: 'grenade' },
-      packArt: { strike_sprite: art('strike_sprite', ROT_32, 32) },
+      packArt: { strike_sprite: art('strike_sprite', roleSheet(GRENADE_BMP, GRENADE_PNG, 32), 32) },
       overrides: { 'missile.animation': 2, 'strike.count': 3 },
     }),
     intent: 'Air strike munition with a 32-frame direction sheet (the PX homing-air-strike layout).',
@@ -641,7 +702,7 @@ const TESTS: TestCase[] = [
       burst: 'clusters',
       body: { sprite: 'grenade' },
       clustlet: { count: 4, sprite_count: 1, animation: 2 },
-      packArt: { cluster_sprite: art('cluster_sprite', ROT_32, 32) },
+      packArt: { cluster_sprite: art('cluster_sprite', roleSheet(GRENADE_BMP, GRENADE_PNG, 32), 32) },
       overrides: { 'strike.count': 3 },
     }),
     intent: 'Strike munition cluster bits with pack art (claim `cluster.sprite` -> strike 0x138).',
@@ -697,7 +758,7 @@ const TESTS: TestCase[] = [
       name: 'WF 16 Claim Cycle',
       slot: 'mb_bomb',
       body: { sprite: 'grenade', gravity_pct: 20, wind_pct: 170 },
-      packArt: { strike_sprite: art('strike_sprite', ROT_32, 32) },
+      packArt: { strike_sprite: art('strike_sprite', roleSheet(GRENADE_BMP, GRENADE_PNG, 32), 32) },
       overrides: { 'missile.animation': 1 },
     }),
     intent: 'Claim body sheet with native animation 1 = cycle, on a slow wind-blown bomb.',
@@ -726,7 +787,7 @@ const TESTS: TestCase[] = [
       burst: 'clusters',
       body: { sprite: 'grenade' },
       clustlet: { count: 5, sprite_count: 1, animation: 2 },
-      packArt: { cluster_sprite: art('cluster_sprite', ROT_16, 16) },
+      packArt: { cluster_sprite: art('cluster_sprite', roleSheet(GRENADE_BMP, GRENADE_PNG, 16), 16) },
       trailer: {
         enabled: true,
         max: 10,
@@ -830,7 +891,7 @@ const TESTS: TestCase[] = [
       clustlet: { count: 5, sprite_count: 1, bit_action: 'none', animation: 0 },
       missileSprite: { enabled: true, mode: 'custom', anim: 'rotation', hideStock: true },
       bitFlight: { mode: 'builder', anim: 'rotation', frames: 16, fps: 15 },
-      packArt: { cluster_sprite: art('cluster_sprite', ROT_32, 32) },
+      packArt: { cluster_sprite: art('cluster_sprite', roleSheet(GRENADE_BMP, GRENADE_PNG, 32), 32) },
     }),
     intent: 'WFWS builder owns the cluster bits: a 16-frame sheet, the claim `cluster.sprite` skipped.',
     expect: 'The parent is the static grenade; the five bits are our 16-frame sheet spinning as they fly.',
@@ -851,9 +912,40 @@ const TESTS: TestCase[] = [
     intent:
       'Timed homing art: the flight sheet until `arm` (800 ms), then the homing sheet for `time` (6000 ms), then back.',
     expect:
-      'Static grenade for 0.8 s, then the 32-frame sheet spins while the missile steers, and the static art returns after 6.8 s.',
+      'The ice sprite for 0.8 s, then the 32-frame bazooka sheet spins while the missile steers, and the flight art returns after 6.8 s.',
     watch:
       'The homing sheet from launch (arm ignored), no swap at 800 ms (timing), art that never ends (time), or the pigeon sprite showing under it.',
+  },
+  {
+    project: makeOp({
+      id: 'wftest.33_builder_bit_homing',
+      name: 'WF 33 Builder Bit Homing',
+      slot: 'cluster_bomb',
+      burst: 'clusters',
+      clustlet: {
+        count: 4,
+        sprite_count: 1,
+        bit_action: 'homing',
+        homing: 'lock',
+        homing_arm_ms: 600,
+        homing_time_ms: 5000,
+        animation: 0,
+      },
+      missileSprite: { enabled: true, mode: 'custom', anim: 'track', frames: 1, hideStock: true },
+      bitFlight: { mode: 'builder', anim: 'track', frames: 1 },
+      // The cluster bits' homing art is the drum's own 20-cell strip at 20 fps,
+      // so a bit that keeps the flight sheet (or shows all 20 cells at once) is
+      // obvious; the record's `clusters.bit.homing.sprite` is zeroed for it.
+      behaviorArt: {
+        homing_bit: { ...DEFAULT_ROLE_ART, mode: 'builder', anim: 'track', frames: 20, fps: 20 },
+      },
+    }),
+    intent:
+      'Timed homing art for cluster bits: the bit sheet until `arm` (600 ms), then the drum strip for `time` (5000 ms).',
+    expect:
+      'The parent tracks with the ice sprite and bursts into four bits; each bit tracks with the grenade for 0.6 s, swaps to the spinning drum for 5 s, then returns to the grenade.',
+    watch:
+      'Bits keeping the flight sheet (the timed window is lost), the drum never appearing (the arm/time rows), the whole 20-cell strip drawn as one frame (frames not declared), or the parent drawing bit art (`m.sprite` identity).',
   },
   {
     project: makeOp({
@@ -865,18 +957,22 @@ const TESTS: TestCase[] = [
       missileSprite: {
         enabled: true,
         mode: 'custom',
-        anim: 'none',
+        anim: 'track',
         frames: 32,
         hideStock: true,
       },
-      behaviorArt: { dig: { ...DEFAULT_ROLE_ART, mode: 'inherit' } },
+      // Underground overrides: the round spins instead of tracking, at twice the
+      // base spin, and keeps its sheet cycling — a dig is unmistakable.
+      behaviorArt: {
+        dig: { ...DEFAULT_ROLE_ART, mode: 'inherit', anim: 'rotation', spinRate: 2, frames: 32 },
+      },
     }),
     intent:
-      'Digging with the WFWS builder: the record dig sprites are zeroed and the builder animates the flight sheet on terrain probes.',
+      'Digging with the WFWS builder: the record dig sprites are zeroed, the round tracks in the air and spins once it is underground.',
     expect:
-      'Upright and cycling in flight; once it enters the land it turns to the heading and keeps cycling, with no mole and no Salvation-Army `wsv*` art.',
+      'Tracks its arc in flight; once the nose is in the land it spins (twice the base speed) while it tunnels, with no mole and no Salvation-Army `wsv*` art, then tracks again in open air.',
     watch:
-      'The mole (dig sprites not zeroed), a `wsv*` frame, art frozen underground (probes never firing), or the sheet turning in mid-air.',
+      'The mole (dig sprites not zeroed), a `wsv*` frame, art frozen underground (probes never firing), no spin in the dirt (`dig.anim`/`dig.spin` lost), or the sheet spinning in mid-air.',
   },
   {
     project: makeOp({
@@ -891,13 +987,13 @@ const TESTS: TestCase[] = [
         // strips are declared with their frame count; 16 vs 32 makes a wrong
         // slice obvious (16 would show every other direction).
         flight1: {
-          file: file(ROT_32, 'sheep_flight1.png'),
+          file: file(roleSheet(SHEEP_BMP, SHEEP_PNG, 32), 'sheep_flight1.png'),
           fileName: 'sheep_flight1.png',
           frames: 32,
           rotationFrames: 32,
         },
         flight2: {
-          file: file(ROT_16, 'sheep_flight2.png'),
+          file: file(roleSheet(SHEEP_BMP, SHEEP_PNG, 16), 'sheep_flight2.png'),
           fileName: 'sheep_flight2.png',
           frames: 16,
           rotationFrames: 16,
@@ -921,22 +1017,26 @@ const TESTS: TestCase[] = [
       // A builder sheet owns the flying state: the export keeps the record
       // `sprite` (WA's walking pose; `sheepwlk` is a real stock id), zeroes
       // `sheep.flight_1/2` and passes the pose's id as `walk`, so the builder
-      // still knows the primary while WA animates the walk. 32 frames gives one
-      // cell per direction, so `track` reads the heading.
+      // still knows the primary while WA animates the walk.
+      //
+      // The sheet is `spec/sspsheep1.png`, which points up-LEFT: the weapon-wide
+      // `angle` modifier (45) stands it up, and `track` then follows the flight
+      // vector. Without it the sheep flies 45 degrees off its heading.
       missileSprite: {
         enabled: true,
         mode: 'custom',
         anim: 'track',
-        frames: 32,
+        frames: 1,
+        angle: 45,
         hideStock: true,
       },
     }),
     intent:
-      'Roaming art through the sprite builder: the record `sprite` keeps WA\'s walk and its id goes to `sb.flight` as `walk`, `sheep.flight_1/2` are zeroed, and `roam = true` waits for Space.',
+      'Roaming art through the sprite builder: the record `sprite` keeps WA\'s walk and its id goes to `sb.flight` as `walk`, `sheep.flight_1/2` are zeroed, and `roam = true` waits for Space. The sheet points up-left, so `angle = 45` stands it up.',
     expect:
-      'The sheep walks with WA\'s pose after firing; on the first Space press it takes off into our 32-frame sheet and points along the heading, and any cluster bits still use our bit sheet.',
+      'The sheep walks with WA\'s pose after firing; on the first Space press it takes off into our sheet and points along its heading (not 45 degrees off it), and any cluster bits still use our bit sheet.',
     watch:
-      'A missing walk pose (`sprite` zeroed although `sheepwlk` draws), stock flown art under ours (`sheep.flight_1/2` not zeroed), our art while still walking (Space detection firing early), bits drawn with the primary sheet (`walk` id matching the bit sprite), or nothing after Space (`wa.world.keys().space`/turn worm).',
+      'A missing walk pose (`sprite` zeroed although `sheepwlk` draws), stock flown art under ours (`sheep.flight_1/2` not zeroed), the sheep flying 45 degrees off its heading (`angle` lost), art frozen upright in the air (`track` never applied), bits drawn with the primary sheet (`walk` id matching the bit sprite), or nothing after Space (`wa.world.keys().space`/turn worm).',
   },
   {
     project: makeOp({
@@ -1059,7 +1159,7 @@ const TESTS: TestCase[] = [
         drawHand: true,
         thrown: false,
         keepWhileFiring: true,
-        flashFile: file(GRENADE_PNG, 'flash.png'),
+        flashFile: file(AIM_PNG, 'flash.png'),
         flashFrames: 3,
         flashOut: 14,
         flashSide: 2,
@@ -1115,11 +1215,7 @@ for (const test of TESTS) {
     const source =
       slot === 'missile_trail' || slot === 'cluster_trail'
         ? TRAIL_4
-        : asset.frames >= 32
-          ? ROT_32
-          : asset.frames === 16
-            ? ROT_16
-            : GRENADE_PNG;
+        : roleSheet(GRENADE_BMP, GRENADE_PNG, asset.frames);
     writeFileSync(join(BUNDLE, path), source);
     usedSheets.add(path);
     if (asset.frames > 1) {
@@ -1132,11 +1228,11 @@ for (const test of TESTS) {
   // repeat-fire frames, so a sequential-fire test needs the pixels too.
   if (project.hold?.enabled) {
     mkdirSync(join(BUNDLE, 'sprites', folder), { recursive: true });
-    writeFileSync(join(BUNDLE, holdSheetPath(project)), GRENADE_PNG);
+    writeFileSync(join(BUNDLE, holdSheetPath(project)), AIM_PNG);
     // The firing-state sprite (`hold.flash`). Loaded through the hold table,
     // so it needs no `mod.toml` declaration — only the file.
     if (project.hold.flashFile) {
-      writeFileSync(join(BUNDLE, flashSheetPath(project)), GRENADE_PNG);
+      writeFileSync(join(BUNDLE, flashSheetPath(project)), AIM_PNG);
     }
   }
 
@@ -1145,13 +1241,11 @@ for (const test of TESTS) {
     usesBuilders = true;
     mkdirSync(join(BUNDLE, 'sprites', folder), { recursive: true });
     const path = missileFlightSheetPath(project);
-    // A multi-frame primary sheet uses the rotation strip, so a test can see the
-    // frame cycle (digging animates the round's own sheet).
+    // The ice sprite (a directional glyph): a multi-frame sheet is baked into a
+    // rotation strip so a test can see the frame cycle, and digging animates the
+    // round's own sheet.
     const primaryFrames = project.missileSprite.frames ?? 1;
-    writeFileSync(
-      join(BUNDLE, path),
-      primaryFrames >= 32 ? ROT_32 : primaryFrames === 16 ? ROT_16 : GRENADE_PNG
-    );
+    writeFileSync(join(BUNDLE, path), roleSheet(ICE_BMP, ICE_PNG, primaryFrames));
     if (primaryFrames > 1) {
       spriteDecls.set(path, { frames: primaryFrames, fps: project.missileSprite.fps || 15, play: 'loop' });
     }
@@ -1161,16 +1255,18 @@ for (const test of TESTS) {
     // missile art, so a declared path always exists.
     if (bitBuilderMode(project) === 'builder') {
       const bitPath = bitFlightSheetPath(project);
-      writeFileSync(join(BUNDLE, bitPath), ROT_16);
+      const bitFrames = Math.max(1, project.bitFlight?.frames ?? 1);
+      writeFileSync(join(BUNDLE, bitPath), roleSheet(GRENADE_BMP, GRENADE_PNG, bitFrames));
       usedSheets.add(bitPath);
-      spriteDecls.set(bitPath, { frames: 16, fps: 15, play: 'loop' });
+      spriteDecls.set(bitPath, { frames: bitFrames, fps: project.bitFlight?.fps || 15, play: 'loop' });
     }
     for (const state of resolveBehaviorStates(project)) {
       if (state.art.mode !== 'builder') continue;
       const statePath = behaviorStateSheetPath(project, state.def.key);
-      writeFileSync(join(BUNDLE, statePath), ROT_32);
+      const frames = Math.max(1, state.art.frames ?? 1);
+      writeFileSync(join(BUNDLE, statePath), roleSheet(ICE_BMP, ICE_PNG, frames));
       usedSheets.add(statePath);
-      spriteDecls.set(statePath, { frames: 32, fps: 15, play: 'loop' });
+      spriteDecls.set(statePath, { frames, fps: state.art.fps || 15, play: 'loop' });
     }
     // Timed homing art is not a `states` entry any more; its sheets are
     // declared by `wfwsRoleFlags`. Write them, or a declared path dangles.
@@ -1181,13 +1277,14 @@ for (const test of TESTS) {
     ]) {
       if (!owned) continue;
       const statePath = behaviorStateSheetPath(project, key);
-      writeFileSync(join(BUNDLE, statePath), ROT_32);
+      const role = project.behaviorArt![key]!;
+      const frames = Math.max(1, role.frames ?? 1);
+      // The homing *bit* is the drum's own 20-cell sheet; the primary's homing
+      // art is the bazooka, so the two homing roles are never the same picture.
+      const [base, png] = key === 'homing_bit' ? [DRUM_BMP, DRUM_PNG] : [AIM_BMP, AIM_PNG];
+      writeFileSync(join(BUNDLE, statePath), roleSheet(base, png, frames));
       usedSheets.add(statePath);
-      spriteDecls.set(statePath, {
-        frames: project.behaviorArt?.[key]?.frames ?? 32,
-        fps: project.behaviorArt?.[key]?.fps ?? 15,
-        play: 'loop',
-      });
+      spriteDecls.set(statePath, { frames, fps: role.fps || 15, play: 'loop' });
     }
   }
 
@@ -1203,8 +1300,7 @@ for (const test of TESTS) {
       if (!asset?.file) continue;
       const path = roamSheetPath(project, which);
       const frames = asset.frames ?? 1;
-      const source = frames >= 32 ? ROT_32 : frames === 16 ? ROT_16 : GRENADE_PNG;
-      writeFileSync(join(BUNDLE, path), source);
+      writeFileSync(join(BUNDLE, path), roleSheet(SHEEP_BMP, SHEEP_PNG, frames));
       usedSheets.add(path);
       if (frames > 1) spriteDecls.set(path, { frames, fps: 15, play: 'loop' });
     }
