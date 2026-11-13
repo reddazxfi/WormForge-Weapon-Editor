@@ -1040,6 +1040,32 @@ const TESTS: TestCase[] = [
   },
   {
     project: makeOp({
+      id: 'wftest.34_roam_tilt',
+      name: 'WF 34 Roam Tilt',
+      slot: 'super_sheep',
+      action: 'roam',
+      body: { sprite: 'sheepwlk' },
+      // `anim = "roam"`: the sheet points along the velocity but may only lean
+      // 35 degrees up or 25 down from a 10 degree rest, and it sits at the rest
+      // angle while WA walks the animal (no velocity at all on the ground).
+      missileSprite: {
+        enabled: true,
+        mode: 'custom',
+        anim: 'roam',
+        frames: 1,
+        roamTilt: { up: 35, down: 25, rest: 10 },
+        hideStock: true,
+      },
+    }),
+    intent:
+      'The roam tilt preset: `anim = roam` with `tilt = { up = 35, down = 25, rest = 10 }`, WA keeping the ground pose.',
+    expect:
+      'While it walks the art sits 10 degrees off vertical; taking off leans it back up to 35 at the steepest climb, then forward to 25 on the way down, never further.',
+    watch:
+      'The art pointing at the last heading while walking (`track` instead of the rest angle), no tilt at all (`tilt` lost, or `anim = roam` emitted as another type), the art past the limits, or the sheet 45 degrees off (that is WF 28 and its `angle`).',
+  },
+  {
+    project: makeOp({
       id: 'wftest.29_fire_seq',
       name: 'WF 29 Sequential Fire',
       slot: 'mortar',

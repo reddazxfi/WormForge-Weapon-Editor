@@ -31,7 +31,7 @@ import type {
   RoamSheetAsset,
   WeaponProject,
 } from '../../types/weapon';
-import { DEFAULT_DIG_ROLE_ART, DEFAULT_ROLE_ART } from '../../data/spriteBuilder';
+import { DEFAULT_DIG_ROLE_ART, DEFAULT_ROAM_TILT, DEFAULT_ROLE_ART } from '../../data/spriteBuilder';
 import { DEFAULT_EXPLOSION_EFFECT, EXPLOSION_PRESETS } from '../../data/explosionPresets';
 import { DEFAULT_FIRE_SEQUENCE } from '../../data/fireSequence';
 import { DEFAULT_CUSTOM_SOUNDS } from '../../data/soundPresets';
@@ -206,6 +206,7 @@ const animOf = (value: LuaValue | undefined, fallback: MissileSpriteConfig['anim
   value === 'slow' ||
   value === 'medium' ||
   value === 'fast' ||
+  value === 'roam' ||
   value === 'none'
     ? value
     : fallback;
@@ -432,9 +433,17 @@ export async function readBundleFeatures(args: {
     const sheetPath = str(holdTable.sheet);
     const asset = await readAsset(files, bundleDir, sheetPath);
     const hold = readHold(holdTable, args.holdBase ?? DEFAULT_IMPORT_HOLD);
+    // The firing-state sprite has two emission shapes: the old `hold.flash`
+    // overlay (out/side/scale pre-resolved against the gun), and the current
+    // FAMAS-style second hold entry handed to `px_hold_art` (`local firing = {
+    // ... }` + `hold_art.add(firing)`), which inherits the gun's placement.
+    const firingTable = isTable(scan.assignments['firing'])
+      ? scan.assignments['firing']
+      : undefined;
     const flashTable = isTable(holdTable.flash) ? holdTable.flash : undefined;
-    const flashAsset = flashTable
-      ? await readAsset(files, bundleDir, str(flashTable.sheet))
+    const flashSource = flashTable ?? firingTable;
+    const flashAsset = flashSource
+      ? await readAsset(files, bundleDir, str(flashSource.sheet))
       : undefined;
     const weapRadius = Number(hold.weapRadius ?? 6);
     const weapScale = Number(hold.scale) || 1;
@@ -449,23 +458,28 @@ export async function readBundleFeatures(args: {
       sheetPreview: asset?.preview,
       sheetWidth: asset?.width,
       sheetHeight: asset?.height,
-      ...(flashTable
+      ...(flashSource
         ? {
             flashFile: flashAsset?.file,
             flashPreview: flashAsset?.preview,
             flashWidth: flashAsset?.width,
             flashHeight: flashAsset?.height,
-            // `frames` is the flash's lifetime in 50 Hz ticks (`flash_left`),
-            // not a strip length; `out`/`side`/`scale` are stored relative to
-            // the weapon's own pivot, rotation, and scale.
-            flashFrames: Math.max(1, Math.round(num(flashTable.frames) ?? 3)),
-            flashOut: Math.round(((dx * cos - dy * sin) / weapScale) * 100) / 100,
-            flashSide: Math.round(((dx * sin + dy * cos) / weapScale) * 100) / 100,
-            flashScale: Math.round(((num(flashTable.scale) ?? 1) / weapScale) * 1000) / 1000,
+            // Only the old overlay form carries geometry: it lives in 50 Hz
+            // ticks (`flash_left`) and in offsets relative to the gun's pivot,
+            // rotation and scale. The FAMAS form inherits all of that.
+            ...(flashTable
+              ? {
+                  flashFrames: Math.max(1, Math.round(num(flashTable.frames) ?? 3)),
+                  flashOut: Math.round(((dx * cos - dy * sin) / weapScale) * 100) / 100,
+                  flashSide: Math.round(((dx * sin + dy * cos) / weapScale) * 100) / 100,
+                  flashScale:
+                    Math.round(((num(flashTable.scale) ?? 1) / weapScale) * 1000) / 1000,
+                }
+              : {}),
           }
         : {}),
     };
-    notes.push(flashTable ? 'hold art + muzzle flash' : 'hold art');
+    notes.push(flashSource ? 'hold art + firing sprite' : 'hold art');
   }
 
   // ---- sprite builder -----------------------------------------------------
@@ -494,6 +508,16 @@ export async function readBundleFeatures(args: {
       hideStock: true,
       size: num(f.size) ?? 1,
       angle: num(f.angle) ?? 0,
+      // `tilt = { up, down, rest }`: the `anim = "roam"` preset.
+      ...(isTable(f.tilt)
+        ? {
+            roamTilt: {
+              up: num((f.tilt as LuaTable).up) ?? DEFAULT_ROAM_TILT.up,
+              down: num((f.tilt as LuaTable).down) ?? DEFAULT_ROAM_TILT.down,
+              rest: num((f.tilt as LuaTable).rest) ?? DEFAULT_ROAM_TILT.rest,
+            },
+          }
+        : {}),
       logIdentity: f.log === true,
     };
 

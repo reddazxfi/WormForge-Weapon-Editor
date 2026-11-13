@@ -13,7 +13,6 @@ import {
   digArtOverrideRows,
   roamSheetPath,
   missileFlightSheetPath,
-  resolvedHoldFlash,
 } from '../utils/luaGenerator';
 import { StockSpriteInput } from './StockSpriteInput';
 import { stockSpriteName } from '../data/stockSprites';
@@ -22,6 +21,7 @@ import { defaultArtFor } from '../utils/defaultArt';
 import { buildRotationSheet } from '../utils/rotateSheet';
 import {
   DEFAULT_DIG_ROLE_ART,
+  DEFAULT_ROAM_TILT,
   DEFAULT_ROLE_ART,
   bitActionOf,
   bitBuilderMode,
@@ -457,7 +457,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
   const [missileZoom, setMissileZoom] = useState<number>(4);
   const [flightAngleDeg, setFlightAngleDeg] = useState<number>(25); // trajectory launch angle
   const [flightSpeed, setFlightSpeed] = useState<number>(14); // velocity magnitude
-  const [flightMode, setFlightMode] = useState<'orbit' | 'arc' | 'static'>('arc');
+  const [flightMode, setFlightMode] = useState<'orbit' | 'arc' | 'static' | 'walk'>('arc');
   const [backdropTheme, setBackdropTheme] = useState<'grid' | 'sky' | 'cavern'>('grid');
   const [showDrumRef, setShowDrumRef] = useState(true);
   const [oildrumLoadedImg, setOildrumLoadedImg] = useState<HTMLImageElement | null>(null);
@@ -839,42 +839,22 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       }
     }
 
-    // 3b. Firing-state sprite (`hold.flash`). Follows the normal weapon's
-    // `weapRadius`, `weapRotation`, `scale` (`weap_scale`), and `putAwayShrink`
-    // so the muzzle flash moves, scales, and rotates around the worm alongside
-    // the held weapon.
+    // 3b. Firing-state sprite. PX's FAMAS pattern, which the generator emits: a
+    // second hold entry (`px_hold_art`) drawn in WA's firing states with the
+    // same placement as the gun — same pivot, radius, rotation and `weap_scale`,
+    // mirrored by the worm's facing with the rest of the cell. It has its own
+    // picture, so it is drawn at its own pixel size, not stretched to the gun.
     const flashImg = flashLoadedImg || flashImgRef.current;
     if (flashLeft > 0 && flashImg && flashImg.complete && flashImg.naturalWidth > 0) {
-      const resolved = resolvedHoldFlash({
-        ...hold,
-        scale: (Number(hold.scale) || 1) * putAwayShrink,
-      });
-      const fx = cx + Math.sin(rot) * resolved.out - Math.cos(rot) * resolved.side;
-      const fy = cy - Math.cos(rot) * resolved.out - Math.sin(rot) * resolved.side;
-      // `enqueue_hold` always asks for frame 1 and clamps it: a square sheet
-      // shows its only cell, a vertical strip its second cell.
-      const cells =
-        flashImg.naturalHeight > flashImg.naturalWidth
-          ? Math.max(1, Math.round(flashImg.naturalHeight / flashImg.naturalWidth))
-          : 1;
-      const cellH = flashImg.naturalHeight / cells;
-      const cellY = Math.min(1, cells - 1) * cellH;
-      const flashScale = resolved.scale;
       offCtx.save();
       offCtx.imageSmoothingEnabled = false;
-      offCtx.translate(fx, fy);
-      offCtx.rotate(rot - Math.PI / 2);
-      offCtx.scale(flashScale, flashScale);
+      offCtx.translate(weapX, weapY);
+      offCtx.rotate(weapAngle);
+      offCtx.scale(scale, scale);
       offCtx.drawImage(
         flashImg,
-        0,
-        cellY,
-        flashImg.naturalWidth,
-        cellH,
         -flashImg.naturalWidth / 2,
-        -cellH / 2,
-        flashImg.naturalWidth,
-        cellH
+        -flashImg.naturalHeight / 2
       );
       offCtx.restore();
     }
@@ -1023,6 +1003,26 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
         posY = height / 2 + Math.sin(angle) * radius;
         vx = -Math.sin(angle) * radius * dAngle;
         vy = Math.cos(angle) * radius * dAngle;
+      } else if (flightMode === 'walk') {
+        // The roaming animal's own two states, on one loop: it ambles in place
+        // (no velocity — WA walks it, so the art has to rest), then hops (up
+        // leaning back, down leaning forward). This is what makes `roam` tilt
+        // readable in the editor.
+        animStateRef.current.arcT = (animStateRef.current.arcT + STEP) % 1.0;
+        const u = animStateRef.current.arcT;
+        const baseY = height * 0.78;
+        const hopStart = 0.55;
+        const riding = u >= hopStart ? Math.sin(((u - hopStart) / (1 - hopStart)) * Math.PI) : 0;
+        posX = width / 2;
+        posY = baseY - riding * (height * 0.46) - (u < hopStart ? Math.abs(Math.sin(u * 14)) * 2 : 0);
+        // A hair of vx keeps the facing stable; the hop's own slope is the tilt.
+        vx = 0.02;
+        vy =
+          u < hopStart
+            ? 0
+            : -Math.cos(((u - hopStart) / (1 - hopStart)) * Math.PI) *
+              (height * 0.46) *
+              ((Math.PI / (1 - hopStart)) * STEP);
       } else {
         posX = width / 2;
         posY = height / 2;
@@ -1032,7 +1032,27 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
 
       // Rotation calculation. In static preview mode, smoothly rotate without
       // freezing at 90/270 degrees or strobing at 3000 deg/s.
-      if (anim === 'track') {
+      if (anim === 'roam') {
+        // `M.roam_angle`: the resting angle when the animal has no speed (WA
+        // walks it), else the heading clamped to `up`/`down` degrees of it.
+        const tilt = {
+          up: Math.abs(missile.roamTilt?.up ?? DEFAULT_ROAM_TILT.up),
+          down: Math.abs(missile.roamTilt?.down ?? DEFAULT_ROAM_TILT.down),
+          rest: missile.roamTilt?.rest ?? DEFAULT_ROAM_TILT.rest,
+        };
+        const restRad = (tilt.rest * Math.PI) / 180;
+        const speed = Math.hypot(vx, vy);
+        if (speed < 0.05) {
+          rot = restRad;
+        } else {
+          const want = Math.atan2(vy, vx) + Math.PI / 2;
+          let delta = want - restRad;
+          delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+          const up = (tilt.up * Math.PI) / 180;
+          const down = (tilt.down * Math.PI) / 180;
+          rot = restRad + Math.min(up, Math.max(-down, delta));
+        }
+      } else if (anim === 'track') {
         rot = Math.atan2(vy, vx) + Math.PI / 2;
       } else if (flightMode === 'static') {
         const dir = baseVx < 0 ? -1 : 1;
@@ -2194,85 +2214,13 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
           </div>
 
           {hold.flashPreview && (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="space-y-1">
-                <label
-                  htmlFor="hold-flash-frames"
-                  className="block text-xs font-medium text-stone-600 dark:text-stone-400"
-                  title="Ticks the flash stays lit: the engine keeps it for frames + 1 game frames (20 ms each)."
-                >
-                  Lit frames
-                </label>
-                <input
-                  id="hold-flash-frames"
-                  type="number"
-                  min={1}
-                  max={40}
-                  value={hold.flashFrames ?? 3}
-                  onChange={(e) =>
-                    updateHold({ flashFrames: Math.max(1, Number(e.target.value)) })
-                  }
-                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-center font-mono text-xs text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-white"
-                />
-              </div>
-              <div className="space-y-1">
-                <label
-                  htmlFor="hold-flash-out"
-                  className="block text-xs font-medium text-stone-600 dark:text-stone-400"
-                  title="Pixels along the weapon's barrel from the weapon centre; automatically follows Weapon Radius, Rotation, and Scale Multiplier."
-                >
-                  Out (px)
-                </label>
-                <input
-                  id="hold-flash-out"
-                  type="number"
-                  min={-60}
-                  max={60}
-                  value={hold.flashOut ?? 0}
-                  onChange={(e) => updateHold({ flashOut: Number(e.target.value) })}
-                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-center font-mono text-xs text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-white"
-                />
-              </div>
-              <div className="space-y-1">
-                <label
-                  htmlFor="hold-flash-side"
-                  className="block text-xs font-medium text-stone-600 dark:text-stone-400"
-                  title="Pixels across the weapon from the weapon centre; scaled and rotated with the weapon."
-                >
-                  Side (px)
-                </label>
-                <input
-                  id="hold-flash-side"
-                  type="number"
-                  min={-60}
-                  max={60}
-                  value={hold.flashSide ?? 0}
-                  onChange={(e) => updateHold({ flashSide: Number(e.target.value) })}
-                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-center font-mono text-xs text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-white"
-                />
-              </div>
-              <div className="space-y-1">
-                <label
-                  htmlFor="hold-flash-scale"
-                  className="block text-xs font-medium text-stone-600 dark:text-stone-400"
-                  title="Draw scale relative to the weapon; multiplied by Scale Multiplier in both preview and exported Lua."
-                >
-                  Scale
-                </label>
-                <input
-                  id="hold-flash-scale"
-                  type="number"
-                  min={0.1}
-                  max={6}
-                  step={0.1}
-                  value={hold.flashScale ?? 1}
-                  onChange={(e) =>
-                    updateHold({ flashScale: Math.max(0.1, Number(e.target.value)) })
-                  }
-                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-center font-mono text-xs text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-white"
-                />
-              </div>
-            </div>
+            <p className="rounded-lg border border-stone-200 bg-white/70 px-2.5 py-2 text-[11px] text-stone-600 dark:border-stone-700 dark:bg-stone-900/60 dark:text-stone-400">
+              Drawn like PX&apos;s FAMAS firing sheet: the same pivot, radius, rotation and
+              scale as the held art above, on WA&apos;s two firing frames (0x6A / 0x6B) — so
+              it needs no offset or scale of its own. Its own picture is drawn at its own
+              pixel size; a <span className="font-mono">90×90</span> sheet with the gun is
+              the usual case.
+            </p>
           )}
         </div>
       </div>
@@ -2486,6 +2434,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
           slow: 'slow = 1',
           medium: 'medium = 1',
           fast: 'fast = 1',
+          roam: 'roam = 4',
           none: 'none = 5',
         };
 
@@ -2884,6 +2833,57 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                   />
                 </div>
 
+                {/* Roam tilt preset: `anim = "roam"` only. A roaming animal has no
+                    velocity of its own while WA walks it, so the art rests. */}
+                <div
+                  className="space-y-1.5 p-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40"
+                  title="Preset for the Roam Tilt animation (anim = roam): how far the art may lean from the rest angle while it moves, and the angle it holds while WA walks it with no velocity."
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-stone-700 dark:text-stone-300">
+                      Roam Tilt
+                    </span>
+                    <code className="text-[10px] font-mono text-forge-600 dark:text-forge-400">
+                      anim = roam
+                    </code>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(
+                      [
+                        { key: 'up', label: 'Max up', min: 0, max: 180 },
+                        { key: 'down', label: 'Max down', min: 0, max: 180 },
+                        { key: 'rest', label: 'Rest', min: -180, max: 180 },
+                      ] as const
+                    ).map((field) => {
+                      const tilt = missile.roamTilt ?? DEFAULT_ROAM_TILT;
+                      return (
+                        <div key={field.key} className="space-y-0.5">
+                          <label
+                            htmlFor={`flight-tilt-${field.key}`}
+                            className="block text-[10px] font-medium text-stone-600 dark:text-stone-400"
+                          >
+                            {field.label}
+                          </label>
+                          <input
+                            id={`flight-tilt-${field.key}`}
+                            type="number"
+                            min={field.min}
+                            max={field.max}
+                            step={5}
+                            value={tilt[field.key]}
+                            onChange={(e) =>
+                              updateMissile({
+                                roamTilt: { ...tilt, [field.key]: Number(e.target.value) },
+                              })
+                            }
+                            className="w-full rounded-lg border border-stone-200 bg-white px-1.5 py-1 text-center font-mono text-[11px] text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-white"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* Native Sprite Hidden Badge */}
                 <div
                   className="p-3 rounded-xl border border-forge-200 dark:border-forge-900/60 bg-forge-50/50 dark:bg-forge-950/20 flex items-center justify-between gap-2"
@@ -2978,17 +2978,24 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
 
                 {/* Flight Path Selector + Inline Static Vector Sliders */}
                 <div className="w-full max-w-[360px] space-y-2 bg-stone-50 dark:bg-stone-800/50 p-2 rounded-xl border border-stone-200 dark:border-stone-800">
-                  <div className="grid grid-cols-3 gap-1 p-1 bg-stone-100 dark:bg-stone-900 rounded-lg text-xs font-medium">
+                  <div className="grid grid-cols-4 gap-1 p-1 bg-stone-100 dark:bg-stone-900 rounded-lg text-xs font-medium">
                     {(
                       [
-                        { id: 'arc', label: 'Parabolic Arc' },
-                        { id: 'orbit', label: 'Circle Path' },
-                        { id: 'static', label: 'Static Vector' },
+                        { id: 'arc', label: 'Arc', title: 'A thrown arc: heading and speed change along it.' },
+                        { id: 'orbit', label: 'Orbit', title: 'A circle: every heading in turn.' },
+                        { id: 'static', label: 'Static', title: 'One fixed vector, for reading the art.' },
+                        {
+                          id: 'walk',
+                          label: 'Walk',
+                          title:
+                            'A roaming animal: ambling with no velocity (the art rests), then a hop up and down (the tilt clamps).',
+                        },
                       ] as const
                     ).map((mode) => (
                       <button
                         key={mode.id}
                         type="button"
+                        title={mode.title}
                         onClick={() => setFlightMode(mode.id)}
                         className={`py-1 rounded text-[11px] text-center transition-colors cursor-pointer ${
                           flightMode === mode.id
@@ -3459,6 +3466,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                         { id: 'slow', name: 'Slow Spin', sub: '0.5 rad/f spin', code: 'slow = 1' },
                         { id: 'medium', name: 'Medium Spin', sub: '0.8 rad/f spin', code: 'medium = 1' },
                         { id: 'fast', name: 'Fast Spin', sub: '1.35 rad/f spin', code: 'fast = 1' },
+                        { id: 'roam', name: 'Roam Tilt', sub: 'Clamped tilt, rests on the ground', code: 'roam = 4' },
                         { id: 'none', name: 'Fixed Upright', sub: 'Locked 0° turn', code: 'none = 5' },
                       ] as const
                     ).map((item) => {

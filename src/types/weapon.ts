@@ -394,7 +394,16 @@ export interface ExplosionEffectConfig {
   smoke: boolean;
 }
 
-export type MissileAnimType = 'track' | 'rotation' | 'slow' | 'medium' | 'fast' | 'none';
+export type MissileAnimType =
+  | 'track'
+  | 'rotation'
+  | 'slow'
+  | 'medium'
+  | 'fast'
+  | 'none'
+  /** Roaming animal: the art points along the velocity, clamped to a tilt range
+   *  and resting at a fixed angle when the animal has no speed (on the ground). */
+  | 'roam';
 
 /**
  * One extra role the WFWS builder draws. The primary round keeps its own
@@ -452,6 +461,14 @@ export interface MissileSpriteConfig {
    */
   size?: number;
   angle?: number;
+  /**
+   * The `anim = "roam"` preset: how far the art may tilt away from `rest`, in
+   * degrees. A roaming animal walks with no velocity — `track` would leave it
+   * pointing at the last heading — so the builder points it along the velocity
+   * only while it moves, clamps that to `±up`/`-down` from `rest`, and sits at
+   * `rest` when it stops. Emitted as `tilt` on the `sb.flight` call.
+   */
+  roamTilt?: { up: number; down: number; rest: number };
   /** Emit `log = true` in `sb.flight`: one log line per missile's first
    *  frames with what the identity test saw. A debugging aid. */
   logIdentity?: boolean;

@@ -1,6 +1,7 @@
 import type {
   BehaviorArtKey,
   FlightRoleArt,
+  MissileAnimType,
   WeaponProject,
 } from '../types/weapon';
 
@@ -27,6 +28,20 @@ export const DEFAULT_DIG_ROLE_ART: FlightRoleArt = {
   mode: 'builder',
   anim: 'track',
 };
+
+/** `anim = "roam"`: the resting angle and how far the art may tilt from it. */
+export const DEFAULT_ROAM_TILT = { up: 25, down: 25, rest: 0 };
+
+/** The `anim` selector, in the order the cards list it. */
+export const MISSILE_ANIM_OPTIONS: { id: MissileAnimType; name: string; sub: string }[] = [
+  { id: 'track', name: 'Track Vector', sub: 'Points flight angle' },
+  { id: 'rotation', name: 'Spin', sub: 'Turns with speed' },
+  { id: 'slow', name: 'Slow Cycle', sub: 'Slow strip' },
+  { id: 'medium', name: 'Medium Cycle', sub: 'Medium strip' },
+  { id: 'fast', name: 'Fast Cycle', sub: 'Fast strip' },
+  { id: 'roam', name: 'Roam Tilt', sub: 'Clamped tilt, rests on the ground' },
+  { id: 'none', name: 'None', sub: 'Stays upright' },
+];
 
 export interface BehaviorArtDef {
   key: BehaviorArtKey;

@@ -301,6 +301,16 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
     `clusters.bit.sprite` to a stock id (`clustlet`) if it was 0/empty and writes
     `sprite_count = 1`, and it **skips** the claim `cluster = { sprite, … }`
     declaration (the builder hides that sheet anyway).
+  - **`anim = "roam"`: the walking preset.** A roaming animal is walked by WA
+    with no velocity of its own, so `track` freezes the art at the last heading
+    and the animal looks dead on the ground. `anim = "roam"` points the sheet
+    along the velocity but clamps it to `tilt = { up, down, rest }` degrees
+    (`MissileSpriteConfig.roamTilt`, weapon-wide like `size`/`angle`), and holds
+    `rest` whenever the speed is under 0.05 px/frame — i.e. while WA walks it. The
+    clamp is a shortest-signed delta, so a heading across the wrap point still
+    limits on the near side. The Hold page's **Roam Tilt** card edits the three
+    angles and the flight preview gained a **Walk** mode (amble with no velocity,
+    then a hop up and down) that shows exactly what the preset does.
   - **Digging is not a state and has no sheet (but can override animation/transform).**
     Whenever the builder owns the flight art and the record digs (`action = "dig"`,
     or a cluster bit whose action is dig), the generator writes `dig.dive_sprite`
@@ -472,11 +482,17 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   `drawHand === false` (while leaving `hold.handRadius` intact in editor state;
   `importFeatures.ts` restores `fallback.handRadius` if `draw_hand = false` and
   `hand_radius = 0.01`).
-- **Firing-state flash (`hold.flash`):** `resolvedHoldFlash(hold)` in
-  `luaGenerator.ts` folds the normal weapon's `weapRadius`, `weapRotation`, and
-  `scale` (`weap_scale`) into the emitted `flash = { out, side, scale }` and
-  canvas preview so the muzzle flash stays locked to the gun; `importFeatures.ts`
-  inverts this transform back into weapon-local `flashOut`/`flashSide`/`flashScale`.
+- **Firing-state sprite (`hold.flashFile`), PX's FAMAS pattern.** It is not the
+  engine's `hold.flash` overlay. The generator emits a *second hold entry* — the
+  same `weap_radius` / `weap_rotation` / `weap_radial_rotation`, its own sheet,
+  `size = cell × weap_scale` — and hands it to `wf-lib/px_hold_art` after the
+  claim (`hold_art.add(firing)`). The helper draws it in WA's two firing states
+  (0x6A / 0x6B) with the worm's live aim, facing and radius, so it follows the
+  gun 1:1 in position, rotation and scale, and it needs no offsets of its own
+  (`flashOut`/`flashSide`/`flashScale`/`flashFrames` are legacy state, read from
+  an old bundle's `hold.flash` on import and never emitted). The dependency is
+  `px.fire_seq` (that bundle exports the helper) and the sheet goes in the
+  claim's `sprites`.
 - **Hold animation:** `worm_hold.rs` does
   `phase += anim_speed * 0.03` once per 50 Hz game frame, so the sheet plays
   `1.5 × frames × anim_speed` frames per second. The UI asks for the real
@@ -648,6 +664,15 @@ bundle, its weapon components and the record tables each one keeps in Lua.
 - Corpus: `bun run tools/scan_mods.ts [ModsFolder]` — 240 of 262 weapons read
   from the dev machine. Misses are stock-copy examples, templates, and records
   that only exist in a bundled `.wep`.
+- **A panel shows the value the record will have, not the editor's default.**
+  `recordField(project, 'path', fallback)` (`src/utils/recordField.ts`) returns
+  the author's override, else what the donor (or the imported `.wep`) carries,
+  else the fallback. `copy_from` supplies the donor's whole record, so a field
+  nobody touched is the donor's — `fires.launch_power_pct` used to be shown as
+  100 for every weapon (a grenade could not charge), which was the *fallback*
+  talking, not the record. `stockDonors.json` was also stale: it predated the
+  `.wep` `fires.*` decode, so no donor carried a launch power at all. Regenerate
+  it whenever the parser learns a field (`bun run tools/gen_stock_donors.ts`).
 - **Per-donor presets** (`src/data/stockDonors.json`): one decoded record per
   panel slot, 70 of them, from PX's default scheme
   (`python tools/px_scheme_weps.py <scheme>.pxs OUT --all` then
@@ -679,6 +704,17 @@ edits the suffix only, so no id can collide with a mod the reader shows.
 - Branding: `public/assets/wormforge-logo.png` (327×57 wordmark) and
   `wormforge-mark.png` (49×49, also the favicon), cropped from
   `spec/modloader_banner.png`.
+- **Weapon identity is a section of its own** (`weapon` in `recordTabs.tsx`):
+  name/id/description, fire archetype, panel slot and position, donor, icon and
+  the defaults live in `WeaponSettings.tsx` and no longer sit above every record
+  page. `App` renders `WeaponSettings` for `activeSubTab === 'weapon'` and
+  `RecordEditor` otherwise.
+- **Tooltips are tappable** (`TooltipTap.tsx`, mounted once in `App`). Most
+  explanations are `title` attributes, which a phone can never show: a tap on any
+  element with a `title` opens the same text in a bubble (the attribute is moved
+  to `data-tip-tap` while it is open so the native tooltip cannot double up; a
+  tap on a `<label>` is swallowed so the input does not take focus; real controls
+  keep their click).
 - Record sprite fields use `StockSpriteInput` (`src/components/StockSpriteInput.tsx`):
   a text box plus the stock table's datalist, the resolved `name (#id)` hint, a
   red warning for text the engine would read as a bundle path, and the
@@ -984,11 +1020,12 @@ that `vite preview` at `/` hides).
     fixes `draw_hand = false`, disabling **Draw Hand** must also emit
     `hand_radius = 0.01` as a fallback alongside `draw_hand = false` while
     preserving the user's `hold.handRadius` in UI state.
-29. **Firing flash (`hold.flash`) must transform with the held weapon.** Because
-    the engine evaluates `flash.out` / `flash.side` / `flash.scale` relative to
-    the worm centre, both the hold canvas and `luaGenerator` share
-    `resolvedHoldFlash(hold)` to apply `weapRadius`, `weapRotation`, and
-    `weap_scale`, and `importFeatures` inverts it back.
+29. **A firing sprite should be a hold entry, not an overlay.** PX's FAMAS does
+    it with `px_hold_art`: a second hold spec with its own sheet and the gun's
+    geometry, drawn in WA's firing states. The engine's `hold.flash` instead
+    carries pre-resolved `out`/`side`/`scale`, which drifts from the gun the
+    moment the hold's radius, rotation or scale changes (and the sheet is loaded
+    as a single frame). Use the FAMAS form.
 30. **Use `bun run` (not `npx tsx`) for repo check scripts.** Scripts that
     import `src/utils/` hit Vite's `import.meta.env`, which `tsx` does not
     populate cleanly; `bun run tools/check_copyfrom.ts` works directly. Also
@@ -1024,8 +1061,8 @@ Done and validated:
   gun/mine/strike fields, collision masks.
 - Hold builder (3-column compact layout, PX posture/hand, continuous loop when
   `frames > 1`, `weap_scale`, `-35..35` px radius range, `draw_hand = false` ->
-  `hand_radius = 0.01` fallback, `resolvedHoldFlash` firing-sprite alignment,
-  put-away, thrown, keep-while-firing) and 50 Hz flight preview.
+  `hand_radius = 0.01` fallback, FAMAS-style firing sprite through
+  `px_hold_art`, put-away, thrown, keep-while-firing) and 50 Hz flight preview.
 - Sidebar UI, light default, forge palette, WormForge logo, mobile layout,
   accessibility pass; Gemini/Antigravity and "API 4.0" copy removed.
 - Default Grenade/Bazooka art used by previews and exports; no dangling sheets.

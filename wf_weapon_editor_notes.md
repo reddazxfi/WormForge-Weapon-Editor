@@ -1814,3 +1814,59 @@ the homing *bit* (its own 20-cell strip at 20 fps, `frames` declared), and
 `sspsheep1` for roaming — which points up-left, so WF 28's `angle = 45` is what
 stands it up and the sheet is a live test of the angle modifier. The PNG reader
 in the tool grew palette support for it (most `spec/` sheets are colour type 3).
+
+### The firing sprite is a hold entry (PX's FAMAS), not an overlay
+
+`hold.flash` is the engine's own overlay: `{ sheet, out, side, scale, frames }`
+with the offsets pre-resolved against the gun, a fixed frame (the sheet is loaded
+as one cell) and only `frames + 1` lit ticks. It drifts from the gun the moment
+the hold's radius, rotation or scale changes, which is why it never looked 1:1.
+
+The FAMAS does it differently and more simply: a *second hold entry* whose sheet
+is drawn by `px_hold_art` in WA's firing states, with the worm's live aim,
+facing and radius. The editor now emits exactly that — the same
+`weap_radius`/`weap_rotation`/`weap_radial_rotation`, its own sheet,
+`size = cell × weap_scale` — and calls `hold_art.add(firing)` after the claim.
+The card keeps only the upload: there is nothing to place. `px.fire_seq` is the
+dependency (it exports the helper) and the sheet is claimed in `sprites`.
+`flashOut`/`flashSide`/`flashScale`/`flashFrames` survive only to read a bundle
+written by the old code.
+
+### Weapon & Panel, tappable tooltips
+
+The identity/placement card sat above every record page. It is now the
+`weapon` section of the record nav (`recordTabs.tsx`), rendered by `App`
+instead of `RecordEditor`.
+
+Most field explanations are `title` attributes, which no phone can show.
+`TooltipTap` mounts one listener for the app: a tap on any `[title]` opens the
+text in a bubble, moving the attribute to `data-tip-tap` while it is open (so
+the native tooltip cannot appear on top), swallowing a `<label>` tap so the input
+does not take focus, and leaving real controls alone.
+
+### `anim = "roam"`: the walking preset
+
+WA walks a roaming animal itself, with no velocity, so `track` holds the last
+heading and the animal looks dead on the ground. The new builder animation
+points the art along the velocity, clamped to `tilt = { up, down, rest }` degrees
+of the rest angle (a shortest-signed delta, so a heading across the wrap point
+still limits on the near side) and returns `rest` below 0.05 px/frame. The three
+angles are weapon-wide (`MissileSpriteConfig.roamTilt`, like `size`/`angle`) and
+the Hold page's **Roam Tilt** card edits them. The flight preview gained a
+**Walk** mode: the animal ambles with no velocity (art at rest), then hops — up
+leaning back, down leaning forward.
+
+### Record values, donors and the launch power
+
+Two separate bugs made every weapon look the same:
+
+1. `stockDonors.json` predated the `.wep` `fires.*` decode, so no donor carried
+   `fires.launch_power_pct` at all, and the panel fell back to its hardcoded
+   `?? 100` — a grenade could never charge. The table is regenerated (70 slots,
+   grenade 0, mortar 100, super sheep 5) and `recordField()` now reads the
+   author's override, then the donor's (or the imported file's) value, then a
+   fallback, for 19 record fields.
+2. The donor switch was fine in the model (a Mortar really did show damage 15
+   and push 0), but the stale donor numbers hid it: everything looked constant.
+   `rebaseToDonor` still keeps an author's own edits and adopts the new donor's
+   values for the rest.

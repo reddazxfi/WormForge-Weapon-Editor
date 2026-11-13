@@ -150,6 +150,24 @@ no guessing and no desync. The generator zeroes `missile.homing.sprite` /
 `clusters.bit.homing.sprite` while the builder owns the art, so WA's own homing
 sprite cannot draw underneath.
 
+### `anim = "roam"`: the walking preset
+
+WA walks a roaming animal itself, so on the ground the entity has no velocity
+and `track` leaves the art pointing at the last heading — a walking animal that
+looks frozen. `anim = "roam"` points the sheet along the velocity but clamps it
+to a tilt range, and holds the rest angle while the animal is slow:
+
+```lua
+sb.flight(ctx, { weapon = ctx.id, sheet = "...", anim = "roam",
+                 tilt = { up = 25, down = 25, rest = 0 } })  -- degrees
+```
+
+`up`/`down` are how far the art may lean each way from `rest`; `down` is a
+magnitude, applied as `-down`. Below 0.05 px/frame the art sits at `rest`, which
+is the walking case. The clamp uses the shortest signed difference from `rest`,
+so a heading across the wrap point still limits on the near side. It replaces
+`track` for this animation only; the other roles keep their own `anim`.
+
 ### Roaming (the builder owns the flying state)
 
 A roaming animal walks until the turn's player presses Space, and only then

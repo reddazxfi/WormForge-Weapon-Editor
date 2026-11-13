@@ -16,6 +16,7 @@ import { supportsFireSequence } from '../data/fireSequence';
 import { COLLISION_FLAGS } from '../data/recordSchema';
 import { defaultArtFor } from './defaultArt';
 import {
+  DEFAULT_ROAM_TILT,
   bitActionOf,
   bitBuilderMode,
   primaryBuilderOn,
@@ -206,29 +207,6 @@ export function flashSheetPath(project: WeaponProject): string {
   return `sprites/${sanitizeModFolder(project.id)}/flash.png`;
 }
 
-/**
- * Resolves engine-space `hold.flash` parameters (`out`, `side`, `scale`) so
- * the firing sprite follows the normal weapon's `weapRadius`, `weapRotation`,
- * and `scale` (`weap_scale`) consistently in both preview and Lua export.
- */
-export function resolvedHoldFlash(hold: HoldConfig): {
-  out: number;
-  side: number;
-  scale: number;
-} {
-  const weapRadius = Number(hold.weapRadius ?? 6);
-  const weapScale = Number(hold.scale) || 1;
-  const weapRotRad = ((Number(hold.weapRotation) || 0) * Math.PI) / 180;
-  const localOut = Number(hold.flashOut ?? 0) * weapScale;
-  const localSide = Number(hold.flashSide ?? 0) * weapScale;
-  const cos = Math.cos(weapRotRad);
-  const sin = Math.sin(weapRotRad);
-  return {
-    out: -weapRadius + localOut * cos + localSide * sin,
-    side: -localOut * sin + localSide * cos,
-    scale: (Number(hold.flashScale ?? 1) || 1) * weapScale,
-  };
-}
 
 /** Every record slot that accepts pack art during installation. */
 export const PACK_ART_SLOTS: PackArtSlot[] = [
@@ -717,7 +695,14 @@ export function generateLuaCode(project: WeaponProject): string {
   // alternate) from the second shot of a burst: the engine's `hold` only draws
   // them while `h.firing` is set, and only the turn's fire message sets it.
   // `wf-lib/px_hold_art` redraws those two states through `wa.on.draw`.
-  const usesHoldArt = !!usesHold && usesFireSequence;
+  //
+  // The firing-state sprite (`hold.flash`) rides the same helper, the way PX's
+  // FAMAS does it: a second hold entry whose sheet is drawn in those states with
+  // the worm's live aim, facing, radius, rotation and `weap_scale`. That is what
+  // makes it follow the held gun 1:1 — the engine's `flash` overlay carried its
+  // own pre-resolved out/side/scale and could drift from it.
+  const usesFiringArt = !!usesHold && !!project.hold?.flashFile;
+  const usesHoldArt = !!usesHold && (usesFireSequence || usesFiringArt);
   const shotSoundPath = usesFireSequence ? customSoundPath(project, 'shot') : null;
   // The effects SDK's ribbon trail follows a missile WA builds from this
   // record, so it only applies to the missile families (a strike's bombs are
@@ -835,20 +820,6 @@ export function generateLuaCode(project: WeaponProject): string {
     if (h.keepWhileFiring) holdRows.push('keep_while_firing = true,');
     if (h.thrown) holdRows.push('thrown = true,');
     if (h.putAway) holdRows.push('put_away = true,');
-    if (h.flashFile) {
-      // The firing-state sprite. The engine draws it on the firing states
-      // (0x6A/0x6B) for `frames` + 1 ticks, with `out` / `side` relative to
-      // the worm centre and `scale` standalone — fold the normal weapon's
-      // radius, rotation, and scale in so the muzzle flash stays locked to it.
-      const resolvedFlash = resolvedHoldFlash(h);
-      holdRows.push('flash = {');
-      holdRows.push(`  sheet = ${luaQuote(flashSheetPath(project))},`);
-      holdRows.push(`  out = ${formatNumber(resolvedFlash.out)},`);
-      holdRows.push(`  side = ${formatNumber(resolvedFlash.side)},`);
-      holdRows.push(`  scale = ${formatNumber(resolvedFlash.scale)},`);
-      holdRows.push(`  frames = ${Math.max(1, Math.round(h.flashFrames ?? 3))},`);
-      holdRows.push('},');
-    }
     if (usesHoldArt) {
       // `px_hold_art` takes the same table plus these two presentation keys
       // (the engine ignores them). It has no scale key: `weap_scale` is folded
@@ -880,6 +851,34 @@ export function generateLuaCode(project: WeaponProject): string {
   if (usesHoldArt) {
     lines.push('    local hold = {');
     for (const row of holdRows) lines.push(`      ${row}`);
+    lines.push('    }');
+  }
+  if (usesFiringArt) {
+    // FAMAS' firing sheet: the hold's own placement, its own picture. The helper
+    // has no `weap_scale` (it draws a quad at `size` pixels), so the multiplier
+    // goes into `size` — the flash cell's pixel extent times the hold's scale.
+    const h = project.hold!;
+    const fallback = defaultArtFor(project);
+    const holdFrames = Math.max(1, h.frames || 1);
+    // The hold's own cell: an uploaded strip is sliced by `frames`, the default
+    // art is stacked to them (so its cell is the original image).
+    const holdCell = Math.min(
+      h.sheetWidth ?? fallback.width,
+      h.sheetFile ? (h.sheetHeight ?? fallback.height) / holdFrames : fallback.height,
+    );
+    // The firing sheet is one cell; with no recorded size (an import, a test
+    // pack) it is assumed to be the gun's own cell.
+    const cell = Math.max(1, Math.min(h.flashWidth ?? 0, h.flashHeight ?? 0) || holdCell);
+    const flashSize = Math.max(1, Math.round(cell * (h.scale ?? 1) * 100) / 100);
+    lines.push('    local firing = {');
+    lines.push('      weapon = ctx.id,');
+    lines.push(`      sheet = ${luaQuote(flashSheetPath(project))},`);
+    lines.push(`      size = ${flashSize},`);
+    lines.push(`      weap_radius = ${h.weapRadius ?? 6},`);
+    lines.push(
+      `      weap_rotation = ${(1 + (h.weapRotation || 0) / 180).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')},`,
+    );
+    lines.push('      weap_radial_rotation = 1,');
     lines.push('    }');
   }
   lines.push(extraAssignments.length > 0 ? '    local rec = {' : '    wa.weapons.replace{');
@@ -2662,8 +2661,14 @@ export function generateLuaCode(project: WeaponProject): string {
     // set, and the engine sets that on the fire message alone; a fire_seq burst
     // repeats the shot without one, so 0x6A/0x6B would hide it every other
     // frame. The helper redraws exactly those two states.
-    lines.push('    -- Keep the held art on WA\'s repeat-fire frames (0x6A/0x6B).');
-    lines.push('    hold_art.add(hold)');
+    if (usesFireSequence) {
+      lines.push('    -- Keep the held art on WA\'s repeat-fire frames (0x6A/0x6B).');
+      lines.push('    hold_art.add(hold)');
+    }
+    if (usesFiringArt) {
+      lines.push('    -- The firing-state sheet, drawn in the same states and place.');
+      lines.push('    hold_art.add(firing)');
+    }
     lines.push('');
   }
 
@@ -2851,6 +2856,24 @@ export function generateLuaCode(project: WeaponProject): string {
       }
     }
 
+    // `anim = "roam"`: the tilt preset. A roaming animal walks with no velocity
+    // of its own, so `track` freezes its heading on the ground; the builder
+    // points it along the velocity and clamps that to `up`/`down` degrees from
+    // `rest`, where it sits when the animal stops. Not emitted at the defaults.
+    if (m.roamTilt) {
+      const tilt = m.roamTilt;
+      const defaultTilt = DEFAULT_ROAM_TILT;
+      if (
+        tilt.up !== defaultTilt.up ||
+        tilt.down !== defaultTilt.down ||
+        tilt.rest !== defaultTilt.rest
+      ) {
+        lines.push(
+          `      tilt = { up = ${formatNumber(tilt.up)}, down = ${formatNumber(tilt.down)}, rest = ${formatNumber(tilt.rest)} },`,
+        );
+      }
+    }
+
     // A roaming animal walks until the turn's player presses Space, then
     // flies. The builder owns that state (the record's `sheep.flight_1/2` are
     // zeroed above), and `roam` tells it what WA itself is drawing.
@@ -2930,11 +2953,13 @@ export function generateModToml(project: WeaponProject): string {
   const explodesNatively = project.fireType === 'power' || project.fireType === 'drop';
   const usesExplosionEffect =
     !!project.explosionEffect?.enabled && explodesNatively;
-  // `wf-lib/fire_seq` is its own library bundle (`px.fire_seq`).
+  // `wf-lib/fire_seq` is its own library bundle (`px.fire_seq`), and so is
+  // `wf-lib/px_hold_art` — which the firing-state sprite rides (FAMAS-style).
   const usesFireSequence =
     !!project.fireSequence?.enabled &&
     !(project.enableCustomLua && /(?:^|\n)[ \t]*on_fire\s*=/.test(project.customLuaSnippet || '')) &&
     supportsFireSequence(project);
+  const usesFiringArt = !!usesHold && !!project.hold?.flashFile;
 
   const lines: string[] = [
     `id = ${luaQuote(project.id)}`,
@@ -2949,7 +2974,7 @@ export function generateModToml(project: WeaponProject): string {
   if (usesHold) dependencies.push('wf.sdk');
   if (usesWfws) dependencies.push('wfws.sdk');
   if (usesRibbonTrail || usesExplosionEffect) dependencies.push('effects.sdk');
-  if (usesFireSequence) dependencies.push('px.fire_seq');
+  if (usesFireSequence || usesFiringArt) dependencies.push('px.fire_seq');
   // Extra library bundles the author asked for (they may be used from the
   // custom Lua snippet, or by a component this editor does not model).
   for (const dependency of project.extraDependencies || []) {

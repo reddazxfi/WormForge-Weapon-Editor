@@ -76,6 +76,9 @@ local ANIM_TYPE = {
   medium = 1,
   fast = 1,
   none = 5,
+  -- Roaming animals: points along the velocity but clamped to a tilt range,
+  -- and rests at a fixed angle when the animal has no speed.
+  roam = 4,
 }
 local ANIM_SPEED = { slow = 0.5, medium = 0.8, fast = 1.35 }
 
@@ -106,6 +109,27 @@ end
 
 function M.spin_turn(prev_rot, vx, anim_speed)
   return (prev_rot or 0) + (anim_speed or 0.5) * 0.5 * sign(vx)
+end
+
+-- `anim = "roam"`: a walking animal's pose.
+--
+-- WA walks a roaming animal with no velocity of its own, so `track` leaves the
+-- art pointing at the last heading and a moving animal looks dead on the
+-- ground. This points the art along the velocity while it moves, clamped to
+-- `up` above and `down` below `rest`, and returns `rest` when the animal has no
+-- speed. Angles are radians; the caller keeps the three limits.
+function M.roam_angle(vx, vy, rest, up, down, speed)
+  if (speed or 0) < 0.05 then return rest end
+  local want = M.track_angle(vx, vy)
+  -- Shortest signed difference, so a heading across the wrap point still clamps
+  -- on the near side.
+  local delta = (want - rest + math.pi) % (2 * math.pi) - math.pi
+  if delta > up then
+    delta = up
+  elseif delta < -down then
+    delta = -down
+  end
+  return rest + delta
 end
 
 -- ---------------------------------------------------------------------------
@@ -260,6 +284,12 @@ function M.flight(ctx, opts)
 
   local size = opts.size or 1.0
   local angle = opts.angle or 0.0
+  -- `anim = "roam"` limits: a resting angle and how far the art may tilt either
+  -- way from it, in degrees. One preset for every role, like `size`/`angle`.
+  local tilt = opts.tilt or {}
+  local rest = math.rad(tilt.rest or 0.0)
+  local up = math.rad(math.abs(tilt.up or 25.0))
+  local down = math.rad(math.abs(tilt.down or 25.0))
 
   local main = resolve(opts, size)
 
@@ -542,6 +572,8 @@ function M.flight(ctx, opts)
     elseif active_anim_type == 1 then
       rot = M.spin_turn(spin_ang[id], eff_vx, (ANIM_SPEED[active_anim] or 0.5) * (active_spin or 1.0))
       spin_ang[id] = rot
+    elseif active_anim_type == 4 then
+      rot = M.roam_angle(m.vx, m.vy, rest, up, down, math.sqrt((m.vx or 0) ^ 2 + (m.vy or 0) ^ 2))
     end
 
     if cfg.frame_fn then

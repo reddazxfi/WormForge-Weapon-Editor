@@ -65,7 +65,12 @@ for (const file of readdirSync(FOLDER)) {
     problems.push(`${file}: ${decoded.error}`);
     continue;
   }
-  if (!known.has(slot)) problems.push(`${file}: "${slot}" is not a stock slot id`);
+  if (!known.has(slot)) {
+    // `none.wep` is the scheme's "no weapon" slot, not a stock slot a claim can
+    // copy from: skip it so the table only names slots the UI offers.
+    problems.push(`${file}: "${slot}" is not a stock slot id`);
+    continue;
+  }
   const record: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(decoded.projectState)) {
     if (transient.has(key) || value === undefined) continue;

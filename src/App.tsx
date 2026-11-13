@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { WeaponProject } from './types/weapon';
 import { Sidebar, MobileBar } from './components/Sidebar';
 import { WeaponSettings } from './components/WeaponSettings';
+import { TooltipTap } from './components/TooltipTap';
 import { RecordEditor } from './components/RecordEditor';
 import { HoldPreview } from './components/HoldPreview';
 import { EffectsWorkspace } from './components/EffectsWorkspace';
@@ -393,8 +394,18 @@ export default function App() {
 
           {activeTab === 'editor' && (
             <div className="space-y-6">
-              <WeaponSettings project={project} onChange={updateProject} />
-              <RecordEditor project={project} onChange={updateProject} activeSubTab={activeSubTab} />
+              {/* Weapon identity and panel placement are their own section now:
+                  they used to sit above every record page, which pushed the
+                  section you were editing off the first screen. */}
+              {activeSubTab === 'weapon' ? (
+                <WeaponSettings project={project} onChange={updateProject} />
+              ) : (
+                <RecordEditor
+                  project={project}
+                  onChange={updateProject}
+                  activeSubTab={activeSubTab}
+                />
+              )}
             </div>
           )}
 
@@ -441,6 +452,8 @@ export default function App() {
         onClose={() => setIsWepModalOpen(false)}
         onApply={handleApplyWepImport}
       />
+
+      <TooltipTap />
 
       {toastMessage && (
         <div

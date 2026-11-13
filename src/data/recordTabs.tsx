@@ -10,11 +10,13 @@ import {
   Crosshair,
   Plane,
   Wrench,
+  Settings2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { FireType } from '../types/weapon';
 
 export type RecordTabId =
+  | 'weapon'
   | 'missile'
   | 'action'
   | 'burst'
@@ -44,6 +46,12 @@ export interface RecordTabDef {
 
 /** The record editor's sections, shared by the sidebar and the mobile nav. */
 export const RECORD_TABS: RecordTabDef[] = [
+  {
+    id: 'weapon',
+    label: 'Weapon & Panel',
+    hint: 'Name, id, donor, slot, icon, defaults',
+    icon: Settings2,
+  },
   { id: 'missile', label: 'Flight & Physics', hint: 'Gravity, wind, fuse, damage', icon: Bomb },
   { id: 'action', label: 'Missile Action', hint: 'Bounce, homing, roam, dig', icon: Zap },
   {

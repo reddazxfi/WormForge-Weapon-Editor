@@ -57,7 +57,7 @@ const files: ModFile[] = walk(BUNDLE).map((full) => {
 const bundles = readBundles(files);
 const weapons = readWeapons(bundles, files);
 check('test pack has one bundle', bundles.length === 1, String(bundles.length));
-check('test pack has 33 weapons', weapons.length === 33, String(weapons.length));
+check('test pack has 34 weapons', weapons.length === 34, String(weapons.length));
 
 const byName = new Map(weapons.map((weapon) => [weapon.name, weapon]));
 const projects = new Map<string, WeaponProject>();
@@ -162,6 +162,12 @@ for (const weapon of weapons) {
   check('WF 26: dig is builder-owned', dig.behaviorArt.dig?.mode !== 'native');
   near('WF 26: dig spins', dig.behaviorArt.dig?.anim, 'rotation');
   near('WF 26: dig spin rate', dig.behaviorArt.dig?.spinRate, 2);
+
+  const tilt = project('WF 34 Roam Tilt')!;
+  near('WF 34: anim', tilt.missileSprite.anim, 'roam');
+  near('WF 34: tilt up', tilt.missileSprite.roamTilt?.up, 35);
+  near('WF 34: tilt down', tilt.missileSprite.roamTilt?.down, 25);
+  near('WF 34: tilt rest', tilt.missileSprite.roamTilt?.rest, 10);
 
   const roam = project('WF 28 Roam Builder')!;
   near('WF 28: action', roam.action, 'roam');
@@ -428,12 +434,13 @@ return {
 // ---- firing-state sprite (WF 32) ---------------------------------------
 {
   const p = project('WF 32 Hold Flash')!;
-  near('WF 32: flash frames', p.hold.flashFrames, 3);
-  near('WF 32: flash out', p.hold.flashOut, 14);
-  near('WF 32: flash side', p.hold.flashSide, 2);
-  near('WF 32: flash scale', p.hold.flashScale, 1.5);
+  // The firing sheet is a second hold entry handed to `px_hold_art`, so it
+  // inherits the gun's placement: only the file and its cell survive a round
+  // trip, exactly like PX's FAMAS.
+  check('WF 32: firing sheet attached', !!p.hold.flashFile, 'no file attached');
+  near('WF 32: firing sheet width', p.hold.flashWidth, 32);
   near('WF 32: keep while firing', p.hold.keepWhileFiring, true);
-  check('WF 32: flash sheet attached', !!p.hold.flashFile, 'no file attached');
+  check('WF 32: old overlay geometry gone', p.hold.flashOut === undefined, 'flashOut set');
 }
 
 // ---- fire subtype is settable, and not forced to the Minigun's -----------
