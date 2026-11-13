@@ -8,42 +8,46 @@ import {
   RoamSheetAsset,
 } from '../types/weapon';
 import {
-  sanitizeModFolder,
   bitFlightSheetPath,
   behaviorStateSheetPath,
+  digArtOverrideRows,
   roamSheetPath,
+  missileFlightSheetPath,
+  resolvedHoldFlash,
 } from '../utils/luaGenerator';
 import { StockSpriteInput } from './StockSpriteInput';
 import { stockSpriteName } from '../data/stockSprites';
 import { assetUrl } from '../utils/assetUrl';
 import { defaultArtFor } from '../utils/defaultArt';
 import { buildRotationSheet } from '../utils/rotateSheet';
-import { FlightRoleEditor } from './FlightRoleEditor';
 import {
+  DEFAULT_DIG_ROLE_ART,
   DEFAULT_ROLE_ART,
-  availableBehaviorArt,
+  bitActionOf,
   bitBuilderMode,
   primaryBuilderOn,
-  resolveBehaviorStates,
 } from '../data/spriteBuilder';
 import mapBackgroundSrc from '../../spec/pre_weapon_preview.png';
+import normalIconSrc from '../../spec/normal.png';
+import homingIconSrc from '../../spec/hmissil1.png';
+import clustersIconSrc from '../../spec/clusters.png';
+import homingClustletsIconSrc from '../../spec/homing_clustlets.png';
+import roamIconSrc from '../../spec/sspsheep1.png';
+import digIconSrc from '../../spec/dig.png';
+import oildrumSrc from '../../spec/oildrum1.png';
 import {
   Upload,
   Play,
   Pause,
-  RefreshCw,
-  ZoomIn,
-  Eye,
-  Sparkles,
-  Sliders,
   ArrowLeftRight,
   Compass,
   Rocket,
-  Image as ImageIcon,
   CheckCircle2,
   Loader2,
-  Package,
   RotateCw,
+  Copy,
+  Check,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface HoldPreviewProps {
@@ -302,9 +306,27 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
   // Put-away animation simulation (worm_hold.rs put_pose)
   const [putAwayCounter, setPutAwayCounter] = useState<number | null>(null);
 
+  // Firing-state sprite (`hold.flash`): the engine lights it for `frames` + 1
+  // ticks after the fire message. The preview "Test" button does the same at
+  // 20 ms a tick.
+  const flashFileInputRef = useRef<HTMLInputElement>(null);
+  const flashImgRef = useRef<HTMLImageElement | null>(null);
+  const [flashLoadedImg, setFlashLoadedImg] = useState<HTMLImageElement | null>(null);
+  const [flashLeft, setFlashLeft] = useState(0);
+
   const triggerPutAwayDemo = () => {
     setPutAwayCounter(20);
   };
+
+  const triggerFireDemo = () => {
+    setFlashLeft(Math.max(1, Math.round(project.hold.flashFrames ?? 3)) + 1);
+  };
+
+  useEffect(() => {
+    if (flashLeft <= 0) return;
+    const timer = setTimeout(() => setFlashLeft((left) => Math.max(0, left - 1)), 20);
+    return () => clearTimeout(timer);
+  }, [flashLeft]);
 
   useEffect(() => {
     if (putAwayCounter === null) return;
@@ -394,18 +416,41 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     key: BehaviorArtKey,
     patch: Partial<FlightRoleArt>
   ) => {
+    const base = key === 'dig' ? DEFAULT_DIG_ROLE_ART : DEFAULT_ROLE_ART;
     onChange({
       behaviorArt: {
         ...behaviorArt,
-        [key]: { ...(behaviorArt[key] ?? DEFAULT_ROLE_ART), ...patch },
+        [key]: { ...(behaviorArt[key] ?? base), ...patch },
       },
     });
   };
   const builderOn = primaryBuilderOn(project);
-  const behaviorDefs = availableBehaviorArt(project);
-  const behaviorSigs = new Map(
-    resolveBehaviorStates(project).map((state) => [state.def.key, state.sig])
-  );
+  const isAirStrike = project.fireType === 'cursor' && !project.teleport;
+  const hasPrimaryHoming = project.action === 'homing';
+  const hasBitHoming = project.burst === 'clusters' && bitActionOf(project) === 'homing';
+  const clustersEnabled = project.burst === 'clusters';
+  const roamEnabled = project.action === 'roam';
+  const digMainEnabled = project.action === 'dig';
+  const digBitEnabled = project.burst === 'clusters' && bitActionOf(project) === 'dig';
+  const digEnabled = digMainEnabled || digBitEnabled;
+
+  type FlightSlotRole = 'primary' | 'homing' | 'clusters' | 'homing_bit' | 'roam' | 'dig';
+  const [activeFlightRole, setActiveFlightRole] = useState<FlightSlotRole>('primary');
+  const [copiedSbLua, setCopiedSbLua] = useState(false);
+
+  // Auto-fallback to primary if the weapon configuration disables the active slot
+  useEffect(() => {
+    if (activeFlightRole === 'homing' && !hasPrimaryHoming) setActiveFlightRole('primary');
+    else if (activeFlightRole === 'clusters' && !clustersEnabled) setActiveFlightRole('primary');
+    else if (activeFlightRole === 'homing_bit' && !hasBitHoming) setActiveFlightRole('primary');
+    else if (activeFlightRole === 'roam' && !roamEnabled) setActiveFlightRole('primary');
+    else if (activeFlightRole === 'dig' && !digEnabled) setActiveFlightRole('primary');
+  }, [activeFlightRole, hasPrimaryHoming, clustersEnabled, hasBitHoming, roamEnabled, digEnabled]);
+
+  const homingRole = behaviorArt.homing ?? defaultBehaviorRole;
+  const homingBitRole = behaviorArt.homing_bit ?? defaultBehaviorRole;
+  const digRole = behaviorArt.dig ?? DEFAULT_DIG_ROLE_ART;
+  const digRoleMode = digRole.mode;
 
   // Missile interactive simulation state
   const [isMissilePlaying, setIsMissilePlaying] = useState(true);
@@ -414,6 +459,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
   const [flightSpeed, setFlightSpeed] = useState<number>(14); // velocity magnitude
   const [flightMode, setFlightMode] = useState<'orbit' | 'arc' | 'static'>('arc');
   const [backdropTheme, setBackdropTheme] = useState<'grid' | 'sky' | 'cavern'>('grid');
+  const [showDrumRef, setShowDrumRef] = useState(true);
+  const [oildrumLoadedImg, setOildrumLoadedImg] = useState<HTMLImageElement | null>(null);
 
   // Internal animation state refs (continuous physics & phase)
   const animStateRef = useRef<{
@@ -421,14 +468,31 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     rotation: number;
     arcT: number;
     frame: number;
+    drumTime: number;
   }>({
     phase: 0,
     rotation: 0,
     arcT: 0,
     frame: 0,
+    drumTime: 0,
   });
 
   const [activeFrameDisplay, setActiveFrameDisplay] = useState(0);
+  const roleImgRef = useRef<HTMLImageElement | null>(null);
+  const [roleLoadedImg, setRoleLoadedImg] = useState<HTMLImageElement | null>(null);
+  const roleFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (!cancelled) setOildrumLoadedImg(img);
+    };
+    img.src = oildrumSrc;
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ---------------------------------------------------------------------------
   // PRELOAD WORM ASSETS
@@ -485,6 +549,21 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     }
   }, [hold.sheetPreview]);
 
+  // Preload the firing-state sprite, so the muzzle flash can be drawn at once.
+  useEffect(() => {
+    if (hold.flashPreview) {
+      const img = new Image();
+      img.onload = () => {
+        flashImgRef.current = img;
+        setFlashLoadedImg(img);
+      };
+      img.src = hold.flashPreview;
+    } else {
+      flashImgRef.current = null;
+      setFlashLoadedImg(null);
+    }
+  }, [hold.flashPreview]);
+
   // Preload missile sprite image
   useEffect(() => {
     if (missile.sheetPreview) {
@@ -497,6 +576,59 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       missileImgRef.current = null;
     }
   }, [missile.sheetPreview]);
+
+  // Preload the active secondary role's preview sheet when switching hotbar slots
+  const secondarySheetPreview =
+    activeFlightRole === 'clusters'
+      ? bitFlight.mode === 'builder'
+        ? bitFlight.sheetPreview
+        : bitFlight.mode === 'inherit'
+          ? missile.sheetPreview
+          : undefined
+      : activeFlightRole === 'homing'
+        ? homingRole.mode === 'builder'
+          ? homingRole.sheetPreview
+          : homingRole.mode === 'inherit'
+            ? missile.sheetPreview
+            : undefined
+        : activeFlightRole === 'homing_bit'
+          ? homingBitRole.mode === 'builder'
+            ? homingBitRole.sheetPreview
+            : homingBitRole.mode === 'inherit'
+              ? bitFlight.mode === 'builder'
+                ? bitFlight.sheetPreview
+                : missile.sheetPreview
+              : undefined
+          : activeFlightRole === 'roam'
+            ? builderOn
+              ? missile.sheetPreview
+              : project.roamSheets?.flight1?.preview
+            : activeFlightRole === 'dig'
+              ? digRoleMode !== 'native'
+                ? digBitEnabled && !digMainEnabled && bitFlight.mode === 'builder'
+                  ? bitFlight.sheetPreview
+                  : missile.sheetPreview
+                : undefined
+              : missile.sheetPreview;
+
+  useEffect(() => {
+    if (secondarySheetPreview) {
+      let cancelled = false;
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) return;
+        roleImgRef.current = img;
+        setRoleLoadedImg(img);
+      };
+      img.src = secondarySheetPreview;
+      return () => {
+        cancelled = true;
+      };
+    } else {
+      roleImgRef.current = null;
+      setRoleLoadedImg(null);
+    }
+  }, [secondarySheetPreview]);
 
   // The supplied stock-style defaults stand in until a PNG is uploaded. They
   // are the same files the exporter writes, so the preview is honest.
@@ -707,6 +839,46 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       }
     }
 
+    // 3b. Firing-state sprite (`hold.flash`). Follows the normal weapon's
+    // `weapRadius`, `weapRotation`, `scale` (`weap_scale`), and `putAwayShrink`
+    // so the muzzle flash moves, scales, and rotates around the worm alongside
+    // the held weapon.
+    const flashImg = flashLoadedImg || flashImgRef.current;
+    if (flashLeft > 0 && flashImg && flashImg.complete && flashImg.naturalWidth > 0) {
+      const resolved = resolvedHoldFlash({
+        ...hold,
+        scale: (Number(hold.scale) || 1) * putAwayShrink,
+      });
+      const fx = cx + Math.sin(rot) * resolved.out - Math.cos(rot) * resolved.side;
+      const fy = cy - Math.cos(rot) * resolved.out - Math.sin(rot) * resolved.side;
+      // `enqueue_hold` always asks for frame 1 and clamps it: a square sheet
+      // shows its only cell, a vertical strip its second cell.
+      const cells =
+        flashImg.naturalHeight > flashImg.naturalWidth
+          ? Math.max(1, Math.round(flashImg.naturalHeight / flashImg.naturalWidth))
+          : 1;
+      const cellH = flashImg.naturalHeight / cells;
+      const cellY = Math.min(1, cells - 1) * cellH;
+      const flashScale = resolved.scale;
+      offCtx.save();
+      offCtx.imageSmoothingEnabled = false;
+      offCtx.translate(fx, fy);
+      offCtx.rotate(rot - Math.PI / 2);
+      offCtx.scale(flashScale, flashScale);
+      offCtx.drawImage(
+        flashImg,
+        0,
+        cellY,
+        flashImg.naturalWidth,
+        cellH,
+        -flashImg.naturalWidth / 2,
+        -cellH / 2,
+        flashImg.naturalWidth,
+        cellH
+      );
+      offCtx.restore();
+    }
+
     // Compose the same 300x300 scene the retired physics preview used, then
     // draw it at 2x: the simulator's default `Scale: 2x`.  The worm cell and
     // the hold art are drawn together at native size before that one scene
@@ -747,7 +919,47 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       ctx.drawImage(offscreen, 0, 0, SIZE, SIZE, cellX, cellY, SIZE, SIZE);
     }
     ctx.restore();
-  }, [hold, aimAngleIndex, currentFrame, facingRight, assetsLoaded, weaponLoadedImg, defaultHoldLoaded, putAwayCounter]);
+  }, [hold, aimAngleIndex, currentFrame, facingRight, assetsLoaded, weaponLoadedImg, defaultHoldLoaded, putAwayCounter, flashLoadedImg, flashLeft]);
+
+  // Derive active preview role settings for the 50 Hz simulation canvas
+  const activeRolePreviewCfg = (() => {
+    if (activeFlightRole === 'clusters') {
+      if (bitFlight.mode === 'builder') return bitFlight;
+      if (bitFlight.mode === 'inherit') return missile;
+      return { ...bitFlight, anim: 'rotation' as MissileAnimType, frames: 1 };
+    }
+    if (activeFlightRole === 'homing') {
+      if (homingRole.mode === 'builder') return homingRole;
+      if (homingRole.mode === 'inherit') return missile;
+      return { ...homingRole, anim: 'track' as MissileAnimType, frames: 1 };
+    }
+    if (activeFlightRole === 'homing_bit') {
+      if (homingBitRole.mode === 'builder') return homingBitRole;
+      if (homingBitRole.mode === 'inherit') {
+        return bitFlight.mode === 'builder' ? bitFlight : missile;
+      }
+      return { ...homingBitRole, anim: 'track' as MissileAnimType, frames: 1 };
+    }
+    if (activeFlightRole === 'roam' && !builderOn && project.roamSheets?.flight1?.preview) {
+      return {
+        ...missile,
+        anim: 'none' as MissileAnimType,
+        frames: project.roamSheets.flight1.frames || 1,
+      };
+    }
+    if (activeFlightRole === 'dig') {
+      if (digRoleMode === 'native') {
+        return { ...DEFAULT_ROLE_ART, anim: 'track' as MissileAnimType, frames: 1 };
+      }
+      const ownerCfg =
+        digBitEnabled && !digMainEnabled && bitFlight.mode === 'builder' ? bitFlight : missile;
+      return {
+        ...digRole,
+        frames: digRole.frames > 1 ? digRole.frames : ownerCfg.frames || 1,
+      };
+    }
+    return missile;
+  })();
 
   // ---------------------------------------------------------------------------
   // 3. MISSILE FLIGHT SPRITE RENDER & ANIMATION LOOP (px_sprite_builder.lua exact)
@@ -781,10 +993,10 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     let lastFrameDisplay = -1;
 
     const stepMissile = () => {
-      const anim = missile.anim || 'rotation';
-      const numFrames = Math.max(1, missile.frames || 1);
-      const userAnimSpeed = missile.animSpeed || 1.0;
-      const spinMult = missile.spinRate || 1.0;
+      const anim = activeRolePreviewCfg.anim || 'rotation';
+      const numFrames = Math.max(1, activeRolePreviewCfg.frames || 1);
+      const userAnimSpeed = activeRolePreviewCfg.animSpeed || 1.0;
+      const spinMult = activeRolePreviewCfg.spinRate || 1.0;
 
       const rad = (flightAngleDeg * Math.PI) / 180;
       const baseVx = Math.cos(rad) * flightSpeed;
@@ -818,15 +1030,17 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
         vy = baseVy;
       }
 
-      // Rotation, verbatim from px_sprite_builder.lua.  Its sheets point up
+      // Rotation, verbatim from wfws_sprite_builder.lua.  Its sheets point up
       // natively, so `track_angle` is the velocity angle plus 90 degrees.
       const signVx = vx > 0 ? 1 : vx < 0 ? -1 : 0;
+      const effSignVx = signVx || (activeFlightRole === 'dig' ? 1 : 0);
+      const effVx = activeFlightRole === 'dig' && vx === 0 && vy !== 0 ? 0.001 : vx;
       if (anim === 'track') {
         rot = Math.atan2(vy, vx) + Math.PI / 2;
       } else if (anim === 'rotation') {
-        rot += spinMult * 0.5 * (vx * 0.15 + Math.abs(vy) * 0.01 * signVx);
+        rot += spinMult * 0.5 * (effVx * 0.15 + Math.abs(vy) * 0.01 * effSignVx);
       } else if (anim === 'slow' || anim === 'medium' || anim === 'fast') {
-        rot += (ANIM_SPEED_TABLE[anim] || 0.5) * 0.5 * signVx;
+        rot += (ANIM_SPEED_TABLE[anim] || 0.5) * spinMult * 0.5 * effSignVx;
       } else {
         rot = 0;
       }
@@ -844,6 +1058,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       animStateRef.current.rotation = rot;
       animStateRef.current.phase = phase;
       animStateRef.current.frame = frame;
+      animStateRef.current.drumTime = (animStateRef.current.drumTime + STEP) % 1.0;
     };
 
     const renderMissile = (now: number) => {
@@ -882,10 +1097,10 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
         setActiveFrameDisplay(frame);
       }
 
-      const anim = missile.anim || 'rotation';
-      const numFrames = Math.max(1, missile.frames || 1);
-      const scaleMult = (missile.scale || 1.0) * (missile.size ?? 1);
-      const mirror = missile.mirror !== false;
+      const anim = activeRolePreviewCfg.anim || 'rotation';
+      const numFrames = Math.max(1, activeRolePreviewCfg.frames || 1);
+      const scaleMult = (activeRolePreviewCfg.scale || 1.0) * (missile.size ?? 1);
+      const mirror = activeRolePreviewCfg.mirror !== false;
       // `angle` is added to the drawn rotation, negated on a mirrored sheet, as
       // the builder does it.
       const angleOffset = (((missile.angle ?? 0) * Math.PI) / 180) * (mirror && vx < 0 ? -1 : 1);
@@ -935,12 +1150,48 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       // Draw simulated velocity vector arrow when in static mode
       if (flightMode === 'static') {
         ctx.save();
-        ctx.strokeStyle = '#10b981';
+        ctx.strokeStyle = '#f59e0b';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(posX, posY);
         ctx.lineTo(posX + vx * 2.5, posY + vy * 2.5);
         ctx.stroke();
+        ctx.restore();
+      }
+
+      // Animated oil drum scale reference (`spec/oildrum1.png`, 20 frames @ 20 fps,
+      // 90x90 cells with visible body at x=33..56, y=24..59) drawn at 1:1 WA scale
+      // (`zoom / 4`) in the bottom-right corner so projectile size/scale is clear.
+      if (
+        showDrumRef &&
+        oildrumLoadedImg &&
+        oildrumLoadedImg.complete &&
+        oildrumLoadedImg.naturalWidth > 0
+      ) {
+        const drumFrames = 20;
+        const cellW = oildrumLoadedImg.naturalWidth;
+        const cellH = oildrumLoadedImg.naturalHeight / drumFrames;
+        const drumFrame = Math.floor(animStateRef.current.drumTime * 20) % drumFrames;
+        const drumScale = missileZoom / 4;
+        const dx = Math.round(width - 10 - 57 * drumScale);
+        const dy = Math.round(height - 16 - 60 * drumScale);
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(
+          oildrumLoadedImg,
+          0,
+          drumFrame * cellH,
+          cellW,
+          cellH,
+          dx,
+          dy,
+          cellW * drumScale,
+          cellH * drumScale
+        );
+        ctx.fillStyle = 'rgba(226, 232, 240, 0.55)';
+        ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText('oildrum 1×', width - 8, height - 5);
         ctx.restore();
       }
 
@@ -955,15 +1206,19 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       const zoom = missileZoom;
       ctx.scale(facing * scaleMult * (zoom / 4), scaleMult * (zoom / 4));
 
-      const missileImg = missileImgRef.current;
-      if (missileImg && missileImg.complete && missileImg.naturalWidth > 0) {
+      const activeImg =
+        activeFlightRole === 'primary'
+          ? missileImgRef.current
+          : roleLoadedImg || roleImgRef.current;
+
+      if (activeImg && activeImg.complete && activeImg.naturalWidth > 0) {
         // PX sheets are vertical strips of frames.
-        const frameHeight = missileImg.naturalHeight / numFrames;
-        const frameWidth = missileImg.naturalWidth;
+        const frameHeight = activeImg.naturalHeight / numFrames;
+        const frameWidth = activeImg.naturalWidth;
         const sy = frame * frameHeight;
 
         ctx.drawImage(
-          missileImg,
+          activeImg,
           0,
           sy,
           frameWidth,
@@ -973,15 +1228,28 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
           frameWidth,
           frameHeight
         );
-      } else if (defaultMissileLoaded && defaultMissileLoaded.complete && defaultMissileLoaded.naturalWidth > 0) {
+      } else if (
+        (activeFlightRole === 'primary' ||
+          (activeFlightRole === 'clusters' && bitFlight.mode === 'inherit') ||
+          (activeFlightRole === 'homing' && homingRole.mode === 'inherit') ||
+          (activeFlightRole === 'homing_bit' &&
+            homingBitRole.mode === 'inherit' &&
+            bitFlight.mode === 'inherit') ||
+          (activeFlightRole === 'dig' &&
+            digRoleMode !== 'native' &&
+            (!digBitEnabled || digMainEnabled || bitFlight.mode === 'inherit'))) &&
+        defaultMissileLoaded &&
+        defaultMissileLoaded.complete &&
+        defaultMissileLoaded.naturalWidth > 0
+      ) {
         ctx.drawImage(
           defaultMissileLoaded,
           -defaultMissileLoaded.naturalWidth / 2,
           -defaultMissileLoaded.naturalHeight / 2
         );
       } else {
-        // Fallback stylized procedural missile art for immediate visual feedback
-        renderProceduralMissile(ctx, anim, frame);
+        // Fallback stylized procedural missile art tailored per role
+        renderProceduralMissile(ctx, anim, frame, activeFlightRole);
       }
 
       ctx.restore();
@@ -993,6 +1261,18 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     return () => cancelAnimationFrame(animationFrameId);
   }, [
     missile,
+    bitFlight,
+    homingRole,
+    homingBitRole,
+    digRole,
+    digRoleMode,
+    digMainEnabled,
+    digBitEnabled,
+    activeFlightRole,
+    builderOn,
+    project.roamSheets?.flight1?.frames,
+    project.roamSheets?.flight1?.preview,
+    roleLoadedImg,
     isMissilePlaying,
     missileZoom,
     flightAngleDeg,
@@ -1000,18 +1280,121 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     flightMode,
     backdropTheme,
     defaultMissileLoaded,
+    showDrumRef,
+    oildrumLoadedImg,
   ]);
 
-  // Fallback high-contrast pixelated missile graphic
+  // Fallback high-contrast pixelated missile graphic per role
   const renderProceduralMissile = (
     ctx: CanvasRenderingContext2D,
     animType: MissileAnimType,
-    frame: number
+    frame: number,
+    role: FlightSlotRole
   ) => {
+    if (role === 'homing') {
+      ctx.fillStyle = '#2563eb';
+      ctx.beginPath();
+      ctx.moveTo(0, -15);
+      ctx.lineTo(6, 6);
+      ctx.lineTo(0, 3);
+      ctx.lineTo(-6, 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#1d4ed8';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = frame % 2 === 0 ? '#60a5fa' : '#93c5fd';
+      ctx.beginPath();
+      ctx.arc(0, 8, 3, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
+    if (role === 'homing_bit') {
+      ctx.fillStyle = '#4f46e5';
+      ctx.beginPath();
+      ctx.moveTo(0, -11);
+      ctx.lineTo(4.5, 4);
+      ctx.lineTo(0, 2);
+      ctx.lineTo(-4.5, 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#312e81';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = frame % 2 === 0 ? '#a5b4fc' : '#38bdf8';
+      ctx.beginPath();
+      ctx.arc(0, 6, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
+    if (role === 'clusters') {
+      ctx.fillStyle = '#9333ea';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 5.5, 7.5, Math.PI / 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#6b21a8';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#f43f5e';
+      ctx.beginPath();
+      ctx.arc(-1.5, -2, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
+    if (role === 'roam') {
+      ctx.fillStyle = '#dc2626';
+      ctx.beginPath();
+      ctx.moveTo(-3, -2);
+      ctx.lineTo(-11, 9);
+      ctx.lineTo(-1, 6);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#f5f5f4';
+      ctx.beginPath();
+      ctx.arc(0, 0, 6.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#27272a';
+      ctx.beginPath();
+      ctx.arc(5, -3, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
+    if (role === 'dig') {
+      ctx.fillStyle = '#ea580c';
+      ctx.beginPath();
+      ctx.moveTo(0, -15);
+      ctx.lineTo(6.5, 0);
+      ctx.lineTo(4.5, 10);
+      ctx.lineTo(-4.5, 10);
+      ctx.lineTo(-6.5, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#9a3412';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.strokeStyle = frame % 2 === 0 ? '#fde047' : '#fed7aa';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-4, -4);
+      ctx.lineTo(4, -7);
+      ctx.moveTo(-5, 2);
+      ctx.lineTo(5, -1);
+      ctx.stroke();
+      return;
+    }
+
     // PX sheets point up natively; the fallback art does too so the preview
     // shows the same rotation the engine will apply.
     if (animType === 'rotation') {
-      // Chilli Bomb / Grenade style
       ctx.fillStyle = '#dc2626';
       ctx.beginPath();
       ctx.ellipse(0, 0, 6, 11, Math.PI / 6, 0, Math.PI * 2);
@@ -1020,16 +1403,13 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
-      // Stem
-      ctx.fillStyle = '#16a34a';
+      ctx.fillStyle = '#eab308';
       ctx.fillRect(-2, -14, 4, 4);
 
-      // Highlight
       ctx.fillStyle = '#fca5a5';
       ctx.fillRect(-2, -6, 3, 6);
     } else if (animType === 'track') {
-      // Shadow Bolt / Bazooka Rocket style, nose up
-      ctx.fillStyle = '#6366f1';
+      ctx.fillStyle = '#dc2626';
       ctx.beginPath();
       ctx.moveTo(0, -14);
       ctx.lineTo(6, 6);
@@ -1037,17 +1417,15 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       ctx.lineTo(-6, 6);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = '#3730a3';
+      ctx.strokeStyle = '#991b1b';
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // Energy core pulse
-      ctx.fillStyle = frame % 2 === 0 ? '#38bdf8' : '#a855f7';
+      ctx.fillStyle = frame % 2 === 0 ? '#38bdf8' : '#f59e0b';
       ctx.beginPath();
       ctx.arc(0, 0, 3, 0, Math.PI * 2);
       ctx.fill();
     } else {
-      // Mini Girder or spinning projectile, long axis up
       ctx.fillStyle = '#f59e0b';
       ctx.fillRect(-4, -12, 8, 24);
       ctx.strokeStyle = '#b45309';
@@ -1105,6 +1483,45 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const handleUploadFlash = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const previewUrl = URL.createObjectURL(file);
+    let flashWidth: number | undefined;
+    let flashHeight: number | undefined;
+    try {
+      const px = await imagePixelSize(previewUrl);
+      flashWidth = px.width;
+      flashHeight = px.height;
+    } catch {
+      // The browser still draws it; the cell just falls back to square.
+    }
+    updateHold({
+      enabled: true,
+      flashFile: file,
+      flashPreview: previewUrl,
+      flashWidth,
+      flashHeight,
+      flashFrames: Math.max(1, Math.round(hold.flashFrames ?? 3)),
+      flashOut: hold.flashOut ?? 0,
+      flashSide: hold.flashSide ?? 0,
+      flashScale: hold.flashScale ?? 1,
+    });
+  };
+
+  const removeFlash = () => {
+    if (hold.flashPreview) URL.revokeObjectURL(hold.flashPreview);
+    setFlashLoadedImg(null);
+    setFlashLeft(0);
+    updateHold({
+      flashFile: undefined,
+      flashPreview: undefined,
+      flashWidth: undefined,
+      flashHeight: undefined,
+    });
+    if (flashFileInputRef.current) flashFileInputRef.current.value = '';
+  };
+
   const handleUploadMissileSheet = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1129,23 +1546,133 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     if (missileFileInputRef.current) missileFileInputRef.current.value = '';
   };
 
-  // Just the extra `sb.flight` keys the roles add, for the code preview.
-  const previewRoles = builderOn
-    ? [
-        project.burst === 'clusters' && bitFlight.mode === 'builder'
-          ? `  bits = { sheet = "sprites/${sanitizeModFolder(project.id)}/bit_flight.png", anim = "${bitFlight.anim}" },`
-          : project.burst === 'clusters' && bitFlight.mode === 'inherit'
-            ? '  bits = "inherit",'
-            : '',
-        behaviorDefs.some(
-          (def) => (behaviorArt[def.key]?.mode ?? 'native') !== 'inherit'
-        )
-          ? '  states = { ... }  -- behaviour art (see the roles above)'
-          : '',
-      ]
-        .filter(Boolean)
-        .join('\n')
-    : '';
+  const handleUploadRoleSheet = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const previewUrl = URL.createObjectURL(file);
+    if (activeFlightRole === 'clusters') {
+      if (bitFlight.sheetPreview) URL.revokeObjectURL(bitFlight.sheetPreview);
+      updateBitFlight({ sheetFile: file, sheetPreview: previewUrl, mode: 'builder' });
+    } else if (activeFlightRole === 'homing') {
+      if (homingRole.sheetPreview) URL.revokeObjectURL(homingRole.sheetPreview);
+      updateBehaviorArt('homing', { sheetFile: file, sheetPreview: previewUrl, mode: 'builder' });
+    } else if (activeFlightRole === 'homing_bit') {
+      if (homingBitRole.sheetPreview) URL.revokeObjectURL(homingBitRole.sheetPreview);
+      updateBehaviorArt('homing_bit', { sheetFile: file, sheetPreview: previewUrl, mode: 'builder' });
+    }
+  };
+
+  const removeCustomRoleSheet = () => {
+    if (activeFlightRole === 'clusters') {
+      if (bitFlight.sheetPreview) URL.revokeObjectURL(bitFlight.sheetPreview);
+      updateBitFlight({ sheetFile: undefined, sheetPreview: undefined, mode: 'native' });
+    } else if (activeFlightRole === 'homing') {
+      if (homingRole.sheetPreview) URL.revokeObjectURL(homingRole.sheetPreview);
+      updateBehaviorArt('homing', { sheetFile: undefined, sheetPreview: undefined, mode: 'native' });
+    } else if (activeFlightRole === 'homing_bit') {
+      if (homingBitRole.sheetPreview) URL.revokeObjectURL(homingBitRole.sheetPreview);
+      updateBehaviorArt('homing_bit', { sheetFile: undefined, sheetPreview: undefined, mode: 'native' });
+    }
+    if (roleFileInputRef.current) roleFileInputRef.current.value = '';
+  };
+
+  // Accurate `sb.flight` Lua preview matching `luaGenerator.ts`
+  const roleRowsForPreview = (r: FlightRoleArt, indent: string) => {
+    const out: string[] = [`${indent}anim = "${r.anim || 'rotation'}",`];
+    if ((r.frames || 1) > 1) out.push(`${indent}cyclical = ${r.frames},`);
+    if (r.animSpeed && r.animSpeed !== 1) out.push(`${indent}anim_speed = ${r.animSpeed},`);
+    if (r.spinRate && r.spinRate !== 1) out.push(`${indent}spin = ${r.spinRate},`);
+    if (r.scale && r.scale !== 1) out.push(`${indent}scale = ${r.scale},`);
+    if (r.mirror === false) out.push(`${indent}mirror = false,`);
+    if (r.z !== undefined && r.z !== 5) out.push(`${indent}z = ${r.z},`);
+    return out;
+  };
+
+  const homingBuilderOn =
+    builderOn && hasPrimaryHoming && (behaviorArt.homing?.mode ?? 'native') === 'builder';
+  const bitHomingBuilderOn =
+    builderOn &&
+    bitBuilderMode(project) === 'builder' &&
+    hasBitHoming &&
+    (behaviorArt.homing_bit?.mode ?? 'native') === 'builder';
+  const digActiveInBuilder =
+    builderOn &&
+    digRoleMode !== 'native' &&
+    (digMainEnabled || (digBitEnabled && bitBuilderMode(project) !== null));
+
+  const sbFlightLuaPreview = (() => {
+    if (isAirStrike) {
+      return `-- Air strikes use native strike munitions (no sb.flight path).\n-- Configure the body sprite in Pack Art / Record Editor.`;
+    }
+    const modLines: string[] = [
+      `-- inside install, after wa.weapons.replace{ ... }`,
+      `sb.flight(ctx, {`,
+      `  weapon = ctx.id,`,
+      `  sheet = "${missileFlightSheetPath(project)}",`,
+      `  anim = "${missile.anim || 'rotation'}",`,
+    ];
+    if ((missile.frames || 1) > 1) modLines.push(`  cyclical = ${missile.frames},`);
+    if (missile.animSpeed && missile.animSpeed !== 1) modLines.push(`  anim_speed = ${missile.animSpeed},`);
+    if (missile.spinRate && missile.spinRate !== 1) modLines.push(`  spin = ${missile.spinRate},`);
+    if (missile.scale && missile.scale !== 1) modLines.push(`  scale = ${missile.scale},`);
+    if (missile.mirror === false) modLines.push(`  mirror = false,`);
+    if (missile.z !== undefined && missile.z !== 5) modLines.push(`  z = ${missile.z},`);
+    if (missile.size !== undefined && missile.size !== 1) modLines.push(`  size = ${missile.size},`);
+    if (missile.angle) modLines.push(`  angle = ${missile.angle},`);
+
+    if (clustersEnabled && bitFlight.mode === 'builder') {
+      modLines.push(`  bits = {`);
+      modLines.push(`    sheet = "${bitFlightSheetPath(project)}",`);
+      modLines.push(...roleRowsForPreview(bitFlight, '    '));
+      if (bitHomingBuilderOn && behaviorArt.homing_bit) {
+        modLines.push(`    homing = {`);
+        modLines.push(`      sheet = "${behaviorStateSheetPath(project, 'homing_bit')}",`);
+        modLines.push(
+          `      arm = ${project.body.clustlet.homing_arm_ms ?? 0}, time = ${project.body.clustlet.homing_time_ms ?? 0},`,
+        );
+        modLines.push(...roleRowsForPreview(behaviorArt.homing_bit, '      '));
+        modLines.push(`    },`);
+      }
+      modLines.push(`  },`);
+    } else if (clustersEnabled && bitFlight.mode === 'inherit') {
+      modLines.push(`  bits = "inherit",`);
+    }
+
+    if (homingBuilderOn && behaviorArt.homing) {
+      modLines.push(`  homing = {`);
+      modLines.push(`    sheet = "${behaviorStateSheetPath(project, 'homing')}",`);
+      modLines.push(
+        `    arm = ${project.body.homing_arm_ms ?? 0}, time = ${project.body.homing_time_ms ?? 0},`,
+      );
+      modLines.push(...roleRowsForPreview(behaviorArt.homing, '    '));
+      modLines.push(`  },`);
+    }
+
+    if (digActiveInBuilder) {
+      const digRows = digArtOverrideRows(project.behaviorArt?.dig, '    ');
+      if (digRows.length > 0) {
+        modLines.push(`  dig = {`);
+        modLines.push(...digRows);
+        modLines.push(`  },`);
+      } else {
+        modLines.push(`  dig = true,`);
+      }
+    }
+    if (roamEnabled) modLines.push(`  roam = true,`);
+    if (project.missileSprite.logIdentity) modLines.push(`  log = true,`);
+    modLines.push(`})`);
+    return modLines.join('\n');
+  })();
+
+  const handleCopySbLua = async () => {
+    try {
+      await navigator.clipboard.writeText(sbFlightLuaPreview);
+      setCopiedSbLua(true);
+      setTimeout(() => setCopiedSbLua(false), 1800);
+    } catch {
+      // Fallback if clipboard API is unavailable
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -1313,7 +1840,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
               <input
                 id="hold-hand-radius"
                 type="range"
-                min={-10}
+                min={-35}
                 max={35}
                 step={1}
                 value={hold.handRadius}
@@ -1425,7 +1952,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                 <input
                   id="hold-weap-radius"
                   type="range"
-                  min={-10}
+                  min={-35}
                   max={35}
                   step={1}
                   value={hold.weapRadius}
@@ -1593,713 +2120,1509 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
             </div>
           </div>
         </div>
+
+        {/* Firing-state sprite: `hold.flash`. The engine draws it over the worm
+            on WA's firing states, at the gun's muzzle. */}
+        <div className="mt-4 p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wider">
+                Firing Sprite (`hold.flash`)
+              </span>
+              <p className="mt-0.5 max-w-2xl text-[11px] text-stone-500 dark:text-stone-400">
+                Optional still drawn over the worm while WA is in its firing states
+                (0x6A / 0x6B), at the gun&apos;s muzzle — a muzzle flash, or an extra
+                overlay on the firing frame. It only shows while{' '}
+                <span className="font-mono">keep_while_firing</span> holds the gun on those
+                frames.
+              </p>
+              {hold.flashFile && !hold.keepWhileFiring && (
+                <p className="mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                  Turn on “Keep While Firing” above, or WA hides the hold (and this sprite)
+                  on the firing frames.
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {hold.flashPreview && (
+                <button
+                  type="button"
+                  onClick={triggerFireDemo}
+                  disabled={flashLeft > 0}
+                  title="Light the flash in the preview for frames + 1 ticks (20 ms each)"
+                  className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/50"
+                >
+                  {flashLeft > 0 ? 'Firing…' : 'Test fire'}
+                </button>
+              )}
+              <input
+                ref={flashFileInputRef}
+                type="file"
+                accept="image/png,image/gif"
+                onChange={handleUploadFlash}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => flashFileInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-stone-800 shadow-2xs hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+              >
+                <Upload className="h-3.5 w-3.5 text-forge-600 dark:text-forge-400" />
+                {hold.flashFile ? 'Change PNG' : 'Upload PNG'}
+              </button>
+              {hold.flashPreview && (
+                <button
+                  type="button"
+                  onClick={removeFlash}
+                  className="text-xs font-medium text-rose-500 hover:text-rose-600"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
+
+          {hold.flashPreview && (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="space-y-1">
+                <label
+                  htmlFor="hold-flash-frames"
+                  className="block text-xs font-medium text-stone-600 dark:text-stone-400"
+                  title="Ticks the flash stays lit: the engine keeps it for frames + 1 game frames (20 ms each)."
+                >
+                  Lit frames
+                </label>
+                <input
+                  id="hold-flash-frames"
+                  type="number"
+                  min={1}
+                  max={40}
+                  value={hold.flashFrames ?? 3}
+                  onChange={(e) =>
+                    updateHold({ flashFrames: Math.max(1, Number(e.target.value)) })
+                  }
+                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-center font-mono text-xs text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-white"
+                />
+              </div>
+              <div className="space-y-1">
+                <label
+                  htmlFor="hold-flash-out"
+                  className="block text-xs font-medium text-stone-600 dark:text-stone-400"
+                  title="Pixels along the weapon's barrel from the weapon centre; automatically follows Weapon Radius, Rotation, and Scale Multiplier."
+                >
+                  Out (px)
+                </label>
+                <input
+                  id="hold-flash-out"
+                  type="number"
+                  min={-60}
+                  max={60}
+                  value={hold.flashOut ?? 0}
+                  onChange={(e) => updateHold({ flashOut: Number(e.target.value) })}
+                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-center font-mono text-xs text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-white"
+                />
+              </div>
+              <div className="space-y-1">
+                <label
+                  htmlFor="hold-flash-side"
+                  className="block text-xs font-medium text-stone-600 dark:text-stone-400"
+                  title="Pixels across the weapon from the weapon centre; scaled and rotated with the weapon."
+                >
+                  Side (px)
+                </label>
+                <input
+                  id="hold-flash-side"
+                  type="number"
+                  min={-60}
+                  max={60}
+                  value={hold.flashSide ?? 0}
+                  onChange={(e) => updateHold({ flashSide: Number(e.target.value) })}
+                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-center font-mono text-xs text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-white"
+                />
+              </div>
+              <div className="space-y-1">
+                <label
+                  htmlFor="hold-flash-scale"
+                  className="block text-xs font-medium text-stone-600 dark:text-stone-400"
+                  title="Draw scale relative to the weapon; multiplied by Scale Multiplier in both preview and exported Lua."
+                >
+                  Scale
+                </label>
+                <input
+                  id="hold-flash-scale"
+                  type="number"
+                  min={0.1}
+                  max={6}
+                  step={0.1}
+                  value={hold.flashScale ?? 1}
+                  onChange={(e) =>
+                    updateHold({ flashScale: Math.max(0.1, Number(e.target.value)) })
+                  }
+                  className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-center font-mono text-xs text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-white"
+                />
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ======================================================================= */}
-      {/* 2. MISSILE / PROJECTILE FLIGHT SPRITE BUILDER (px_sprite_builder.lua)   */}
+      {/* 2. MISSILE / PROJECTILE FLIGHT SPRITE BUILDER (wfws_sprite_builder.lua) */}
       {/* ======================================================================= */}
-      <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl p-5 shadow-xs transition-colors">
-        {/* Header */}
-        <div className="flex flex-wrap items-center justify-between pb-4 mb-5 border-b border-stone-100 dark:border-stone-800 gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="font-heading text-base font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-2">
-                <Rocket className="w-4 h-4 text-forge-600 dark:text-forge-400" />
-                <span>Missile & Projectile Flight Sprite Builder</span>
-              </h2>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-forge-50 dark:bg-forge-950/60 text-forge-600 dark:text-forge-400 font-semibold border border-forge-200 dark:border-forge-800/60">
-                wfws_sprite_builder.lua · sb.flight
-              </span>
-            </div>
-            <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
-              Follow flying projectiles with custom PNG sheets, animation types (<code className="font-mono text-forge-600 dark:text-forge-400">track</code>, <code className="font-mono text-forge-600 dark:text-forge-400">rotation</code>, <code className="font-mono text-forge-600 dark:text-forge-400">slow/med/fast</code>), cyclical frame playback, and <code className="font-mono text-stone-600 dark:text-stone-300">m.sprite = 0</code> native sprite hiding. Cluster bits can use their own sheet, and the builder swaps art on its own clock (timed homing) or by probing the land (dig). Roaming animals keep WA's walk and take off into this sheet when the player presses Space.
-            </p>
-            {project.action === 'roam' && (
-              <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-900/40 px-3 py-1.5">
-                Roaming animal: this sheet replaces the flown art. WA keeps
-                drawing the walk from the record `sprite`; the builder waits for
-                the turn player's Space press (lockstep, so every peer starts on
-                the same frame), then draws and animates its frames. The export
-                zeroes `sheep.flight_1` / `sheep.flight_2` so the native flown
-                sprites do not draw underneath.
-              </p>
-            )}
-          </div>
+      {(() => {
+        const hotbarSlots: {
+          id: FlightSlotRole;
+          slotNum: number;
+          label: string;
+          icon: string;
+          badge: string;
+          title: string;
+          desc: string;
+          enabled: boolean;
+          disabledHint: string;
+          activeClass: string;
+          bannerClass: string;
+          pillClass: string;
+        }[] = [
+          {
+            id: 'primary',
+            slotNum: 1,
+            label: 'Main',
+            icon: normalIconSrc,
+            badge: 'Primary Round (normal.png)',
+            title: 'Editing Role: Primary Missile',
+            desc: 'Initial flight round fired from the launcher. All secondary phases (homing, cluster bits, dig state) build on top of this.',
+            enabled: true,
+            disabledHint: '',
+            activeClass:
+              'border-amber-500 bg-amber-500/15 ring-2 ring-amber-500/70 shadow-sm',
+            bannerClass:
+              'border-amber-200 dark:border-amber-800/60 bg-amber-50/70 dark:bg-amber-950/25 text-amber-900 dark:text-amber-200',
+            pillClass:
+              'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800',
+          },
+          {
+            id: 'homing',
+            slotNum: 2,
+            label: 'Home',
+            icon: homingIconSrc,
+            badge: 'Primary Homing (hmissil1.png)',
+            title: 'Editing Role: Primary Homing Guidance',
+            desc: 'Timed guidance art swapped into the main round between homing arm delay and expiry, zeroing WA’s missile.homing.sprite.',
+            enabled: hasPrimaryHoming,
+            disabledHint: 'Requires Missile Action = Homing in Record Editor',
+            activeClass:
+              'border-sky-500 bg-sky-500/15 ring-2 ring-sky-500/70 shadow-sm',
+            bannerClass:
+              'border-sky-200 dark:border-sky-800/60 bg-sky-50/70 dark:bg-sky-950/25 text-sky-900 dark:text-sky-200',
+            pillClass:
+              'bg-sky-100 dark:bg-sky-950/60 text-sky-800 dark:text-sky-300 border-sky-300 dark:border-sky-800',
+          },
+          {
+            id: 'clusters',
+            slotNum: 3,
+            label: 'Bits',
+            icon: clustersIconSrc,
+            badge: 'Cluster Bits (clusters.png)',
+            title: 'Editing Role: Cluster Bits Payload',
+            desc: 'Child bomblets spawned when the primary round bursts. Can use their own sheet, inherit primary art, or stay native.',
+            enabled: clustersEnabled,
+            disabledHint: 'Requires Burst Payload = Clusters in Record Editor',
+            activeClass:
+              'border-purple-500 bg-purple-500/15 ring-2 ring-purple-500/70 shadow-sm',
+            bannerClass:
+              'border-purple-200 dark:border-purple-800/60 bg-purple-50/70 dark:bg-purple-950/25 text-purple-900 dark:text-purple-200',
+            pillClass:
+              'bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border-purple-300 dark:border-purple-800',
+          },
+          {
+            id: 'homing_bit',
+            slotNum: 4,
+            label: 'HomeBit',
+            icon: homingClustletsIconSrc,
+            badge: 'Homing Clustlets (homing_clustlets.png)',
+            title: 'Editing Role: Homing Cluster Bits',
+            desc: 'Timed guidance art for cluster bomblets after bit arming, emitted as bits.homing while Cluster Bits is in Builder mode.',
+            enabled: hasBitHoming,
+            disabledHint: 'Requires Burst = Clusters and Bit Action = Homing in Record Editor',
+            activeClass:
+              'border-indigo-500 bg-indigo-500/15 ring-2 ring-indigo-500/70 shadow-sm',
+            bannerClass:
+              'border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/70 dark:bg-indigo-950/25 text-indigo-900 dark:text-indigo-200',
+            pillClass:
+              'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800',
+          },
+          {
+            id: 'roam',
+            slotNum: 5,
+            label: 'Sheep',
+            icon: roamIconSrc,
+            badge: 'Roaming Action (sspsheep1.png)',
+            title: 'Editing Role: Super Sheep / Roaming Animal',
+            desc: 'Steerable flying animal. Builder mode waits for Space to fly (roam = true); when builder is off, dual rotation strips drive sheep_sprites.',
+            enabled: roamEnabled,
+            disabledHint: 'Requires Missile Action = Roam in Record Editor',
+            activeClass:
+              'border-forge-500 bg-forge-500/15 ring-2 ring-forge-500/70 shadow-sm',
+            bannerClass:
+              'border-forge-200 dark:border-forge-800/60 bg-forge-50/70 dark:bg-forge-950/25 text-forge-900 dark:text-forge-200',
+            pillClass:
+              'bg-forge-100 dark:bg-forge-950/60 text-forge-800 dark:text-forge-300 border-forge-300 dark:border-forge-800',
+          },
+          {
+            id: 'dig',
+            slotNum: 6,
+            label: 'Dig',
+            icon: digIconSrc,
+            badge: 'Digging Probe (dig.png)',
+            title: 'Editing Role: Digging Terrain Probes',
+            desc: 'Sheetless state: zeroes WA dig sprites and cycles the owning flight sheet while 4 terrain probes detect solid land (dig = true).',
+            enabled: digEnabled,
+            disabledHint: 'Requires Missile Action = Dig or Bit Action = Dig in Record Editor',
+            activeClass:
+              'border-orange-500 bg-orange-500/15 ring-2 ring-orange-500/70 shadow-sm',
+            bannerClass:
+              'border-orange-200 dark:border-orange-800/60 bg-orange-50/70 dark:bg-orange-950/25 text-orange-900 dark:text-orange-200',
+            pillClass:
+              'bg-orange-100 dark:bg-orange-950/60 text-orange-800 dark:text-orange-300 border-orange-300 dark:border-orange-800',
+          },
+        ];
 
-          <label className="flex items-center gap-2 cursor-pointer bg-stone-100 dark:bg-stone-800 px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700">
-            <input
-              type="checkbox"
-              checked={missile.enabled}
-              onChange={(e) =>
-                updateMissile({
-                  enabled: e.target.checked,
-                  // Choosing the builder is what "enabled" means: with no
-                  // upload the exporter falls back to the default missile art,
-                  // but the mode still has to be custom for the generator.
-                  ...(e.target.checked ? { mode: 'custom' } : {}),
-                })
-              }
-              className="rounded text-forge-600 focus:ring-forge-500"
-            />
-            <span className="text-xs font-semibold text-stone-900 dark:text-stone-100">
-              Enable Missile Flight Sprite
-            </span>
-          </label>
-        </div>
+        const activeSlotMeta =
+          hotbarSlots.find((s) => s.id === activeFlightRole) ?? hotbarSlots[0];
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left Column: Interactive Missile Flight Canvas */}
-          <div className="lg:col-span-5 flex flex-col items-center gap-3">
-            <div className="relative border-2 border-stone-800 rounded-xl overflow-hidden shadow-lg bg-stone-950 w-full max-w-[320px]">
-              <canvas
-                ref={missileCanvasRef}
-                width={300}
-                height={260}
-                className="block mx-auto cursor-pointer"
-                style={{ imageRendering: 'pixelated' }}
-                onClick={() => setIsMissilePlaying(!isMissilePlaying)}
-                title="Click canvas to toggle Play / Pause"
-              />
+        const isSecondaryRole =
+          activeFlightRole === 'clusters' ||
+          activeFlightRole === 'homing' ||
+          activeFlightRole === 'homing_bit';
+        const isDigRole = activeFlightRole === 'dig';
+        const secondaryRoleObj =
+          activeFlightRole === 'clusters'
+            ? bitFlight
+            : activeFlightRole === 'homing'
+              ? homingRole
+              : activeFlightRole === 'homing_bit'
+                ? homingBitRole
+                : null;
+        const updateSecondaryRole = (patch: Partial<FlightRoleArt>) => {
+          if (activeFlightRole === 'clusters') updateBitFlight(patch);
+          else if (activeFlightRole === 'homing') updateBehaviorArt('homing', patch);
+          else if (activeFlightRole === 'homing_bit') updateBehaviorArt('homing_bit', patch);
+        };
 
-              {/* Status Badges Overlay */}
-              <div className="absolute top-2 left-2 flex items-center gap-1.5 text-[10px] font-mono bg-black/75 backdrop-blur-xs text-stone-300 px-2 py-0.5 rounded border border-white/10">
-                <span className="uppercase text-forge-400 font-bold">{missile.anim || 'rotation'}</span>
-                <span>·</span>
-                <span>Frame {activeFrameDisplay + 1}/{Math.max(1, missile.frames || 1)}</span>
-              </div>
+        const activeSheetLocked =
+          (isDigRole && digRoleMode === 'native') ||
+          (isSecondaryRole && secondaryRoleObj?.mode !== 'builder');
 
-              <div className="absolute bottom-2 left-2 flex items-center gap-1.5 text-[10px] font-mono bg-black/75 backdrop-blur-xs text-stone-300 px-2 py-0.5 rounded border border-white/10">
-                <span>{isMissilePlaying ? 'Simulating Flight' : 'Paused'}</span>
-                <span>·</span>
-                <span className="text-stone-400 capitalize">{flightMode}</span>
-              </div>
+        const digOwningSheetIsBit =
+          digBitEnabled && !digMainEnabled && bitFlight.mode === 'builder';
+        const digOwningFrames = (digOwningSheetIsBit ? bitFlight.frames : missile.frames) || 1;
+        const activeAnim: MissileAnimType = isDigRole
+          ? digRole.anim || 'track'
+          : isSecondaryRole
+            ? secondaryRoleObj!.anim || 'rotation'
+            : missile.anim || 'rotation';
+        const activeFrames = isDigRole
+          ? digRole.frames > 1
+            ? digRole.frames
+            : digOwningFrames
+          : isSecondaryRole
+            ? secondaryRoleObj!.frames || 1
+            : missile.frames || 1;
+        const activeAnimSpeed = isDigRole
+          ? digRole.animSpeed || 1.0
+          : isSecondaryRole
+            ? secondaryRoleObj!.animSpeed || 1.0
+            : missile.animSpeed || 1.0;
+        const activeSpinRate = isDigRole
+          ? digRole.spinRate || 1.0
+          : isSecondaryRole
+            ? secondaryRoleObj!.spinRate || 1.0
+            : missile.spinRate || 1.0;
+        const activeScale = isDigRole
+          ? digRole.scale || 1.0
+          : isSecondaryRole
+            ? secondaryRoleObj!.scale || 1.0
+            : missile.scale || 1.0;
+        const activeMirror = isDigRole
+          ? digRole.mirror !== false
+          : isSecondaryRole
+            ? secondaryRoleObj!.mirror !== false
+            : missile.mirror !== false;
+        const activeZ = isDigRole
+          ? digRole.z ?? 5.0
+          : isSecondaryRole
+            ? secondaryRoleObj!.z ?? 5.0
+            : missile.z ?? 5.0;
 
-              {/* Backdrop Theme Picker */}
-              <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 backdrop-blur-xs p-0.5 rounded border border-white/10 text-[10px]">
-                {(['grid', 'sky', 'cavern'] as const).map((theme) => (
-                  <button
-                    key={theme}
-                    type="button"
-                    onClick={() => setBackdropTheme(theme)}
-                    className={`px-1.5 py-0.5 rounded capitalize ${
-                      backdropTheme === theme ? 'bg-forge-600 text-white font-bold' : 'text-stone-400 hover:text-white'
-                    }`}
+        const updateActiveRoleParams = (
+          patch: Partial<Pick<FlightRoleArt, 'anim' | 'frames' | 'animSpeed' | 'spinRate' | 'scale' | 'mirror' | 'z'>>
+        ) => {
+          if (isDigRole) {
+            updateBehaviorArt('dig', patch);
+            return;
+          }
+          if (isSecondaryRole) {
+            updateSecondaryRole(patch);
+          } else {
+            updateMissile(patch);
+          }
+        };
+
+        const animCodeMap: Record<MissileAnimType, string> = {
+          track: 'track = 2',
+          rotation: 'rotation = 3',
+          slow: 'slow = 1',
+          medium: 'medium = 1',
+          fast: 'fast = 1',
+          none: 'none = 5',
+        };
+
+        const assetLabel =
+          activeFlightRole === 'clusters'
+            ? 'Cluster Bit Sprite Sheet'
+            : activeFlightRole === 'homing'
+              ? 'Primary Homing Sheet'
+              : activeFlightRole === 'homing_bit'
+                ? 'Homing Bit Sheet'
+                : activeFlightRole === 'dig'
+                  ? 'Digging Animation'
+                  : 'Projectile Sprite Sheet';
+
+        const assetPathHint =
+          activeFlightRole === 'clusters'
+            ? bitFlightSheetPath(project)
+            : activeFlightRole === 'homing'
+              ? behaviorStateSheetPath(project, 'homing')
+              : activeFlightRole === 'homing_bit'
+                ? behaviorStateSheetPath(project, 'homing_bit')
+                : activeFlightRole === 'dig'
+                  ? digOwningSheetIsBit
+                    ? bitFlightSheetPath(project)
+                    : missileFlightSheetPath(project)
+                  : missileFlightSheetPath(project);
+
+        const activeSheetFile = isDigRole
+          ? undefined
+          : isSecondaryRole
+            ? secondaryRoleObj?.sheetFile
+            : missile.sheetFile;
+        const activeSheetPreview = isDigRole
+          ? undefined
+          : isSecondaryRole
+            ? secondaryRoleObj?.sheetPreview
+            : missile.sheetPreview;
+
+        return (
+          <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl p-5 shadow-xs transition-colors">
+            {/* Header + 6-Icon Hotbar */}
+            <div className="pb-4 mb-4 border-b border-stone-100 dark:border-stone-800 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-forge-600 text-white flex items-center justify-center shadow-2xs shrink-0">
+                    <Rocket className="w-4 h-4" />
+                  </div>
+                  <h2 className="font-heading text-base font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
+                    Missile & Projectile Flight Sprite Builder
+                  </h2>
+                  <span
+                    className={`text-[11px] font-mono px-2 py-0.5 rounded border font-semibold ${activeSlotMeta.pillClass}`}
                   >
-                    {theme}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Flight Mode & Playback Bar */}
-            <div className="flex items-center justify-between w-full max-w-[320px] gap-2">
-              <button
-                type="button"
-                onClick={() => setIsMissilePlaying(!isMissilePlaying)}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg text-white transition-colors cursor-pointer ${
-                  isMissilePlaying ? 'bg-amber-600 hover:bg-amber-700' : 'bg-forge-600 hover:bg-forge-700'
-                }`}
-              >
-                {isMissilePlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                <span>{isMissilePlaying ? 'Pause Flight' : 'Resume Flight'}</span>
-              </button>
-
-              <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-800 p-1 rounded-lg border border-stone-200 dark:border-stone-700 text-xs">
-                <span className="px-1 text-[11px] font-mono text-stone-500">Zoom:</span>
-                {[2, 3, 4, 5, 6].map((z) => (
-                  <button
-                    key={z}
-                    type="button"
-                    onClick={() => setMissileZoom(z)}
-                    className={`px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold ${
-                      missileZoom === z
-                        ? 'bg-forge-600 text-white'
-                        : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-                    }`}
-                  >
-                    {z}x
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Flight Path Mode Toggle: Arc vs Orbit vs Static Vector */}
-            <div className="w-full max-w-[320px] grid grid-cols-3 gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-lg border border-stone-200 dark:border-stone-700 text-xs font-medium">
-              {(
-                [
-                  { id: 'arc', label: 'Parabolic Arc' },
-                  { id: 'orbit', label: 'Circle Path' },
-                  { id: 'static', label: 'Static Vector' },
-                ] as const
-              ).map((mode) => (
-                <button
-                  key={mode.id}
-                  type="button"
-                  onClick={() => setFlightMode(mode.id)}
-                  className={`py-1 rounded text-center transition-colors cursor-pointer ${
-                    flightMode === mode.id
-                      ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white font-bold shadow-2xs'
-                      : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-                  }`}
-                >
-                  {mode.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Velocity Vector & Angle Controls (when in static vector mode) */}
-            {flightMode === 'static' && (
-              <div className="w-full max-w-[320px] space-y-2 bg-stone-50 dark:bg-stone-800/50 p-3 rounded-lg border border-stone-200 dark:border-stone-800">
-                <div className="flex items-center justify-between text-xs font-medium text-stone-700 dark:text-stone-300">
-                  <span>Flight Angle:</span>
-                  <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">{flightAngleDeg}°</span>
-                </div>
-                <input
-                  type="range"
-                  min={-90}
-                  max={90}
-                  step={5}
-                  value={flightAngleDeg}
-                  onChange={(e) => setFlightAngleDeg(Number(e.target.value))}
-                  className="w-full accent-forge-500 cursor-pointer"
-                />
-
-                <div className="flex items-center justify-between text-xs font-medium text-stone-700 dark:text-stone-300 pt-1">
-                  <span>Flight Speed:</span>
-                  <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">{flightSpeed} px/f</span>
-                </div>
-                <input
-                  type="range"
-                  min={2}
-                  max={30}
-                  step={1}
-                  value={flightSpeed}
-                  onChange={(e) => setFlightSpeed(Number(e.target.value))}
-                  className="w-full accent-forge-500 cursor-pointer"
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Right Column: Sprite Builder Properties & Controls */}
-          <div className="lg:col-span-7 space-y-5">
-            {/* 1. Custom Missile PNG Sheet Card */}
-            <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Upload className="w-4 h-4 text-forge-600 dark:text-forge-400" />
-                  <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
-                    Projectile Sprite Asset
+                    {activeSlotMeta.badge}
                   </span>
                 </div>
-                {missile.sheetPreview && (
-                  <button
-                    type="button"
-                    onClick={removeCustomMissileSheet}
-                    className="text-xs text-rose-500 hover:text-rose-600 font-medium cursor-pointer"
-                  >
-                    Remove Sheet
-                  </button>
-                )}
-              </div>
-
-              <div className="flex items-center gap-3">
-                <input
-                  ref={missileFileInputRef}
-                  type="file"
-                  accept="image/png,image/gif"
-                  onChange={handleUploadMissileSheet}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => missileFileInputRef.current?.click()}
-                  className="px-3.5 py-2 text-xs font-semibold text-stone-800 dark:text-stone-200 bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-700 shadow-2xs transition-colors flex items-center gap-2 cursor-pointer"
-                >
-                  <Upload className="w-3.5 h-3.5 text-forge-600 dark:text-forge-400" />
-                  <span>{missile.sheetFile ? 'Change PNG Sheet' : 'Upload Missile PNG Sheet'}</span>
-                </button>
-
-                <div className="text-xs text-stone-500 dark:text-stone-400">
-                  {missile.sheetFile ? (
-                    <span className="font-mono text-forge-600 dark:text-forge-400 font-medium">
-                      {missile.sheetFile.name} ({(missile.sheetFile.size / 1024).toFixed(1)} KB)
-                    </span>
-                  ) : (
-                    <span>Using default {defaultArt.label} art — upload a PNG to replace it</span>
-                  )}
-                </div>
-              </div>
-
-            </div>
-
-            {/* 1b. WFWS extra roles: cluster bits and behaviour states */}
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
-                    WFWS role art
-                  </div>
-                  <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
-                    Cluster bits, timed homing and terrain-probed dig are drawn by
-                    the same
-                    <code className="font-mono"> sb.flight </code> call. Each role can keep WA&apos;s
-                    sprite, draw your own sheet, or inherit the primary art.
-                  </p>
-                </div>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-forge-50 dark:bg-forge-950/60 text-forge-600 dark:text-forge-400 font-semibold border border-forge-200 dark:border-forge-800/60">
-                  wf-lib/wfws_sprite_builder
-                </span>
-              </div>
-
-              {!builderOn && (
-                <p className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg px-2.5 py-1.5">
-                  Enable <strong>Missile Flight Sprite</strong> above first. Bits, homing
-                  and dig art are emitted inside that builder call; until then these rows are saved but ignored.
+                <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+                  Switch projectile roles using the hotbar to configure sprite sheets, rotation modes, trajectories, and <code className="font-mono text-stone-600 dark:text-stone-300">sb.flight</code> parameters.
                 </p>
-              )}
+              </div>
 
-              {project.burst === 'clusters' && (
-                <FlightRoleEditor
-                  role={bitFlight}
-                  onChange={updateBitFlight}
-                  title="Cluster bit art"
-                  description="The child missiles after the burst. Native keeps WA's clustlet sheet; Builder draws this sheet; Inherit reuses the primary round's art."
-                  path={bitFlightSheetPath(project)}
-                  inheritLabel="Inherit primary"
-                  disabled={!builderOn}
-                  warning={
-                    bitBuilderMode(project) === 'builder' && project.packArt?.cluster_sprite
-                      ? 'The native `cluster.sprite` upload in Burst Payload is skipped while the bit builder owns the bits; use this sheet instead.'
-                      : undefined
-                  }
-                />
-              )}
-
-              {behaviorDefs.length > 0 && (
-                <div className="space-y-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-400">
-                    Behaviour art
-                  </div>
-                  {behaviorDefs.map((def) => {
-                    const homingArmMs =
-                      (def.key === 'homing'
-                        ? project.body.homing_arm_ms
-                        : project.body.clustlet.homing_arm_ms) ?? 0;
-                    const homingTimeMs =
-                      (def.key === 'homing'
-                        ? project.body.homing_time_ms
-                        : project.body.clustlet.homing_time_ms) ?? 0;
-                    return (
-                    <FlightRoleEditor
-                      key={def.key}
-                      role={behaviorArt[def.key] ?? defaultBehaviorRole}
-                      onChange={(patch) => updateBehaviorArt(def.key, patch)}
-                      title={def.label}
-                      description={
-                        def.key === 'dig'
-                          ? 'Terrain-probed animation. Native keeps the record dig frames; anything else zeroes them and cycles the flight sheet.'
-                          : def.key === 'homing' || def.key === 'homing_bit'
-                            ? `Timed from the record: art from ${homingArmMs} ms ${homingTimeMs > 0 ? `to ${homingArmMs + homingTimeMs} ms` : 'until it lands or blasts'}. The builder swaps to this sheet inside that window and zeroes WA's homing sprite.`
-                            : `${def.description} Signal: ${def.record}.`
-                      }
-                      path={behaviorStateSheetPath(project, def.key)}
-                      sig={behaviorSigs.get(def.key)}
-                      inheritLabel="Inherit"
-                      disabled={!builderOn}
-                      sheetless={def.key === 'dig'}
-                    />
-                    );
-                  })}
-                </div>
-              )}
-
-              {project.action === 'roam' && (
-                <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 space-y-3">
-                  {builderOn && (
-                    <p className="text-[11px] rounded-lg border border-amber-300/70 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-amber-800 dark:text-amber-200">
-                      The missile flight builder above owns the flying state, so
-                      these two sheets are not installed and not written while it
-                      is on. It keeps WA's walking pose, waits for the player's
-                      Space press, then draws its own sheet; the export zeroes
-                      `sheep.flight_1` / `sheep.flight_2` so WA's flown art does
-                      not draw underneath. Turn the builder off to use these
-                      sheets instead.
-                    </p>
-                  )}
-                  <div>
-                    <div className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
-                      Roaming animal sheets (`sheep_sprites`)
-                    </div>
-                    <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
-                      WA alternates these two sheets while you steer the animal
-                      (written to `sheep.flight_1` / `sheep.flight_2`), and it
-                      picks the frame from the flight direction: the sheet has to
-                      be a rotation strip (PX's Ghost Sheep ships 60x1920 = 32
-                      frames of 60x60). Upload one frame and hit{' '}
-                      <strong>Rotate into strip</strong>, or upload an existing
-                      strip and set its frame count. Nothing is detected here: the
-                      walking pose is the record body, the gas pose is
-                      `roam.gas.animal_sprite`, and WA picks every one of them
-                      itself.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <RoamSheetField
-                      id="roam-sheet-1"
-                      label="Flying sheet 1 (`flight_1`)"
-                      asset={project.roamSheets?.flight1}
-                      path={roamSheetPath(project, 'flight1')}
-                      onChange={(asset) =>
-                        onChange({
-                          roamSheets: { ...project.roamSheets, flight1: asset, flight2: project.roamSheets?.flight2 ?? {} },
-                        })
-                      }
-                    />
-                    <RoamSheetField
-                      id="roam-sheet-2"
-                      label="Flying sheet 2 (`flight_2`)"
-                      asset={project.roamSheets?.flight2}
-                      path={roamSheetPath(project, 'flight2')}
-                      onChange={(asset) =>
-                        onChange({
-                          roamSheets: { ...project.roamSheets, flight2: asset, flight1: project.roamSheets?.flight1 ?? {} },
-                        })
-                      }
-                    />
-                  </div>
-                  <p className="text-[10px] text-stone-400">
-                    Native ids in the record: `flight_1` {project.roamConfig?.flight_1 ?? 0}
-                    {' '}({stockSpriteName(project.roamConfig?.flight_1 ?? 0) ?? 'unused'}),
-                    `flight_2` {project.roamConfig?.flight_2 ?? 0}
-                    {' '}({stockSpriteName(project.roamConfig?.flight_2 ?? 0) ?? 'unused'}).
-                    The uploads replace both, so the numeric rows are skipped while
-                    they are set.
-                  </p>
-                  {!!project.roamSheets?.flight1?.file !== !!project.roamSheets?.flight2?.file && (
-                    <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                      Both sheets are needed: the engine takes exactly two for
-                      `sheep_sprites`, so nothing is emitted until the second is uploaded.
-                    </p>
-                  )}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                    <StockSpriteInput
-                      id="roam-gas-pose"
-                      label="Gas pose (`roam.gas.animal_sprite`)"
-                      numeric
-                      placeholder="0"
-                      value={project.roamConfig?.gas_animal_sprite ?? 0}
-                      onChange={(v) =>
-                        onChange({
-                          roamConfig: {
-                            ...project.roamConfig,
-                            gas_animal_sprite: v === '' ? 0 : Number(v),
-                          },
-                        })
-                      }
-                      desc="Drawn instead of the animal while it emits gas (the Skunk's skunk2 is 174). A stock id, so no upload: WA has no bundle-path field here."
-                    />
-                    <div className="space-y-1 text-[11px] text-stone-500 dark:text-stone-400">
-                      <div className="font-semibold text-stone-700 dark:text-stone-300">
-                        The five PX sheep labels
-                      </div>
-                      <p>
-                        flying / flying 2 → the two uploads (`sheep_sprites`).
-                        taking off (0xE8) and during flight (0xEC) live in two
-                        sheep sprite fields the engine does not name yet, so PX
-                        spells them with its own ids (76 and `0x10000 + 77`).
-                        farting → `roam.gas.animal_sprite`.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 2. Animation Type Selector (`ANIM_TYPE` from px_sprite_builder.lua) */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-1.5">
-                <Compass className="w-3.5 h-3.5 text-forge-600 dark:text-forge-400" />
-                <span>Animation Mode (`opts.anim`)</span>
-              </label>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {[
-                  {
-                    id: 'track',
-                    name: 'Track Trajectory',
-                    sub: 'Points along flight vector',
-                    code: 'ANIM_TYPE.track = 2',
-                  },
-                  {
-                    id: 'rotation',
-                    name: 'Speed Rotation',
-                    sub: 'Speed-based dynamic tumble',
-                    code: 'ANIM_TYPE.rotation = 3',
-                  },
-                  {
-                    id: 'slow',
-                    name: 'Slow Spin',
-                    sub: 'Steady spin (speed = 0.5)',
-                    code: 'ANIM_TYPE.slow = 1',
-                  },
-                  {
-                    id: 'medium',
-                    name: 'Medium Spin',
-                    sub: 'Steady spin (speed = 0.8)',
-                    code: 'ANIM_TYPE.medium = 1',
-                  },
-                  {
-                    id: 'fast',
-                    name: 'Fast Spin',
-                    sub: 'Steady spin (speed = 1.35)',
-                    code: 'ANIM_TYPE.fast = 1',
-                  },
-                  {
-                    id: 'none',
-                    name: 'Fixed Upright',
-                    sub: 'No rotation turn (0°)',
-                    code: 'ANIM_TYPE.none = 5',
-                  },
-                ].map((item) => {
-                  const isSelected = (missile.anim || 'rotation') === item.id;
+              {/* 6-Slot Pixel Icon Hotbar */}
+              <div
+                role="tablist"
+                aria-label="Projectile flight roles"
+                className="flex flex-wrap items-center gap-2 bg-stone-100 dark:bg-stone-800/80 p-1.5 rounded-2xl border border-stone-200 dark:border-stone-700 shadow-inner shrink-0 self-start xl:self-auto"
+              >
+                {hotbarSlots.map((slot) => {
+                  const isActive = activeFlightRole === slot.id;
                   return (
                     <button
-                      key={item.id}
+                      key={slot.id}
                       type="button"
-                      onClick={() => updateMissile({ anim: item.id as MissileAnimType })}
-                      className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
-                        isSelected
-                          ? 'border-forge-500 bg-forge-50/30 dark:bg-forge-950/30 ring-1 ring-forge-500'
-                          : 'border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 hover:border-stone-300 dark:hover:border-stone-700'
+                      role="tab"
+                      aria-selected={isActive}
+                      disabled={!slot.enabled}
+                      onClick={() => slot.enabled && setActiveFlightRole(slot.id)}
+                      title={
+                        slot.enabled
+                          ? `Slot ${slot.slotNum}: ${slot.badge}`
+                          : `${slot.badge} — ${slot.disabledHint}`
+                      }
+                      className={`relative w-14 h-14 rounded-xl border-2 transition-all overflow-hidden group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forge-500 ${
+                        !slot.enabled
+                          ? 'opacity-35 grayscale cursor-not-allowed border-stone-200 dark:border-stone-700 bg-stone-200/70 dark:bg-stone-900/60'
+                          : isActive
+                            ? `${slot.activeClass} cursor-pointer`
+                            : 'border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 hover:border-stone-400 dark:hover:border-stone-500 cursor-pointer'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-0.5">
-                        <span className={`text-xs font-bold ${isSelected ? 'text-forge-700 dark:text-forge-400' : 'text-stone-800 dark:text-stone-200'}`}>
-                          {item.name}
-                        </span>
-                        {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-forge-600 dark:text-forge-400" />}
-                      </div>
-                      <div className="text-[11px] text-stone-500 dark:text-stone-400 leading-tight">
-                        {item.sub}
-                      </div>
-                      <div className="text-[10px] font-mono text-stone-400 mt-1">
-                        {item.code}
-                      </div>
+                      <span
+                        className={`absolute top-1 left-1 font-mono font-bold text-[9px] leading-none px-1 py-0.5 rounded border z-10 ${
+                          !slot.enabled
+                            ? 'bg-stone-200 dark:bg-stone-800 text-stone-400 border-stone-300 dark:border-stone-700'
+                            : 'bg-white/90 dark:bg-stone-900/90 text-stone-700 dark:text-stone-200 border-stone-300 dark:border-stone-700'
+                        }`}
+                      >
+                        {slot.slotNum}
+                      </span>
+                      <img
+                        src={slot.icon}
+                        alt={slot.label}
+                        className={`w-full h-full object-contain p-1.5 transition-transform ${
+                          slot.enabled ? 'group-hover:scale-110' : ''
+                        }`}
+                        style={{ imageRendering: 'pixelated' }}
+                      />
+                      <span
+                        className={`absolute bottom-0.5 right-0.5 text-[9px] font-bold font-mono leading-none px-1 py-0.5 rounded shadow-2xs ${
+                          !slot.enabled
+                            ? 'bg-stone-200/90 dark:bg-stone-800/90 text-stone-500'
+                            : 'bg-white/90 dark:bg-stone-900/90 text-stone-800 dark:text-stone-100'
+                        }`}
+                      >
+                        {slot.label}
+                      </span>
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* 3. Sheet Frames & Cyclical Animation Parameters */}
-            <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-4">
-              <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
-                Cyclical Sheet Animation & Scale
+            {/* Active Role Banner */}
+            <div
+              className={`mb-4 px-3.5 py-2.5 rounded-xl border text-xs flex flex-wrap items-center justify-between gap-2 ${activeSlotMeta.bannerClass}`}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <img
+                  src={activeSlotMeta.icon}
+                  alt=""
+                  className="w-7 h-7 object-contain shrink-0"
+                  style={{ imageRendering: 'pixelated' }}
+                />
+                <div className="min-w-0">
+                  <div className="font-bold leading-snug">{activeSlotMeta.title}</div>
+                  <p className="text-[11px] opacity-85 leading-snug">{activeSlotMeta.desc}</p>
+                </div>
+              </div>
+              <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded bg-white/80 dark:bg-stone-900/80 border border-current/20 shrink-0">
+                Role Slot {activeSlotMeta.slotNum} / {hotbarSlots.length}
               </span>
+            </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-stone-600 dark:text-stone-400">Total Frames</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={64}
-                    value={missile.frames || 1}
-                    onChange={(e) => updateMissile({ frames: Math.max(1, Number(e.target.value)) })}
-                    className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
-                  />
+            {isAirStrike && (
+              <div className="mb-4 px-3.5 py-2 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>
+                  Air strikes spawn munitions from their own record copy and do not run{' '}
+                  <code className="font-mono">sb.flight</code>. Use the Record / Pack Art strike body sprite instead.
+                </span>
+              </div>
+            )}
+
+            {/* Row 2: Projectile Asset Bar + Enable Missile Flight Sprite Pill */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-5">
+              <div className="flex-1 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 px-3.5 py-2 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 min-w-0">
+                <div className="flex items-center gap-2.5 min-w-0 truncate">
+                  <Upload className="w-4 h-4 text-forge-600 dark:text-forge-400 shrink-0" />
+                  <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide shrink-0">
+                    {assetLabel}
+                  </span>
+                  {isDigRole ? (
+                    <span
+                      className="text-xs text-stone-500 dark:text-stone-400 truncate"
+                      title={assetPathHint}
+                    >
+                      Sheetless — cycles {digOwningSheetIsBit ? 'Cluster Bits' : 'Primary Round'} sheet on terrain contact
+                    </span>
+                  ) : activeSheetFile ? (
+                    <span
+                      className="font-mono text-xs text-forge-600 dark:text-forge-400 font-medium truncate"
+                      title={`${activeSheetFile.name} (${(activeSheetFile.size / 1024).toFixed(1)} KB) → ${assetPathHint}`}
+                    >
+                      {activeSheetFile.name} ({(activeSheetFile.size / 1024).toFixed(1)} KB)
+                    </span>
+                  ) : isSecondaryRole && secondaryRoleObj?.mode !== 'builder' ? (
+                    <span className="text-xs text-stone-500 dark:text-stone-400 truncate">
+                      {secondaryRoleObj?.mode === 'inherit'
+                        ? activeFlightRole === 'homing_bit' && bitFlight.mode === 'builder'
+                          ? 'Inheriting Cluster Bits art — upload a PNG to switch to Builder'
+                          : 'Inheriting Primary Round art — upload a PNG to switch to Builder'
+                        : 'Using Native WA sprite — upload a PNG to switch to Builder'}
+                    </span>
+                  ) : (
+                    <span
+                      className="text-xs text-stone-500 dark:text-stone-400 truncate"
+                      title={assetPathHint}
+                    >
+                      {isSecondaryRole
+                        ? `Default fallback art → ${assetPathHint}`
+                        : `Using default ${defaultArt.label} art — upload a PNG to replace it`}
+                    </span>
+                  )}
+                  {activeSheetPreview && (
+                    <button
+                      type="button"
+                      onClick={isSecondaryRole ? removeCustomRoleSheet : removeCustomMissileSheet}
+                      className="text-xs text-rose-500 hover:text-rose-600 font-medium shrink-0 ml-1 cursor-pointer"
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-stone-600 dark:text-stone-400">Anim Speed</label>
-                  <input
-                    type="number"
-                    step={0.1}
-                    min={0.1}
-                    max={10.0}
-                    value={missile.animSpeed || 1.0}
-                    onChange={(e) => updateMissile({ animSpeed: Math.max(0.1, Number(e.target.value)) })}
-                    className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
-                  />
+                <div className="shrink-0">
+                  {isDigRole ? (
+                    <button
+                      type="button"
+                      onClick={() => setActiveFlightRole(digOwningSheetIsBit ? 'clusters' : 'primary')}
+                      className="px-3 py-1.5 text-xs font-semibold text-stone-800 dark:text-stone-200 bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-700 shadow-2xs transition-colors cursor-pointer"
+                    >
+                      Edit {digOwningSheetIsBit ? 'Bits' : 'Main'} Sheet
+                    </button>
+                  ) : (
+                    <>
+                      <input
+                        ref={isSecondaryRole ? roleFileInputRef : missileFileInputRef}
+                        type="file"
+                        accept="image/png,image/gif"
+                        onChange={isSecondaryRole ? handleUploadRoleSheet : handleUploadMissileSheet}
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          (isSecondaryRole ? roleFileInputRef : missileFileInputRef).current?.click()
+                        }
+                        className="px-3 py-1.5 text-xs font-semibold text-stone-800 dark:text-stone-200 bg-white dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-700 shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Upload className="w-3.5 h-3.5 text-forge-600 dark:text-forge-400" />
+                        <span>{activeSheetFile ? 'Change PNG Sheet' : 'Upload PNG'}</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <label
+                htmlFor="flight-enable-builder"
+                className={`flex items-center gap-2 bg-white dark:bg-stone-800 px-3.5 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 shadow-2xs shrink-0 self-start sm:self-auto ${
+                  isAirStrike ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                }`}
+              >
+                <input
+                  id="flight-enable-builder"
+                  type="checkbox"
+                  disabled={isAirStrike}
+                  checked={missile.enabled}
+                  onChange={(e) =>
+                    updateMissile({
+                      enabled: e.target.checked,
+                      ...(e.target.checked ? { mode: 'custom' } : {}),
+                    })
+                  }
+                  className="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer"
+                />
+                <span className="text-xs font-semibold text-stone-900 dark:text-stone-100 whitespace-nowrap">
+                  Enable Missile Flight Sprite
+                </span>
+              </label>
+            </div>
+
+            {/* 3-Column Workbench Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.35fr_1.85fr] gap-4 items-start">
+              {/* LEFT COLUMN: Modifiers, Role Scale, Global Size, Angle Offset */}
+              <div className="order-3 lg:order-1 flex flex-col gap-3.5">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <label
+                    htmlFor="flight-mirror-left"
+                    title="Flips sprite horizontally when moving left (vx < 0)"
+                    className={`h-10 flex items-center justify-between px-3 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 shadow-2xs transition-colors ${
+                      activeSheetLocked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-stone-50 dark:hover:bg-stone-750'
+                    }`}
+                  >
+                    <span className="text-xs font-semibold text-stone-800 dark:text-stone-200 select-none">
+                      Mirror Left
+                    </span>
+                    <input
+                      id="flight-mirror-left"
+                      type="checkbox"
+                      disabled={activeSheetLocked}
+                      checked={activeMirror}
+                      onChange={(e) => updateActiveRoleParams({ mirror: e.target.checked })}
+                      className="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer"
+                    />
+                  </label>
+
+                  <label
+                    htmlFor="flight-log-identity"
+                    title="Logs one line per missile's first frames with id, m.sprite, and classified role (log = true)."
+                    className="h-10 flex items-center justify-between px-3 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 cursor-pointer shadow-2xs hover:bg-stone-50 dark:hover:bg-stone-750 transition-colors"
+                  >
+                    <span className="text-xs font-semibold text-stone-800 dark:text-stone-200 select-none">
+                      Log Debug
+                    </span>
+                    <input
+                      id="flight-log-identity"
+                      type="checkbox"
+                      checked={!!project.missileSprite.logIdentity}
+                      onChange={(e) =>
+                        onChange({
+                          missileSprite: {
+                            ...project.missileSprite,
+                            logIdentity: e.target.checked,
+                          },
+                        })
+                      }
+                      className="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer"
+                    />
+                  </label>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-stone-600 dark:text-stone-400">Spin Rate</label>
+                {/* Role Scale Slider */}
+                <div
+                  className={`space-y-1 p-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 ${
+                    activeSheetLocked ? 'opacity-50' : ''
+                  }`}
+                >
+                  <div className="flex justify-between items-center text-xs">
+                    <label
+                      htmlFor="flight-role-scale"
+                      className="font-semibold text-stone-700 dark:text-stone-300"
+                    >
+                      {isSecondaryRole ? 'Role Scale' : 'Primary Scale'}
+                    </label>
+                    <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
+                      {activeScale.toFixed(2)}x
+                    </span>
+                  </div>
                   <input
-                    type="number"
-                    step={0.1}
-                    min={0.1}
-                    max={5.0}
-                    value={missile.spinRate || 1.0}
-                    onChange={(e) => updateMissile({ spinRate: Math.max(0.1, Number(e.target.value)) })}
-                    className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-stone-600 dark:text-stone-400">Sprite Scale</label>
-                  <input
-                    type="number"
-                    step={0.1}
+                    id="flight-role-scale"
+                    type="range"
                     min={0.2}
                     max={3.0}
-                    value={missile.scale || 1.0}
-                    onChange={(e) => updateMissile({ scale: Math.max(0.2, Number(e.target.value)) })}
-                    className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
-                  />
-                </div>
-              </div>
-
-              {/* Toggles: Mirror & HideStock */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-stone-200/50 dark:border-stone-800/50">
-                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={missile.mirror !== false}
-                    onChange={(e) => updateMissile({ mirror: e.target.checked })}
-                    className="rounded text-forge-600 focus:ring-forge-500 mt-0.5"
-                  />
-                  <div>
-                    <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">
-                      Mirror Facing (`vx &lt; 0`)
-                    </div>
-                    <div className="text-[11px] text-stone-500">
-                      Flips sprite horizontally when moving left.
-                    </div>
-                  </div>
-                </label>
-
-                <div className="flex items-start gap-2.5 p-2.5 rounded-lg border border-forge-200 dark:border-forge-900/60 bg-forge-50/40 dark:bg-forge-950/20">
-                  <CheckCircle2 className="w-4 h-4 text-forge-600 dark:text-forge-400 mt-0.5 shrink-0" aria-hidden="true" />
-                  <div>
-                    <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">
-                      Stock Sprite Hidden (`sprite = 0`)
-                    </div>
-                    <div className="text-[11px] text-stone-500">
-                      Always written while the builder is on: it hides WA's round.
-                      Identity is the same field read backwards — with a bit sheet
-                      configured, the missile whose `m.sprite` is zero is the cluster
-                      bit (a bit inherits its parent's copy of the record sprite), so
-                      everything else is the primary.
-                    </div>
-                  </div>
-                </div>
-
-                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={!!project.missileSprite.logIdentity}
-                    onChange={(e) =>
-                      onChange({
-                        missileSprite: { ...project.missileSprite, logIdentity: e.target.checked },
-                      })
-                    }
-                    className="rounded text-forge-600 focus:ring-forge-500 mt-0.5"
-                  />
-                  <div>
-                    <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">
-                      Log Identity (`log = true`)
-                    </div>
-                    <div className="text-[11px] text-stone-500">
-                      One log line per missile&apos;s first frames with its id,
-                      `m.sprite` and the role it was classified as. Turn it off for
-                      the real bundle.
-                    </div>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            {/* 3b. Weapon-wide builder parameters: one size for every role and a
-                rotation offset for art that does not point up. */}
-            <div className="p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
-                  Builder Parameters
-                </span>
-                <span className="font-mono text-[10px] text-stone-400">size · angle</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label
-                    htmlFor="builder-size"
-                    className="text-xs font-medium text-stone-600 dark:text-stone-400"
-                  >
-                    Size (all roles)
-                  </label>
-                  <input
-                    id="builder-size"
-                    type="number"
                     step={0.05}
-                    min={0.1}
-                    max={4}
-                    value={missile.size ?? 1}
-                    onChange={(e) => updateMissile({ size: Math.max(0.1, Number(e.target.value)) })}
-                    className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                    disabled={activeSheetLocked}
+                    value={activeScale}
+                    onChange={(e) => updateActiveRoleParams({ scale: Number(e.target.value) })}
+                    className="w-full accent-forge-500 cursor-pointer"
                   />
-                  <p className="text-[11px] text-stone-500">
-                    Multiplies every role&apos;s own scale — the primary, the cluster bits and each
-                    behaviour sheet — so one number resizes the whole weapon. `size = 1` is the
-                    sheet&apos;s own pixels.
-                  </p>
                 </div>
 
-                <div className="space-y-1">
-                  <label
-                    htmlFor="builder-angle"
-                    className="text-xs font-medium text-stone-600 dark:text-stone-400"
-                  >
-                    Angle offset (degrees)
-                  </label>
+                {/* Global Size (All Roles) Slider */}
+                <div
+                  className="space-y-1 p-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40"
+                  title="Multiplies every role's own scale — primary, cluster bits, and behaviour sheets."
+                >
+                  <div className="flex justify-between items-center text-xs">
+                    <label
+                      htmlFor="flight-global-size"
+                      className="font-semibold text-stone-700 dark:text-stone-300"
+                    >
+                      Global Size (All Roles)
+                    </label>
+                    <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
+                      {(missile.size ?? 1).toFixed(2)}x
+                    </span>
+                  </div>
                   <input
-                    id="builder-angle"
-                    type="number"
-                    step={15}
+                    id="flight-global-size"
+                    type="range"
+                    min={0.25}
+                    max={3.0}
+                    step={0.05}
+                    value={missile.size ?? 1}
+                    onChange={(e) => updateMissile({ size: Number(e.target.value) })}
+                    className="w-full accent-forge-500 cursor-pointer"
+                  />
+                </div>
+
+                {/* Angle Offset Slider */}
+                <div
+                  className="space-y-1 p-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40"
+                  title="Added to whatever rotation the animation asks for. Sheets drawn pointing right need -90°; mirrored automatically when vx < 0."
+                >
+                  <div className="flex justify-between items-center text-xs">
+                    <label
+                      htmlFor="flight-angle-offset"
+                      className="font-semibold text-stone-700 dark:text-stone-300"
+                    >
+                      Angle Offset
+                    </label>
+                    <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
+                      {missile.angle ?? 0}°
+                    </span>
+                  </div>
+                  <input
+                    id="flight-angle-offset"
+                    type="range"
                     min={-180}
                     max={180}
+                    step={5}
                     value={missile.angle ?? 0}
                     onChange={(e) => updateMissile({ angle: Number(e.target.value) })}
-                    className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                    className="w-full accent-forge-500 cursor-pointer"
                   />
-                  <p className="text-[11px] text-stone-500">
-                    Added to whatever rotation the role&apos;s animation asked for, for art that does
-                    not point up: a sheet drawn pointing right needs `-90`. Tracked art stays
-                    tracked, it just gains the offset, and the offset is mirrored on the left so the
-                    art points the same way both ways.
-                  </p>
+                </div>
+
+                {/* Native Sprite Hidden Badge */}
+                <div
+                  className="p-3 rounded-xl border border-forge-200 dark:border-forge-900/60 bg-forge-50/50 dark:bg-forge-950/20 flex items-center justify-between gap-2"
+                  title="Always written while the builder is on: hides WA's native round (m.sprite = 0). Cluster bits retain a marker id and are classified as bits."
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <CheckCircle2 className="w-4 h-4 text-forge-600 dark:text-forge-400 shrink-0" />
+                    <span className="text-xs font-semibold text-stone-800 dark:text-stone-200 truncate">
+                      {activeFlightRole === 'roam'
+                        ? 'Zeroes sheep.flight_1/2'
+                        : activeFlightRole === 'dig'
+                          ? digRoleMode === 'native'
+                            ? 'Keeps WA dig sprites'
+                            : 'Zeroes dig sprites'
+                          : activeFlightRole === 'homing'
+                            ? 'Zeroes homing.sprite'
+                            : activeFlightRole === 'homing_bit'
+                              ? 'Zeroes bit.homing.sprite'
+                              : 'Native Sprite Hidden'}
+                    </span>
+                  </div>
+                  <code className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-white dark:bg-stone-900 border border-forge-200 dark:border-forge-800 text-forge-700 dark:text-forge-300 shrink-0">
+                    {activeFlightRole === 'roam'
+                      ? 'flight = 0'
+                      : activeFlightRole === 'dig'
+                        ? digRoleMode === 'native'
+                          ? 'native'
+                          : 'dig = true'
+                        : 'sprite = 0'}
+                  </code>
+                </div>
+              </div>
+
+              {/* CENTER COLUMN: Interactive 50 Hz Pixel Viewport & Trajectory */}
+              <div className="order-1 lg:order-2 flex flex-col items-center gap-3 w-full">
+                <div className="relative w-full max-w-[360px] aspect-[300/260] border-2 border-stone-800 rounded-xl overflow-hidden shadow-lg bg-stone-950">
+                  <canvas
+                    ref={missileCanvasRef}
+                    width={300}
+                    height={260}
+                    className="block w-full h-full cursor-pointer"
+                    style={{ imageRendering: 'pixelated' }}
+                    onClick={() => setIsMissilePlaying(!isMissilePlaying)}
+                    title="Click canvas to toggle Play / Pause"
+                  />
+
+                  <div className="absolute top-2 left-2 flex items-center gap-1.5 text-[10px] font-mono bg-black/75 backdrop-blur-xs text-stone-300 px-2 py-0.5 rounded border border-white/10">
+                    <span className="uppercase text-forge-400 font-bold">{activeAnim}</span>
+                    <span>·</span>
+                    <span>
+                      Frame {activeFrameDisplay + 1}/{Math.max(1, activeFrames)}
+                    </span>
+                  </div>
+
+                  <div className="absolute bottom-2 left-2 flex items-center gap-1.5 text-[10px] font-mono bg-black/75 backdrop-blur-xs text-stone-300 px-2 py-0.5 rounded border border-white/10">
+                    <span>{isMissilePlaying ? 'Simulating Flight' : 'Paused'}</span>
+                    <span>·</span>
+                    <span className="text-stone-400 capitalize">{flightMode}</span>
+                  </div>
+
+                  <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 backdrop-blur-xs p-0.5 rounded border border-white/10 text-[10px]">
+                    {(['grid', 'sky', 'cavern'] as const).map((theme) => (
+                      <button
+                        key={theme}
+                        type="button"
+                        onClick={() => setBackdropTheme(theme)}
+                        className={`px-1.5 py-0.5 rounded capitalize cursor-pointer ${
+                          backdropTheme === theme
+                            ? 'bg-forge-600 text-white font-bold'
+                            : 'text-stone-400 hover:text-white'
+                        }`}
+                      >
+                        {theme}
+                      </button>
+                    ))}
+                    <span className="w-px h-3 bg-white/15 mx-0.5" />
+                    <button
+                      type="button"
+                      onClick={() => setShowDrumRef((v) => !v)}
+                      aria-pressed={showDrumRef}
+                      title="Toggle animated oil drum scale reference (20 frames, 20 fps)"
+                      className={`px-1.5 py-0.5 rounded cursor-pointer ${
+                        showDrumRef
+                          ? 'bg-forge-600 text-white font-bold'
+                          : 'text-stone-400 hover:text-white'
+                      }`}
+                    >
+                      Drum
+                    </button>
+                  </div>
+                </div>
+
+                {/* Flight Path Selector + Inline Static Vector Sliders */}
+                <div className="w-full max-w-[360px] space-y-2 bg-stone-50 dark:bg-stone-800/50 p-2 rounded-xl border border-stone-200 dark:border-stone-800">
+                  <div className="grid grid-cols-3 gap-1 p-1 bg-stone-100 dark:bg-stone-900 rounded-lg text-xs font-medium">
+                    {(
+                      [
+                        { id: 'arc', label: 'Parabolic Arc' },
+                        { id: 'orbit', label: 'Circle Path' },
+                        { id: 'static', label: 'Static Vector' },
+                      ] as const
+                    ).map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => setFlightMode(mode.id)}
+                        className={`py-1 rounded text-[11px] text-center transition-colors cursor-pointer ${
+                          flightMode === mode.id
+                            ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-white font-bold shadow-2xs'
+                            : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                        }`}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {flightMode === 'static' && (
+                    <div className="grid grid-cols-2 gap-3 pt-1 px-1">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center justify-between text-[11px] font-medium text-stone-700 dark:text-stone-300">
+                          <span>Angle</span>
+                          <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
+                            {flightAngleDeg}°
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          aria-label="Static flight vector angle"
+                          min={-90}
+                          max={90}
+                          step={5}
+                          value={flightAngleDeg}
+                          onChange={(e) => setFlightAngleDeg(Number(e.target.value))}
+                          className="w-full accent-forge-500 cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <div className="flex items-center justify-between text-[11px] font-medium text-stone-700 dark:text-stone-300">
+                          <span>Speed</span>
+                          <span className="font-mono text-forge-600 dark:text-forge-400 font-bold">
+                            {flightSpeed} px/f
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          aria-label="Static flight vector speed"
+                          min={2}
+                          max={30}
+                          step={1}
+                          value={flightSpeed}
+                          onChange={(e) => setFlightSpeed(Number(e.target.value))}
+                          className="w-full accent-forge-500 cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Playback & Zoom Bar */}
+                <div className="flex items-center justify-between w-full max-w-[360px] gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsMissilePlaying(!isMissilePlaying)}
+                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg text-white transition-colors cursor-pointer ${
+                      isMissilePlaying
+                        ? 'bg-amber-600 hover:bg-amber-700'
+                        : 'bg-forge-600 hover:bg-forge-700'
+                    }`}
+                  >
+                    {isMissilePlaying ? (
+                      <Pause className="w-3.5 h-3.5" />
+                    ) : (
+                      <Play className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isMissilePlaying ? 'Pause Flight' : 'Resume Flight'}</span>
+                  </button>
+
+                  <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-800 p-1 rounded-lg border border-stone-200 dark:border-stone-700 text-xs">
+                    {[2, 3, 4, 5, 6].map((z) => (
+                      <button
+                        key={z}
+                        type="button"
+                        onClick={() => setMissileZoom(z)}
+                        className={`px-1.5 py-0.5 rounded text-[11px] font-mono font-semibold cursor-pointer ${
+                          missileZoom === z
+                            ? 'bg-forge-600 text-white'
+                            : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                        }`}
+                      >
+                        {z}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* RIGHT COLUMN: Role Config, Anim Mode Grid, Sheet Animation & Lua Call */}
+              <div className="order-2 lg:order-3 flex flex-col gap-3.5">
+                {/* 1. Role Overrides & Behavior */}
+                <div className="p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2 pb-2 border-b border-stone-200/70 dark:border-stone-700/70">
+                    <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">
+                      Role Overrides & Behavior
+                    </span>
+                    <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300">
+                      wf-lib/wfws_sprite_builder
+                    </span>
+                  </div>
+
+                  {!builderOn && !isAirStrike && (
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg px-2.5 py-1.5">
+                      Enable <strong>Missile Flight Sprite</strong> above to emit <code className="font-mono">sb.flight</code> in the Lua bundle.
+                    </p>
+                  )}
+
+                  {activeFlightRole === 'primary' && (
+                    <div className="space-y-2.5 text-xs">
+                      <p className="text-[11px] text-stone-600 dark:text-stone-300">
+                        <strong>Primary Weapon Round:</strong> Initial projectile sheet. Secondary roles (homing, cluster bits, digging) inherit or override from this round.
+                      </p>
+                      {digMainEnabled && (
+                        <div className="p-2.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 flex items-center justify-between gap-2">
+                          <span className="text-[11px] text-stone-600 dark:text-stone-300">
+                            Digging probe is{' '}
+                            <strong className="font-mono">
+                              {digRoleMode === 'native' ? 'native' : 'enabled (dig = true)'}
+                            </strong>
+                            .
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setActiveFlightRole('dig')}
+                            className="px-2 py-1 rounded text-[11px] font-semibold bg-orange-50 dark:bg-orange-950/50 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/50 cursor-pointer shrink-0"
+                          >
+                            Open Dig Tab
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {activeFlightRole === 'homing' && (
+                    <div className="space-y-2.5 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-stone-700 dark:text-stone-300">
+                          Primary Homing Art Mode
+                        </span>
+                        <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-800 p-0.5 rounded-lg border border-stone-200 dark:border-stone-700">
+                          {(['native', 'builder', 'inherit'] as const).map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              disabled={!builderOn}
+                              onClick={() => updateBehaviorArt('homing', { mode: m })}
+                              className={`px-2.5 py-1 rounded text-[11px] font-semibold capitalize cursor-pointer disabled:opacity-50 ${
+                                homingRole.mode === m
+                                  ? 'bg-forge-600 text-white shadow-2xs'
+                                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {(() => {
+                        const armMs = project.body.homing_arm_ms ?? 0;
+                        const timeMs = project.body.homing_time_ms ?? 0;
+                        return (
+                          <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                            Timed window from Record Editor: <strong className="font-mono">{armMs} ms</strong>{' '}
+                            to{' '}
+                            <strong className="font-mono">
+                              {timeMs > 0 ? `${armMs + timeMs} ms` : 'impact'}
+                            </strong>
+                            . In <span className="font-semibold">Builder</span> mode, WA’s{' '}
+                            <code className="font-mono">missile.homing.sprite</code> is zeroed and this sheet swaps in during guidance.
+                          </p>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {activeFlightRole === 'homing_bit' && (
+                    <div className="space-y-2.5 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-stone-700 dark:text-stone-300">
+                          Homing Clustlet Art Mode
+                        </span>
+                        <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-800 p-0.5 rounded-lg border border-stone-200 dark:border-stone-700">
+                          {(['native', 'builder', 'inherit'] as const).map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              disabled={!builderOn}
+                              onClick={() => updateBehaviorArt('homing_bit', { mode: m })}
+                              className={`px-2.5 py-1 rounded text-[11px] font-semibold capitalize cursor-pointer disabled:opacity-50 ${
+                                homingBitRole.mode === m
+                                  ? 'bg-forge-600 text-white shadow-2xs'
+                                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {(() => {
+                        const armMs = project.body.clustlet.homing_arm_ms ?? 0;
+                        const timeMs = project.body.clustlet.homing_time_ms ?? 0;
+                        return (
+                          <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                            Cluster bit homing window: <strong className="font-mono">{armMs} ms</strong>{' '}
+                            to{' '}
+                            <strong className="font-mono">
+                              {timeMs > 0 ? `${armMs + timeMs} ms` : 'impact'}
+                            </strong>
+                            . Emits <code className="font-mono">bits.homing = &#123; ... &#125;</code> and zeroes{' '}
+                            <code className="font-mono">clusters.bit.homing.sprite</code>.
+                          </p>
+                        );
+                      })()}
+
+                      {homingBitRole.mode === 'builder' && bitFlight.mode !== 'builder' && (
+                        <div className="p-2.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[11px]">
+                            <code className="font-mono">bits.homing</code> requires{' '}
+                            <strong>Cluster Bits (Slot 3)</strong> in <strong>Builder</strong> mode (currently{' '}
+                            <code className="font-mono">{bitFlight.mode}</code>).
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => updateBitFlight({ mode: 'builder' })}
+                            className="px-2.5 py-1 rounded text-[11px] font-semibold bg-amber-600 hover:bg-amber-700 text-white cursor-pointer shrink-0"
+                          >
+                            Enable Bit Builder
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {activeFlightRole === 'clusters' && (
+                    <div className="space-y-2.5 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-stone-700 dark:text-stone-300">
+                          Cluster Bit Art Mode
+                        </span>
+                        <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-800 p-0.5 rounded-lg border border-stone-200 dark:border-stone-700">
+                          {(['native', 'builder', 'inherit'] as const).map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              disabled={!builderOn}
+                              onClick={() => updateBitFlight({ mode: m })}
+                              className={`px-2.5 py-1 rounded text-[11px] font-semibold capitalize cursor-pointer disabled:opacity-50 ${
+                                bitFlight.mode === m
+                                  ? 'bg-forge-600 text-white shadow-2xs'
+                                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                        Child bomblets after burst: <strong>Native</strong> keeps WA’s clustlet sheet, <strong>Builder</strong> draws a dedicated sheet, <strong>Inherit</strong> reuses the primary sheet.
+                      </p>
+
+                      {digBitEnabled && (
+                        <div className="p-2.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 flex items-center justify-between gap-2">
+                          <span className="text-[11px] text-stone-600 dark:text-stone-300">
+                            Bit digging probe is{' '}
+                            <strong className="font-mono">
+                              {digRoleMode === 'native' ? 'native' : 'enabled (dig = true)'}
+                            </strong>
+                            .
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setActiveFlightRole('dig')}
+                            className="px-2 py-1 rounded text-[11px] font-semibold bg-orange-50 dark:bg-orange-950/50 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/50 cursor-pointer shrink-0"
+                          >
+                            Open Dig Tab
+                          </button>
+                        </div>
+                      )}
+
+                      {bitBuilderMode(project) === 'builder' && project.packArt?.cluster_sprite && (
+                        <p className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg px-2.5 py-1.5">
+                          The native <code className="font-mono">cluster.sprite</code> upload in Burst Payload is skipped while the bit builder owns the bits.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {activeFlightRole === 'dig' && (
+                    <div className="space-y-2.5 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-stone-700 dark:text-stone-300">
+                          Digging Terrain Probe
+                        </span>
+                        <div className="flex items-center gap-1 bg-stone-100 dark:bg-stone-800 p-0.5 rounded-lg border border-stone-200 dark:border-stone-700">
+                          <button
+                            type="button"
+                            disabled={!builderOn}
+                            onClick={() => updateBehaviorArt('dig', { mode: 'native' })}
+                            className={`px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer disabled:opacity-50 ${
+                              digRoleMode === 'native'
+                                ? 'bg-forge-600 text-white shadow-2xs'
+                                : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                            }`}
+                          >
+                            Native
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!builderOn}
+                            onClick={() => updateBehaviorArt('dig', { mode: 'builder' })}
+                            className={`px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer disabled:opacity-50 ${
+                              digRoleMode !== 'native'
+                                ? 'bg-forge-600 text-white shadow-2xs'
+                                : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                            }`}
+                          >
+                            Probe
+                          </button>
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                        Active for{' '}
+                        <strong>
+                          {digMainEnabled && digBitEnabled
+                            ? 'Primary Round & Cluster Bits'
+                            : digMainEnabled
+                              ? 'Primary Round'
+                              : 'Cluster Bits'}
+                        </strong>
+                        .{' '}
+                        {digRoleMode === 'native'
+                          ? 'Native keeps WA’s record dig sprites (dig.dive_sprite / sprite_1..3).'
+                          : 'Overrides the owning sheet’s rotation, spin rate, anim speed, and scale only while 4 terrain probes detect solid land; reverts seamlessly in open air.'}
+                      </p>
+
+                      {digRoleMode !== 'native' &&
+                        digArtOverrideRows(behaviorArt.dig, '').length > 0 && (
+                          <div className="flex items-center justify-between gap-2 pt-0.5">
+                            <span className="text-[11px] text-orange-700 dark:text-orange-300 font-medium">
+                              Custom underground animation overrides active
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => updateBehaviorArt('dig', { ...DEFAULT_DIG_ROLE_ART })}
+                              className="text-[11px] font-semibold text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white underline cursor-pointer"
+                            >
+                              Reset to defaults
+                            </button>
+                          </div>
+                        )}
+
+                      {digRoleMode !== 'native' &&
+                        digBitEnabled &&
+                        !digMainEnabled &&
+                        bitFlight.mode === 'native' && (
+                          <div className="p-2.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-[11px]">
+                              Cluster Bits (Slot 3) is currently <strong>Native</strong>, so bit dig sprites are left to WA.
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => updateBitFlight({ mode: 'builder' })}
+                              className="px-2.5 py-1 rounded text-[11px] font-semibold bg-amber-600 hover:bg-amber-700 text-white cursor-pointer shrink-0"
+                            >
+                              Enable Bit Builder
+                            </button>
+                          </div>
+                        )}
+                    </div>
+                  )}
+
+                  {activeFlightRole === 'roam' && (
+                    <div className="space-y-3 text-xs">
+                      {builderOn && (
+                        <p className="text-[11px] rounded-lg border border-amber-300/70 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5 text-amber-800 dark:text-amber-200">
+                          The flight builder owns takeoff (<code className="font-mono">roam = true</code>): it waits for Space, draws the primary sheet, and zeroes <code className="font-mono">sheep.flight_1/2</code>. Turn the builder off to export the two native rotation strips below instead.
+                        </p>
+                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <RoamSheetField
+                          id="roam-sheet-1"
+                          label="Flying sheet 1 (`flight_1`)"
+                          asset={project.roamSheets?.flight1}
+                          path={roamSheetPath(project, 'flight1')}
+                          onChange={(asset) =>
+                            onChange({
+                              roamSheets: {
+                                ...project.roamSheets,
+                                flight1: asset,
+                                flight2: project.roamSheets?.flight2 ?? {},
+                              },
+                            })
+                          }
+                        />
+                        <RoamSheetField
+                          id="roam-sheet-2"
+                          label="Flying sheet 2 (`flight_2`)"
+                          asset={project.roamSheets?.flight2}
+                          path={roamSheetPath(project, 'flight2')}
+                          onChange={(asset) =>
+                            onChange({
+                              roamSheets: {
+                                ...project.roamSheets,
+                                flight2: asset,
+                                flight1: project.roamSheets?.flight1 ?? {},
+                              },
+                            })
+                          }
+                        />
+                      </div>
+                      {!!project.roamSheets?.flight1?.file !== !!project.roamSheets?.flight2?.file && (
+                        <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                          Both sheets are required for <code className="font-mono">sheep_sprites</code>.
+                        </p>
+                      )}
+                      <StockSpriteInput
+                        id="roam-gas-pose"
+                        label="Gas pose (`roam.gas.animal_sprite`)"
+                        numeric
+                        placeholder="0"
+                        value={project.roamConfig?.gas_animal_sprite ?? 0}
+                        onChange={(v) =>
+                          onChange({
+                            roamConfig: {
+                              ...project.roamConfig,
+                              gas_animal_sprite: v === '' ? 0 : Number(v),
+                            },
+                          })
+                        }
+                        desc={`Native ids: flight_1 ${project.roamConfig?.flight_1 ?? 0} (${stockSpriteName(project.roamConfig?.flight_1 ?? 0) ?? 'unused'}), flight_2 ${project.roamConfig?.flight_2 ?? 0} (${stockSpriteName(project.roamConfig?.flight_2 ?? 0) ?? 'unused'}).`}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Animation Mode 3x2 Grid */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-1.5">
+                      <Compass className="w-3.5 h-3.5 text-forge-600 dark:text-forge-400" />
+                      <span>Animation Mode (opts.anim)</span>
+                    </span>
+                    <span className="text-[10px] font-mono font-bold text-forge-700 dark:text-forge-300 bg-forge-50 dark:bg-forge-950/60 px-1.5 py-0.5 rounded border border-forge-200 dark:border-forge-800/60">
+                      {animCodeMap[activeAnim]}
+                    </span>
+                  </div>
+
+                  <div
+                    className={`grid grid-cols-2 sm:grid-cols-3 gap-2 ${
+                      activeSheetLocked ? 'opacity-50 pointer-events-none' : ''
+                    }`}
+                  >
+                    {(
+                      [
+                        { id: 'track', name: 'Track Vector', sub: 'Points flight angle', code: 'track = 2' },
+                        { id: 'rotation', name: 'Speed Tumble', sub: 'Velocity spin', code: 'rotation = 3' },
+                        { id: 'slow', name: 'Slow Spin', sub: '0.5 rad/f spin', code: 'slow = 1' },
+                        { id: 'medium', name: 'Medium Spin', sub: '0.8 rad/f spin', code: 'medium = 1' },
+                        { id: 'fast', name: 'Fast Spin', sub: '1.35 rad/f spin', code: 'fast = 1' },
+                        { id: 'none', name: 'Fixed Upright', sub: 'Locked 0° turn', code: 'none = 5' },
+                      ] as const
+                    ).map((item) => {
+                      const isSelected = activeAnim === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          disabled={activeSheetLocked}
+                          onClick={() => updateActiveRoleParams({ anim: item.id })}
+                          className={`relative p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
+                            isSelected
+                              ? 'border-forge-500 bg-forge-50/40 dark:bg-forge-950/30 ring-1 ring-forge-500'
+                              : 'border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 hover:border-stone-300 dark:hover:border-stone-700'
+                          }`}
+                        >
+                          {isSelected && (
+                            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-xs bg-forge-600" />
+                          )}
+                          <div
+                            className={`text-xs font-bold leading-tight pr-3 ${
+                              isSelected
+                                ? 'text-forge-700 dark:text-forge-300'
+                                : 'text-stone-800 dark:text-stone-200'
+                            }`}
+                          >
+                            {item.name}
+                          </div>
+                          <div className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5 leading-tight">
+                            {item.sub}
+                          </div>
+                          <div className="text-[10px] font-mono text-stone-400 mt-1">
+                            {item.code}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 3. Flight Sheet Animation Card */}
+                <div
+                  className={`p-3.5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/30 space-y-2.5 ${
+                    activeSheetLocked ? 'opacity-50' : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wider">
+                      Flight Sheet Animation
+                    </span>
+                    <span className="text-[10px] font-mono text-stone-400">50 Hz loop</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div className="space-y-1 text-center">
+                      <label
+                        htmlFor="flight-num-frames"
+                        className="block text-[11px] font-medium text-stone-600 dark:text-stone-400"
+                      >
+                        Total Frames
+                      </label>
+                      <input
+                        id="flight-num-frames"
+                        type="number"
+                        min={1}
+                        max={64}
+                        disabled={activeSheetLocked}
+                        value={activeFrames}
+                        onChange={(e) =>
+                          updateActiveRoleParams({ frames: Math.max(1, Number(e.target.value)) })
+                        }
+                        className="w-full text-xs font-mono text-center px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                      />
+                    </div>
+
+                    <div className="space-y-1 text-center">
+                      <label
+                        htmlFor="flight-anim-speed"
+                        className="block text-[11px] font-medium text-stone-600 dark:text-stone-400"
+                      >
+                        Anim Speed
+                      </label>
+                      <input
+                        id="flight-anim-speed"
+                        type="number"
+                        step={0.1}
+                        min={0.1}
+                        max={10.0}
+                        disabled={activeSheetLocked}
+                        value={activeAnimSpeed}
+                        onChange={(e) =>
+                          updateActiveRoleParams({
+                            animSpeed: Math.max(0.1, Number(e.target.value)),
+                          })
+                        }
+                        className="w-full text-xs font-mono text-center px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                      />
+                    </div>
+
+                    <div className="space-y-1 text-center">
+                      <label
+                        htmlFor="flight-spin-rate"
+                        className="block text-[11px] font-medium text-stone-600 dark:text-stone-400"
+                      >
+                        Spin Rate
+                      </label>
+                      <input
+                        id="flight-spin-rate"
+                        type="number"
+                        step={0.1}
+                        min={0.1}
+                        max={10.0}
+                        disabled={activeSheetLocked}
+                        value={activeSpinRate}
+                        onChange={(e) =>
+                          updateActiveRoleParams({
+                            spinRate: Math.max(0.1, Number(e.target.value)),
+                          })
+                        }
+                        className="w-full text-xs font-mono text-center px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                      />
+                    </div>
+
+                    <div className="space-y-1 text-center">
+                      <label
+                        htmlFor="flight-z-depth"
+                        className="block text-[11px] font-medium text-stone-600 dark:text-stone-400"
+                      >
+                        Depth (z)
+                      </label>
+                      <input
+                        id="flight-z-depth"
+                        type="number"
+                        step={0.5}
+                        min={0}
+                        max={20}
+                        disabled={activeSheetLocked}
+                        value={activeZ}
+                        onChange={(e) =>
+                          updateActiveRoleParams({ z: Math.max(0, Number(e.target.value)) })
+                        }
+                        className="w-full text-xs font-mono text-center px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Generated Lua Code Box + Copy Button */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider">
+                      Generated Lua `sb.flight` Call
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopySbLua}
+                      className="text-[11px] font-semibold text-forge-700 dark:text-forge-300 bg-forge-50 dark:bg-forge-950/60 hover:bg-forge-100 dark:hover:bg-forge-900/60 px-2.5 py-1 rounded-lg border border-forge-200 dark:border-forge-800 transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedSbLua ? (
+                        <Check className="w-3.5 h-3.5" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                      <span>{copiedSbLua ? 'Copied' : 'Copy Lua'}</span>
+                    </button>
+                  </div>
+                  <pre className="text-xs font-mono bg-stone-950 text-forge-400 p-3 rounded-xl overflow-x-auto border border-stone-800 leading-relaxed">
+                    {sbFlightLuaPreview}
+                  </pre>
                 </div>
               </div>
             </div>
-
-            {/* 4. Generated Lua Code Preview */}
-            <div className="space-y-1.5">
-              <span className="text-[11px] font-mono font-semibold text-stone-500 uppercase tracking-wider">
-                Generated Lua `sb.flight` Call
-              </span>
-              <pre className="text-xs font-mono bg-stone-950 text-forge-400 p-3 rounded-lg overflow-x-auto border border-stone-800">
-{`-- inside install, after wa.weapons.replace{ ... }
-sb.flight(ctx, {
-  weapon = ctx.id,
-  sheet = "sprites/${sanitizeModFolder(project.id)}/missile.png",
-  anim = "${missile.anim || 'rotation'}",${(missile.frames || 1) > 1 ? `\n  cyclical = ${missile.frames},` : ''}${
-    missile.animSpeed && missile.animSpeed !== 1 ? `\n  anim_speed = ${missile.animSpeed},` : ''
-  }${
-    missile.spinRate && missile.spinRate !== 1 ? `\n  spin = ${missile.spinRate},` : ''
-  }${
-    missile.scale && missile.scale !== 1 ? `\n  scale = ${missile.scale},` : ''
-  }${missile.z !== undefined && missile.z !== 5 ? `\n  z = ${missile.z},` : ''}${
-    missile.size !== undefined && missile.size !== 1 ? `\n  size = ${missile.size},` : ''
-  }${missile.angle ? `\n  angle = ${missile.angle},` : ''}${
-    missile.mirror !== false ? '' : '\n  mirror = false,'
-  }${previewRoles ? `\n${previewRoles}` : ''}
-})`}
-              </pre>
-            </div>
           </div>
-        </div>
-      </div>
+        );
+      })()}
     </div>
   );
 };

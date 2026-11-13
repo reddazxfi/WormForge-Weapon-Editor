@@ -57,7 +57,7 @@ const files: ModFile[] = walk(BUNDLE).map((full) => {
 const bundles = readBundles(files);
 const weapons = readWeapons(bundles, files);
 check('test pack has one bundle', bundles.length === 1, String(bundles.length));
-check('test pack has 31 weapons', weapons.length === 31, String(weapons.length));
+check('test pack has 32 weapons', weapons.length === 32, String(weapons.length));
 
 const byName = new Map(weapons.map((weapon) => [weapon.name, weapon]));
 const projects = new Map<string, WeaponProject>();
@@ -127,7 +127,9 @@ for (const weapon of weapons) {
   near('WF 31: fire offset y', p.fireSequence?.offsetY, -3);
   near('WF 31: fire live aim', p.fireSequence?.liveAim, true);
   near('WF 31: fire cancel', p.fireSequence?.cancelOnWeaponChange, true);
-  near('WF 31: repeat-fire pose', p.fireSequence?.repeatFirePose, true);
+  // The burst no longer forces the Minigun's subtype (4): the record's own
+  // fire subtype (the Grenade's 2 here) is what the worm plays.
+  near('WF 31: fire subtype kept', p.specialSubtype, 2);
 }
 
 // ---- builder parameters (WF 30) -----------------------------------------
@@ -282,7 +284,7 @@ function fullProject(p: WeaponProject, name: string): WeaponProject {
     slot: p.slot ?? 'grenade',
     based_on: p.based_on ?? 'grenade',
     fireType: p.fireType ?? 'power',
-    specialSubtype: p.specialSubtype ?? 1,
+    specialSubtype: p.specialSubtype ?? 0,
     teleport: false,
     panel_icon: p.panel_icon ?? 'grenade',
     defaults: { ammo: 1, delay: 0, crateChance: 0, crateType: 'weapon', afterUse: '' },
@@ -331,6 +333,7 @@ for (const [name, p] of projects) {
     ['seq.fire_seq_mis', 'seq.fire_seq_mis{'],
     ['seq.fire_sequential_actor', 'seq.fire_sequential_actor{'],
     ['sheep_sprites', 'sheep_sprites = {'],
+    ['flash = {', 'flash = {'],
   ];
   for (const [from, to] of markers) {
     if (!original.includes(from)) continue;
@@ -417,6 +420,34 @@ return {
     String(lua.split('local x = ev.x').length - 1),
   );
   check('custom on_explode keeps the burst beside it', lua.includes('blast.explode{'));
+}
+
+// ---- firing-state sprite (WF 32) ---------------------------------------
+{
+  const p = project('WF 32 Hold Flash')!;
+  near('WF 32: flash frames', p.hold.flashFrames, 3);
+  near('WF 32: flash out', p.hold.flashOut, 14);
+  near('WF 32: flash side', p.hold.flashSide, 2);
+  near('WF 32: flash scale', p.hold.flashScale, 1.5);
+  near('WF 32: keep while firing', p.hold.keepWhileFiring, true);
+  check('WF 32: flash sheet attached', !!p.hold.flashFile, 'no file attached');
+}
+
+// ---- fire subtype is settable, and not forced to the Minigun's -----------
+{
+  const grenade = project('WF 31 Sequential Hold')!;
+  const projectile = fullProject(
+    {
+      ...grenade,
+      // A missile (not a special): the choice has to reach the record for any
+      // family, since `fires.subtype` is not family-specific.
+      specialSubtype: 5,
+    } as WeaponProject,
+    'Subtype check',
+  );
+  const shot = generateLuaCode(projectile);
+  check('fire subtype 5 is written for a missile', shot.includes('fires = { subtype = 5 }'));
+  check('the burst does not force subtype 4', !shot.includes('subtype = 4'));
 }
 
 // ---- dependencies are not duplicated into extras -----------------------

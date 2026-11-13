@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Image as ImageIcon, Loader2, RotateCw, Trash2, Upload } from 'lucide-react';
+import { HelpCircle, Image as ImageIcon, Loader2, RotateCw, Trash2, Upload } from 'lucide-react';
 import { PackArtAsset, PackArtSlot, WeaponProject } from '../types/weapon';
 import { packArtPath } from '../utils/luaGenerator';
 import { buildRotationSheet } from '../utils/rotateSheet';
@@ -8,8 +8,10 @@ interface PackSpriteUploadProps {
   project: WeaponProject;
   onChange: (updated: Partial<WeaponProject>) => void;
   slot: PackArtSlot;
-  /** The record field this sheet ends up in, e.g. `missile.trail.sprite`. */
+  /** Human-readable card title. */
   label: string;
+  /** The record field this sheet ends up in, shown in hover tooltip. */
+  code?: string;
   hint: string;
   /** Extra record edits applied when art is uploaded (e.g. turn the trail on). */
   onUpload?: () => void;
@@ -40,6 +42,7 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
   onChange,
   slot,
   label,
+  code,
   hint,
   onUpload,
   rotate,
@@ -49,6 +52,7 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
   const asset = project.packArt?.[slot];
   const isGif = !!asset?.fileName?.toLowerCase().endsWith('.gif');
   const path = packArtPath(project, slot);
+  const headerTooltip = [hint, code ? `Field: ${code}` : undefined].filter(Boolean).join('\n') || undefined;
   const frameId = `pack-art-${slot}-frames`;
   const fpsId = `pack-art-${slot}-fps`;
   const rotateId = `pack-art-${slot}-rotate`;
@@ -128,11 +132,20 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
   };
 
   return (
-    <div className="p-3 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 space-y-2.5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-xs font-semibold text-stone-800 dark:text-stone-200">{label}</div>
-          <p className="text-[10px] text-stone-500 dark:text-stone-400 mt-0.5">{hint}</p>
+    <div className="p-2.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <div className="text-xs font-semibold text-stone-800 dark:text-stone-200 truncate" title={headerTooltip}>
+            {label}
+          </div>
+          {headerTooltip && (
+            <span
+              className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0 transition-colors"
+              title={headerTooltip}
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+            </span>
+          )}
         </div>
         {asset && (
           <button
@@ -194,8 +207,8 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
                 <span className="text-stone-400"> ({(asset.file.size / 1024).toFixed(1)} KB)</span>
               )}
             </>
-          ) : (
-            <span>Stock sprite field — upload a PNG or GIF to ship pack art.</span>
+            ) : (
+            <span>Upload a PNG or GIF to replace stock art.</span>
           )}
         </div>
       </div>
@@ -203,12 +216,29 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
       {asset && (
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
-            <label
-              htmlFor={frameId}
-              className="text-[11px] font-medium text-stone-700 dark:text-stone-300"
-            >
-              Frames
-            </label>
+            <div className="flex items-center justify-between gap-1">
+              <label
+                htmlFor={frameId}
+                className="text-[11px] font-medium text-stone-700 dark:text-stone-300 cursor-pointer"
+                title={
+                  isGif
+                    ? 'GIF files use their built-in frame timing.'
+                    : 'Number of vertical frames in the PNG sheet (1 = still image).'
+                }
+              >
+                Frames
+              </label>
+              <span
+                className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0"
+                title={
+                  isGif
+                    ? 'GIF files use their built-in frame timing.'
+                    : 'Number of vertical frames in the PNG sheet (1 = still image).'
+                }
+              >
+                <HelpCircle className="w-3 h-3" />
+              </span>
+            </div>
             <input
               id={frameId}
               type="number"
@@ -219,19 +249,23 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
               onChange={(e) => updateAsset({ frames: Math.max(1, Number(e.target.value) || 1) })}
               className="w-full text-xs font-mono px-2 py-1 rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white disabled:opacity-50"
             />
-            <p className="text-[10px] text-stone-400">
-              {isGif
-                ? 'GIF timing is used as-is.'
-                : 'Vertical PNG cells. 1 = still image; more loop at this FPS.'}
-            </p>
           </div>
           <div className="space-y-1">
-            <label
-              htmlFor={fpsId}
-              className="text-[11px] font-medium text-stone-700 dark:text-stone-300"
-            >
-              FPS
-            </label>
+            <div className="flex items-center justify-between gap-1">
+              <label
+                htmlFor={fpsId}
+                className="text-[11px] font-medium text-stone-700 dark:text-stone-300 cursor-pointer"
+                title="Playback rate written to mod.toml."
+              >
+                FPS
+              </label>
+              <span
+                className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0"
+                title="Playback rate written to mod.toml."
+              >
+                <HelpCircle className="w-3 h-3" />
+              </span>
+            </div>
             <input
               id={fpsId}
               type="number"
@@ -243,7 +277,6 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
               }
               className="w-full text-xs font-mono px-2 py-1 rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
             />
-            <p className="text-[10px] text-stone-400">Sheet playback rate (mod.toml).</p>
           </div>
         </div>
       )}
@@ -251,12 +284,21 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
       {rotate && asset && !isGif && (
         <div className="pt-2 border-t border-stone-200 dark:border-stone-700/70 space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <label
-              htmlFor={rotateId}
-              className="text-[11px] font-medium text-stone-700 dark:text-stone-300"
-            >
-              Rotation sheet
-            </label>
+            <div className="flex items-center gap-1">
+              <label
+                htmlFor={rotateId}
+                className="text-[11px] font-medium text-stone-700 dark:text-stone-300 cursor-pointer"
+                title={`Bakes a 360° directional strip of ${rotateFrames} frames (frame 0 pointing up, rotating clockwise) and sets animation mode to follow flight direction.`}
+              >
+                Rotation sheet
+              </label>
+              <span
+                className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0"
+                title={`Bakes a 360° directional strip of ${rotateFrames} frames (frame 0 pointing up, rotating clockwise) and sets animation mode to follow flight direction.`}
+              >
+                <HelpCircle className="w-3 h-3" />
+              </span>
+            </div>
             <select
               id={rotateId}
               value={rotateFrames}
@@ -274,7 +316,8 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
               type="button"
               onClick={makeRotationSheet}
               disabled={rotating}
-              className="px-3 py-1.5 text-xs font-medium bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-300 dark:border-stone-700 rounded-md transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              title={`Bake ${rotateFrames} directional frames from this image`}
+              className="px-3 py-1 text-xs font-medium bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 border border-stone-300 dark:border-stone-700 rounded-md transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
             >
               {rotating ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -294,12 +337,6 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
             )}
           </div>
 
-          <p className="text-[10px] text-stone-400">
-            Bakes a full 360° strip into {rotateFrames} frames, frame 0 pointing up
-            and turning clockwise (WA&apos;s airmisl order). Sets the record&apos;s native
-            animation to 2 so the frame follows the flight direction; 1 spins it
-            on a timer instead.
-          </p>
           {rotateError && <p className="text-[10px] text-rose-500">{rotateError}</p>}
         </div>
       )}

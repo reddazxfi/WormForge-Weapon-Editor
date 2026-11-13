@@ -4,6 +4,7 @@ import {
   ClustletConfig,
   DigActionConfig,
   FlightRoleArt,
+  HoldConfig,
   PackArtSlot,
   RoamActionConfig,
   WeaponProject,
@@ -195,6 +196,40 @@ export function holdSheetPath(project: WeaponProject): string {
   return sheet && sheet.startsWith(own) ? sheet : `${own}hold.png`;
 }
 
+/**
+ * The firing-state sprite (`hold.flash.sheet`): a still drawn over the worm
+ * while WA is in its firing states, at the gun's muzzle. The engine loads it
+ * like the hold sheet, so it has no record slot and no `mod.toml` declaration —
+ * the file only has to exist at the declared path.
+ */
+export function flashSheetPath(project: WeaponProject): string {
+  return `sprites/${sanitizeModFolder(project.id)}/flash.png`;
+}
+
+/**
+ * Resolves engine-space `hold.flash` parameters (`out`, `side`, `scale`) so
+ * the firing sprite follows the normal weapon's `weapRadius`, `weapRotation`,
+ * and `scale` (`weap_scale`) consistently in both preview and Lua export.
+ */
+export function resolvedHoldFlash(hold: HoldConfig): {
+  out: number;
+  side: number;
+  scale: number;
+} {
+  const weapRadius = Number(hold.weapRadius ?? 6);
+  const weapScale = Number(hold.scale) || 1;
+  const weapRotRad = ((Number(hold.weapRotation) || 0) * Math.PI) / 180;
+  const localOut = Number(hold.flashOut ?? 0) * weapScale;
+  const localSide = Number(hold.flashSide ?? 0) * weapScale;
+  const cos = Math.cos(weapRotRad);
+  const sin = Math.sin(weapRotRad);
+  return {
+    out: -weapRadius + localOut * cos + localSide * sin,
+    side: -localOut * sin + localSide * cos,
+    scale: (Number(hold.flashScale ?? 1) || 1) * weapScale,
+  };
+}
+
 /** Every record slot that accepts pack art during installation. */
 export const PACK_ART_SLOTS: PackArtSlot[] = [
   'strike_sprite',
@@ -307,6 +342,30 @@ function homingWindowRow(
 /** The `sb.flight` keys shared by the primary, bit and state roles. */
 function roleArtRows(cfg: FlightRoleArt, indent: string): string[] {
   const rows = [`${indent}anim = ${luaQuote(cfg.anim || 'rotation')},`];
+  if (cfg.frames > 1) rows.push(`${indent}cyclical = ${cfg.frames},`);
+  if (cfg.animSpeed && cfg.animSpeed !== 1) {
+    rows.push(`${indent}anim_speed = ${formatNumber(cfg.animSpeed)},`);
+  }
+  if (cfg.spinRate && cfg.spinRate !== 1) {
+    rows.push(`${indent}spin = ${formatNumber(cfg.spinRate)},`);
+  }
+  if (cfg.scale && cfg.scale !== 1) {
+    rows.push(`${indent}scale = ${formatNumber(cfg.scale)},`);
+  }
+  if (cfg.mirror === false) rows.push(`${indent}mirror = false,`);
+  if (cfg.z !== undefined && cfg.z !== 5) {
+    rows.push(`${indent}z = ${formatNumber(cfg.z)},`);
+  }
+  return rows;
+}
+
+/** Optional animation/transform overrides applied only while `dig` probes are inside terrain. */
+export function digArtOverrideRows(cfg: FlightRoleArt | undefined, indent: string): string[] {
+  if (!cfg) return [];
+  const rows: string[] = [];
+  if (cfg.anim && cfg.anim !== 'track') {
+    rows.push(`${indent}anim = ${luaQuote(cfg.anim)},`);
+  }
   if (cfg.frames > 1) rows.push(`${indent}cyclical = ${cfg.frames},`);
   if (cfg.animSpeed && cfg.animSpeed !== 1) {
     rows.push(`${indent}anim_speed = ${formatNumber(cfg.animSpeed)},`);
@@ -716,7 +775,8 @@ export function generateLuaCode(project: WeaponProject): string {
     holdRows.push(`sheet = ${luaQuote(holdSheetPath(project))},`);
     holdRows.push(`hand = holds.PX_HANDS[${handIdx}],`);
     holdRows.push(`hand_type = ${handIdx},`);
-    holdRows.push(`hand_radius = ${h.handRadius ?? 10},`);
+    const drawHand = h.drawHand !== false;
+    holdRows.push(`hand_radius = ${drawHand ? (h.handRadius ?? 10) : 0.01},`);
     holdRows.push('hand_rotation = 1,');
     holdRows.push('hand_radial_rotation = 1,');
     holdRows.push(`weap_radius = ${h.weapRadius ?? 6},`);
@@ -737,10 +797,24 @@ export function generateLuaCode(project: WeaponProject): string {
       }
     }
     if (h.handScale && h.handScale !== 1) holdRows.push(`hand_scale = ${h.handScale},`);
-    if (!h.drawHand) holdRows.push('draw_hand = false,');
+    if (!drawHand) holdRows.push('draw_hand = false,');
     if (h.keepWhileFiring) holdRows.push('keep_while_firing = true,');
     if (h.thrown) holdRows.push('thrown = true,');
     if (h.putAway) holdRows.push('put_away = true,');
+    if (h.flashFile) {
+      // The firing-state sprite. The engine draws it on the firing states
+      // (0x6A/0x6B) for `frames` + 1 ticks, with `out` / `side` relative to
+      // the worm centre and `scale` standalone — fold the normal weapon's
+      // radius, rotation, and scale in so the muzzle flash stays locked to it.
+      const resolvedFlash = resolvedHoldFlash(h);
+      holdRows.push('flash = {');
+      holdRows.push(`  sheet = ${luaQuote(flashSheetPath(project))},`);
+      holdRows.push(`  out = ${formatNumber(resolvedFlash.out)},`);
+      holdRows.push(`  side = ${formatNumber(resolvedFlash.side)},`);
+      holdRows.push(`  scale = ${formatNumber(resolvedFlash.scale)},`);
+      holdRows.push(`  frames = ${Math.max(1, Math.round(h.flashFrames ?? 3))},`);
+      holdRows.push('},');
+    }
     if (usesHoldArt) {
       // `px_hold_art` takes the same table plus these two presentation keys
       // (the engine ignores them). It has no scale key: `weap_scale` is folded
@@ -841,6 +915,9 @@ export function generateLuaCode(project: WeaponProject): string {
   const packSprites: string[] = [];
   if (usesHold && project.hold?.sheetFile) {
     packSprites.push(luaQuote(holdSheetPath(project)));
+  }
+  if (usesHold && project.hold?.flashFile) {
+    packSprites.push(luaQuote(flashSheetPath(project)));
   }
   if (usesMissileSprite) {
     packSprites.push(luaQuote(missileFlightSheetPath(project)));
@@ -1002,6 +1079,19 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push('      },');
   }
 
+  // `fires.subtype` (+0x34) is not family-specific: every record has it, and
+  // WA plays that number's own fire animation and sound (4 = Minigun, 5 =
+  // Shotgun, …). Write it when the author's choice differs from the inherited
+  // record; the archetype buttons and a donor change re-base it with the
+  // donor's own number, so an untouched weapon still writes nothing. It is a
+  // firing-header value only: it never touches the held-art animation.
+  {
+    const subtype = override('fires.subtype') ?? project.specialSubtype;
+    if (subtype !== undefined && (!baseline || subtype !== baseline.specialSubtype)) {
+      lines.push(`      fires = { subtype = ${subtype} },`);
+    }
+  }
+
   if (project.fireType === 'hitscan') {
     const gunTouched =
       !baseline ||
@@ -1105,13 +1195,6 @@ export function generateLuaCode(project: WeaponProject): string {
     }
   } else if (project.fireType === 'cursor' && project.teleport) {
     lines.push('      on_select = { cursor = true },');
-  } else if (project.fireType === 'special') {
-    // Special subtypes have per-subtype layouts; only the selector is generic.
-    // An explicit `fires.subtype` override wins over the archetype's number.
-    const subtype = override('fires.subtype') ?? project.specialSubtype;
-    if (!baseline || subtype !== baseline.specialSubtype) {
-      lines.push(`      fires = { subtype = ${subtype} },`);
-    }
   } else if (
     project.fireType === 'power' ||
     (project.fireType === 'drop' && body.fuse) ||
@@ -2299,8 +2382,9 @@ export function generateLuaCode(project: WeaponProject): string {
 
   // Sequential fire: the first shot leaves from `on_fire`, the rest from
   // fire_seq's hidden timer, which holds WA's shot counters so the worm stays
-  // in its firing pose. `fires = { subtype = 4 }` is the minigun's repeat-fire
-  // pose; without it WA leaves the fire method after the first shot.
+  // in the firing pose. The pose's animation and sound are the record's own
+  // `fires.subtype` (chosen in Flight & Physics); nothing is forced here, so a
+  // burst no longer inherits the Minigun's subtype (shells + firing loop).
   if (usesFireSequence) {
     const f = fireSequence!;
     const count = Math.max(1, Math.round(f.count));
@@ -2326,9 +2410,6 @@ export function generateLuaCode(project: WeaponProject): string {
         }
       : null;
     lines.push('      -- Sequential fire (`wf-lib/fire_seq`): one trigger, a burst.');
-    if (f.repeatFirePose && project.fireType !== 'special') {
-      lines.push('      fires = { subtype = 4 },');
-    }
     lines.push('      on_fire = function(ev)');
     if (!live) {
       // Lock the aim to the moment the trigger was pulled.
@@ -2686,11 +2767,18 @@ export function generateLuaCode(project: WeaponProject): string {
       lines.push('      },');
     }
 
-    // Digging: no state, no sheet. The builder cycles the role's own sheet
-    // while four terrain probes around the nose are solid (PX's Bunker Buster
-    // test), so it only applies when the record's dig sprites were zeroed.
+    // Digging: terrain probes around the nose detect solid land (PX's Bunker
+    // Buster test). Emit `dig = true` at defaults, or `dig = { ... }` when the
+    // author overrides underground animation parameters (e.g. faster spin/speed).
     if (zeroMainDig || zeroBitDig) {
-      lines.push('      dig = true,');
+      const digRows = digArtOverrideRows(project.behaviorArt?.dig, '        ');
+      if (digRows.length > 0) {
+        lines.push('      dig = {');
+        for (const row of digRows) lines.push(row);
+        lines.push('      },');
+      } else {
+        lines.push('      dig = true,');
+      }
     }
 
     // A roaming animal walks until the turn's player presses Space, then

@@ -1688,3 +1688,58 @@ of to the game's pixels. It now draws what `px_effects.lua` draws:
   `(damage + 2) * 2` (`lib/custom_explosion.lua`), so a 45-damage blast is a
   94 px ring — the old preset's 30 px was why the preview looked small next to
   the in-game screenshot (the electric mine's 56-damage blast is 116 px).
+
+## 2026-11-12 — Hold builder polish, firing flash sync, 6-role hotbar & underground `dig` overrides
+
+### Hold Art Builder layout, `weap_scale`, radius parity & `draw_hand` fallback
+
+- **Compact 3-column layout** in `HoldPreview.tsx` Section 1: left column
+  for hand controls (Draw Hand, single-button **Hand Type** cycler, Hand Scale,
+  Hand Radius), center column for the 600×600 canvas + Worm Posture (`0–31`) +
+  Flip button, right column for Launchable/Throwable, Weapon Radius/Rotation,
+  Scale Multiplier (`weap_scale`), Put-Away / Keep-While-Firing toggles, and
+  inline muzzle flash controls. Multi-frame hold sheets loop continuously
+  whenever `frames > 1`.
+- **`weap_scale` & firing flash alignment (`resolvedHoldFlash`)**:
+  - `hold.scale` now scales both the preview weapon draw and emits
+    `weap_scale = ...` in Lua.
+  - Because WormForge evaluates `hold.flash` (`out`, `side`, `scale`) relative to
+    the worm centre rather than the weapon pivot, `resolvedHoldFlash(hold)` in
+    `luaGenerator.ts` resolves the weapon's `weapRadius`, `weapRotation`, and
+    `weap_scale` into both the live canvas preview and the exported Lua `flash`
+    table, while `importFeatures.ts` inverts the transform back into local
+    weapon coordinates on bundle import.
+- **Radius parity & `draw_hand = false` engine bug workaround**:
+  - Raised the negative limit on both **Weapon Radius** and **Hand Radius**
+    sliders from `-10` to `-35` px so both sides match (`-35..35` px).
+  - Because WormForge still draws the hand even with `draw_hand = false`,
+    `luaGenerator.ts` emits `hand_radius = 0.01,` alongside `draw_hand = false,`
+    whenever **Draw Hand** is unchecked while leaving the user's `hold.handRadius`
+    value intact in UI state (`importFeatures.ts` restores `fallback.handRadius`
+    when loading `draw_hand = false` with `hand_radius = 0.01`).
+
+### Section 2 Flight Sprite Builder: 6-role hotbar & underground `dig = { ... }` overrides
+
+- **6-slot hotbar** (`Main`, `Home`, `Bits`, `HomeBit`, `Sheep`, `Dig`):
+  replaces the old stacked `FlightRoleEditor` cards with role icon tabs from
+  `spec/` (`normal.png`, `hmissil1.png`, `clusters.png`, `homing_clustlets.png`,
+  `sspsheep1.png`, `dig.png`), greying out roles that do not apply to the
+  current weapon configuration. Multi-frame super-sheets slice and preview cleanly
+  across roles.
+- **Underground `dig` animation & transform overrides**:
+  - `wfws_sprite_builder.lua`: `dig_settings` and `M.flight` now accept optional
+    `anim`, `anim_speed`, `spin`, `cyclical`, `scale` (multiplied by `size`),
+    `mirror`, `z`, and `sheet` inside `dig = { ... }`. When the 4 nose terrain
+    probes detect solid land (`digging == true`), those overrides take effect
+    without despawning/respawning the follower actor when sharing the owning
+    sheet, reverting cleanly in open air.
+  - `M.spin_turn` now multiplies by `(active_spin or 1.0)` so `Spin Rate`
+    scales `slow`/`medium`/`fast` fixed spins as well as `rotation` ("Speed
+    Tumble"), and pure vertical digging (`vx == 0, vy != 0`) uses a tiny
+    `eff_vx = 0.001` fallback in both Lua and the 50 Hz React preview so drills
+    and saws keep spinning straight up/down.
+  - `luaGenerator.ts` keeps `dig = true,` at defaults (`anim = "track"`,
+    `frames <= 1`, `animSpeed = 1`, `spinRate = 1`, `scale = 1`, `mirror = true`,
+    `z = 5`) and emits `dig = { ... }` with only customized keys when overridden;
+    `importFeatures.ts` imports both forms.
+

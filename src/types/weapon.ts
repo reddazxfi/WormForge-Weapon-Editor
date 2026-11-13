@@ -130,6 +130,20 @@ export interface HoldConfig {
   /** Pixel size of the uploaded hold image; `px_hold_art` needs the cell. */
   sheetWidth?: number;
   sheetHeight?: number;
+  /**
+   * Firing-state sprite (`hold.flash`): drawn over the worm on WA's firing
+   * states, at the gun's muzzle. `flashFrames` is its lifetime in 50 Hz ticks
+   * (`frames` + 1 on screen), while `flashOut`/`flashSide`/`flashScale` are
+   * relative to the weapon's own pivot, rotation, and scale (`weap_scale`).
+   */
+  flashFile?: File;
+  flashPreview?: string;
+  flashWidth?: number;
+  flashHeight?: number;
+  flashFrames?: number;
+  flashOut?: number;
+  flashSide?: number;
+  flashScale?: number;
   handType: HandType;
   handRadius: number;
   weapRadius: number;
@@ -332,8 +346,6 @@ export interface FireSequenceConfig {
   liveAim: boolean;
   /** End the burst when the worm stops holding this weapon. */
   cancelOnWeaponChange: boolean;
-  /** `fires = { subtype = 4 }`: WA's repeat-fire pose, so the worm keeps aiming. */
-  repeatFirePose: boolean;
   /** Actors mode: the spawned sheet and its physics. */
   actorSprite: string;
   actorGravity: boolean;

@@ -17,7 +17,7 @@ import { stockDonor, stockDonorBaseline } from './data/stockDonors';
 import { DEFAULT_BODY, DEFAULT_DIG, DEFAULT_FIRE, DEFAULT_ROAM } from './data/defaults';
 import { DEFAULT_CUSTOM_SOUNDS } from './data/soundPresets';
 import { DEFAULT_ROLE_ART } from './data/spriteBuilder';
-import type { RecordTabId } from './data/recordTabs';
+import { bitActionOf, visibleRecordTabs, type RecordTabId } from './data/recordTabs';
 import { CheckCircle2 } from 'lucide-react';
 
 /**
@@ -39,7 +39,9 @@ const INITIAL_PROJECT: WeaponProject = {
   burst: stockDonor('grenade')?.burst ?? 'nothing',
   recordOverrides: { ...(stockDonor('grenade')?.recordOverrides ?? {}) },
   fireType: 'power',
-  specialSubtype: 1,
+  // The donor's own subtype: the Grenade's throw. It is the worm fire
+  // animation + sound, and the Fire Subtype control edits it.
+  specialSubtype: stockDonor('grenade')?.specialSubtype ?? 0,
   teleport: false,
   id: 'wfws.grenade',
   name: 'Grenade',
@@ -166,6 +168,26 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  useEffect(() => {
+    const allowed = visibleRecordTabs(
+      project.burst,
+      bitActionOf(project.body.clustlet),
+      project.fireType,
+      project.teleport
+    );
+    if (!allowed.some((tab) => tab.id === activeSubTab)) {
+      setActiveSubTab('missile');
+    }
+  }, [
+    project.burst,
+    project.body.clustlet.bit_action,
+    project.body.clustlet.homing,
+    project.body.clustlet.contact,
+    project.fireType,
+    project.teleport,
+    activeSubTab,
+  ]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
