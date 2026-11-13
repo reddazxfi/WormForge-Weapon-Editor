@@ -989,6 +989,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     let vx = 0;
     let vy = 0;
     let rot = animStateRef.current.rotation || 0;
+    let roamLeft = false;
     let phase = animStateRef.current.phase || 0;
     let frame = animStateRef.current.frame || 0;
     let started = false;
@@ -1069,6 +1070,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
         const down = (tilt.down * Math.PI) / 180;
         const speed = Math.hypot(vx, vy);
         const grounded = flightMode === 'walk';
+        roamLeft = false;
         if (!grounded) {
           if (speed >= 0.05) rot = Math.atan2(vy, vx) + Math.PI / 2;
         } else if (speed < 0.05) {
@@ -1078,6 +1080,13 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
           let delta = want - restRad;
           delta = Math.atan2(Math.sin(delta), Math.cos(delta));
           rot = restRad + Math.min(down, Math.max(-up, delta));
+          // A mirrored sheet would be flipped top to bottom once the pose lies
+          // flat, so walk left by turning the pose instead (the builder does
+          // the same). `facing` stays 1 for `anim = roam`.
+          if (vx < 0) {
+            rot = -rot;
+            roamLeft = true;
+          }
         }
       } else if (anim === 'track') {
         rot = Math.atan2(vy, vx) + Math.PI / 2;
@@ -1159,9 +1168,16 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       const numFrames = Math.max(1, activeRolePreviewCfg.frames || 1);
       const scaleMult = (activeRolePreviewCfg.scale || 1.0) * (missile.size ?? 1);
       const mirror = activeRolePreviewCfg.mirror !== false;
-      // `angle` is added to the drawn rotation, negated on a mirrored sheet, as
-      // the builder does it.
-      const angleOffset = (((missile.angle ?? 0) * Math.PI) / 180) * (mirror && vx < 0 ? -1 : 1);
+      // `anim = roam` never mirrors: a walking pose lies flat, so the engine's
+      // sprite-local mirror would show it upside down. Its ground pose is
+      // turned through the left instead (`roamLeft`), and its air pose tracks
+      // the heading on both sides.
+      const roamAnim = anim === 'roam';
+      const facing = mirror && !roamAnim && vx < 0 ? -1 : 1;
+      // `angle` is added to the drawn rotation, negated on a mirrored sheet (or
+      // on a left-turned roam pose), as the builder does it.
+      const angleOffset =
+        (((missile.angle ?? 0) * Math.PI) / 180) * (roamLeft || facing < 0 ? -1 : 1);
 
       // DRAW CANVAS
       ctx.clearRect(0, 0, width, height);
@@ -1259,8 +1275,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       ctx.translate(posX, posY);
       ctx.rotate(rot + angleOffset);
 
-      // `b.facing = mirror and (m.vx < 0 and -1 or 1) or 1`
-      const facing = mirror && vx < 0 ? -1 : 1;
+      // `b.facing = mirror and (m.vx < 0 and -1 or 1) or 1` (1 for a roam
+      // pose, which is never mirrored; see above).
       const zoom = missileZoom;
       ctx.scale(facing * scaleMult * (zoom / 4), scaleMult * (zoom / 4));
 

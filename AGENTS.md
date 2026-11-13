@@ -310,12 +310,17 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
     points where it flies. `rest` defaults to 90° (a sheet that points up lies
     flat for a side-on walk) in both the editor and the builder — keep the two in
     step, or the art rests upright in game while the preview shows it flat. The
-    ground heading is measured right-facing (the sheet is mirrored by `facing`),
-    so walking left does not read as a climb, the clamp uses a shortest-signed
-    delta, and `up`/`down` were swapped before (up tilted down). The Hold page's
-    **Roam Tilt** card edits the three angles and the flight preview's **Walk**
-    mode shows the ground lean; its **Arc/Orbit/Static** modes show the air
-    tracking.
+    ground heading is measured right-facing so walking left does not read as a
+    climb, and a leftward walk **turns the whole pose through the left** rather
+    than mirroring the sheet: the engine mirrors a sprite about its own vertical
+    axis, which is a top-to-bottom flip once the walking pose lies flat (the
+    animal came out belly-up). `anim = "roam"` therefore never sets `facing`
+    (the role's Mirror toggle is ignored for this preset), and the airborne
+    tracked angle already points both ways without a mirror. The clamp uses a
+    shortest-signed delta, and `up`/`down` were swapped before (up tilted down).
+    The Hold page's **Roam Tilt** card edits the three angles and the flight
+    preview's **Walk** mode shows the ground lean; its **Arc/Orbit/Static**
+    modes show the air tracking.
   - **Digging is not a state and has no sheet (but can override animation/transform).**
     Whenever the builder owns the flight art and the record digs (`action = "dig"`,
     or a cluster bit whose action is dig), the generator writes `dig.dive_sprite`

@@ -591,6 +591,7 @@ function M.flight(ctx, opts)
 
     local rot = 0
     local frame = 0
+    local roam_left = false
     local eff_vx = (digging and (m.vx or 0) == 0 and (m.vy or 0) ~= 0) and 0.001 or m.vx
     if cfg.turn_fn then
       rot = cfg.turn_fn(m, spin_ang[id])
@@ -606,10 +607,17 @@ function M.flight(ctx, opts)
     elseif active_anim_type == 4 then
       -- `anim = roam`: rest/lean while WA walks the animal (or while the
       -- builder draws its ground phase), full tracking once it is airborne.
+      local grounded = roam and ent.ident == "main" and not flying[id]
       rot = M.roam_angle(m.vx, m.vy, rest, up, down,
-        math.sqrt((m.vx or 0) ^ 2 + (m.vy or 0) ^ 2),
-        roam and ent.ident == "main" and not flying[id], spin_ang[id])
+        math.sqrt((m.vx or 0) ^ 2 + (m.vy or 0) ^ 2), grounded, spin_ang[id])
       spin_ang[id] = rot
+      -- A walking animal lies flat, so a mirrored sheet would come out flipped
+      -- top to bottom: the engine's mirror is about the sprite's own vertical
+      -- axis, which turns into a vertical flip once the art is on its side.
+      -- Turn the whole ground pose through the left instead, and never mirror
+      -- roam art (see `b.facing` below). In the air the tracked angle already
+      -- covers both sides, so it needs no mirror either.
+      if grounded and (m.vx or 0) < 0 then roam_left = true end
     end
 
     if cfg.frame_fn then
@@ -625,13 +633,22 @@ function M.flight(ctx, opts)
       cycl_phase[id] = nil
     end
 
-    b.facing = active_mirror and (m.vx < 0 and -1 or 1) or 1
+    -- `anim = roam` never mirrors. A mirrored walking pose comes out upside
+    -- down (the engine flips the sheet about its own vertical axis, and the
+    -- pose is lying on its side), so its direction comes from `roam_left`
+    -- instead. Airborne roam art is tracked by `roam_angle`, which already
+    -- points left or right without a mirror.
+    local roam_anim = active_anim_type == 4
+    b.facing = (active_mirror and not roam_anim) and (m.vx < 0 and -1 or 1) or 1
     b:frame(frame)
     -- `angle` is added in the drawn frame, and a mirrored sheet is flipped
     -- about the vertical axis, so the offset is negated on the left side to
-    -- keep the art pointing the same way either way.
+    -- keep the art pointing the same way either way. A roam ground pose that
+    -- was turned through the left is mirrored as a whole, offset included.
+    local drawn = math.deg(rot) + (b.facing < 0 and -angle or angle)
+    if roam_left then drawn = -drawn end
     b:gfx({
-      angle = (math.deg(rot) + (b.facing < 0 and -angle or angle)) % 360,
+      angle = drawn % 360,
       depth = active_z,
       scale = active_scale,
     })

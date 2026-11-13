@@ -1931,3 +1931,19 @@ WF 34 now documents the tracked air pose and the 90 degree walk rest; WF 35
 `tools/check_mod_import.ts` asserts the role round-trips and that the primary
 `track` stays at the top level. 35 weapons; `wfcheck` and every check script are
 clean.
+
+### The mirrored walk was upside down
+
+The 90 degree rest was right, but the leftward walk came out belly-up. The
+engine's `mirror_x` flips the sheet about its *own* vertical axis while keeping
+the rotation (see `crates/render/src/geom.rs`: "mirroring swaps the source
+columns rather than the geometry, so a mirrored sprite keeps its rotation"). For
+an upright missile that is invisible, but a walking pose lies flat, so the same
+mirror is a top-to-bottom flip.
+
+`anim = "roam"` now never mirrors (`b.facing = 1`, the role's Mirror toggle is
+ignored): the ground pose is turned through the left instead (`drawn = -drawn`
+for `vx < 0`, offset included), and in the air `track_angle` already points both
+ways. `roam_angle` still measures the lean on the right-facing side; only the
+final angle is mirrored. The 50 Hz preview's `anim = "roam"` does the same, and
+its `facing` stays 1 so the later leftward pose cannot flip.
