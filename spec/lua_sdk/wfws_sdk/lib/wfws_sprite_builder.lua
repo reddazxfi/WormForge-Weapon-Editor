@@ -346,6 +346,7 @@ function M.flight(ctx, opts)
   local active = {}      -- [id] = cfg in force this frame
   local follow = {}      -- [id] = { actor, cfg, gen, seen }
   local spin_ang = {}
+  local roam_side = {}   -- [id] = true while the walking pose faces left
   local cycl_phase = {}
   local dig_dir = {}     -- [id] = last heading, for the terrain probes
   local dig_hold = {}    -- [id] = frames left of "digging"
@@ -425,6 +426,7 @@ function M.flight(ctx, opts)
       if f.seen then f.seen = false return end
       follow[id] = nil
       spin_ang[id] = nil
+      roam_side[id] = nil
       cycl_phase[id] = nil
       kind[id] = nil
       sig[id] = nil
@@ -605,19 +607,22 @@ function M.flight(ctx, opts)
       rot = M.spin_turn(spin_ang[id], eff_vx, (ANIM_SPEED[active_anim] or 0.5) * (active_spin or 1.0))
       spin_ang[id] = rot
     elseif active_anim_type == 4 then
-      -- `anim = roam`: rest/lean while WA walks the animal (or while the
-      -- builder draws its ground phase), full tracking once it is airborne.
+      -- `anim = roam`: the walking pose. The sheet is authored facing right and
+      -- mirrored for left, so the heading is measured on the right-facing side
+      -- (`hx`) and the mirror supplies the side. Super sheep flight is drawn
+      -- from `roam = { sheet = ..., anim = ... }`, a different config with its
+      -- own anim, so it never reaches this branch.
       local grounded = roam and ent.ident == "main" and not flying[id]
-      rot = M.roam_angle(m.vx, m.vy, rest, up, down,
-        math.sqrt((m.vx or 0) ^ 2 + (m.vy or 0) ^ 2), grounded, spin_ang[id])
+      local vx = m.vx or 0
+      if active_mirror then
+        if vx < 0 then roam_side[id] = true
+        elseif vx > 0 then roam_side[id] = false end   -- vx == 0 keeps the side
+        roam_left = roam_side[id] or false
+      end
+      local hx = active_mirror and math.abs(vx) or vx
+      rot = M.roam_angle(hx, m.vy, rest, up, down,
+        math.sqrt(vx ^ 2 + (m.vy or 0) ^ 2), grounded, spin_ang[id])
       spin_ang[id] = rot
-      -- A walking animal lies flat, so a mirrored sheet would come out flipped
-      -- top to bottom: the engine's mirror is about the sprite's own vertical
-      -- axis, which turns into a vertical flip once the art is on its side.
-      -- Turn the whole ground pose through the left instead, and never mirror
-      -- roam art (see `b.facing` below). In the air the tracked angle already
-      -- covers both sides, so it needs no mirror either.
-      if grounded and (m.vx or 0) < 0 then roam_left = true end
     end
 
     if cfg.frame_fn then
@@ -633,20 +638,27 @@ function M.flight(ctx, opts)
       cycl_phase[id] = nil
     end
 
-    -- `anim = roam` never mirrors. A mirrored walking pose comes out upside
-    -- down (the engine flips the sheet about its own vertical axis, and the
-    -- pose is lying on its side), so its direction comes from `roam_left`
-    -- instead. Airborne roam art is tracked by `roam_angle`, which already
-    -- points left or right without a mirror.
+    -- Walking pose (`anim = roam`): a real mirror about the sprite's vertical
+    -- axis, side kept in `roam_side` so a straight drop does not snap to the
+    -- right. Every other anim keeps the old rule: mirror by the sign of `vx`.
     local roam_anim = active_anim_type == 4
-    b.facing = (active_mirror and not roam_anim) and (m.vx < 0 and -1 or 1) or 1
+    if roam_anim then
+      b.facing = roam_left and -1 or 1
+    else
+      b.facing = active_mirror and (m.vx < 0 and -1 or 1) or 1
+    end
     b:frame(frame)
     -- `angle` is added in the drawn frame, and a mirrored sheet is flipped
     -- about the vertical axis, so the offset is negated on the left side to
-    -- keep the art pointing the same way either way. A roam ground pose that
-    -- was turned through the left is mirrored as a whole, offset included.
-    local drawn = math.deg(rot) + (b.facing < 0 and -angle or angle)
-    if roam_left then drawn = -drawn end
+    -- keep the art pointing the same way either way.
+    local drawn
+    if roam_anim and roam_left then
+      drawn = -(math.deg(rot) + angle)   -- screen mirror of the right-facing pose
+    elseif roam_anim then
+      drawn = math.deg(rot) + angle
+    else
+      drawn = math.deg(rot) + (b.facing < 0 and -angle or angle)
+    end
     b:gfx({
       angle = drawn % 360,
       depth = active_z,
