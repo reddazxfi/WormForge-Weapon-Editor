@@ -118,7 +118,6 @@ const RecordSectionRow: React.FC<{
     <button
       type="button"
       onClick={onClick}
-      title={tab.hint}
       aria-current={active ? 'page' : undefined}
       className={`relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
         active
@@ -159,12 +158,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Action). The parent row still selects its own tab; the chevron only opens
   // and closes the children.
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-  const tabs = visibleRecordTabs(
-    project.burst,
-    bitActionOf(project.body.clustlet),
-    project.fireType,
-    project.teleport
-  );
+  const tabs = visibleRecordTabs(project.burst, bitActionOf(project.body.clustlet));
 
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 flex-col border-r border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900 lg:flex">
@@ -249,7 +243,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </span>
                           ) : tab.id === 'burst' ? (
                             <span className="rounded bg-stone-200 px-1 font-mono text-[9px] uppercase text-stone-600 dark:bg-stone-700 dark:text-stone-300">
-                              {project.burst === 'nothing' || !project.burst ? 'plain' : project.burst}
+                              {project.burst || 'plain'}
                             </span>
                           ) : tab.id === 'callbacks' && project.enableCustomLua ? (
                             <span
@@ -452,12 +446,7 @@ export const MobileBar: React.FC<MobileBarProps> = ({
           onChange={(e) => setActiveSubTab(e.target.value as RecordTabId)}
           className="w-full rounded-md border border-stone-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
         >
-          {visibleRecordTabs(
-            project.burst,
-            bitActionOf(project.body.clustlet),
-            project.fireType,
-            project.teleport
-          ).map(({ id, label, parent }) => (
+          {visibleRecordTabs(project.burst, bitActionOf(project.body.clustlet)).map(({ id, label, parent }) => (
             <option key={id} value={id}>
               {parent ? `— ${label}` : label}
             </option>

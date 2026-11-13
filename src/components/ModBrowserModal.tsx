@@ -141,15 +141,6 @@ export function ModBrowserModal({ onClose, showToast, onImport }: Props) {
               writes (hold art, sprite-builder roles, trail, burst, sequential fire, sounds)
               are read here; importing also attaches the bundle's own sheets and WAVs.
             </p>
-            <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span>
-                <strong className="font-semibold">WFWS weapons only, for now.</strong> Only
-                bundles this editor writes (the WFWS format) map back into the panels and
-                import reliably. A Project X port can still be read, but its own callbacks,
-                libraries and art naming are not carried — expect its record tables only.
-              </span>
-            </p>
           </div>
           <button
             type="button"

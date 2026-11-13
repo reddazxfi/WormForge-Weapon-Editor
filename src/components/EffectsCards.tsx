@@ -148,7 +148,7 @@ export function RibbonTrailCard({ project, onChange }: CardProps) {
           <label htmlFor="ribbon-core" className={labelClass}>
             Core width (`core_w`)
           </label>
-          <div className="flex items-stretch w-full rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden focus-within:ring-2 focus-within:ring-forge-500 focus-within:border-forge-500">
+          <div className="relative">
             <input
               id="ribbon-core"
               type="number"
@@ -157,11 +157,9 @@ export function RibbonTrailCard({ project, onChange }: CardProps) {
               step={0.5}
               value={ribbon.coreWidth}
               onChange={(e) => update({ coreWidth: Number(e.target.value) })}
-              className="flex-1 min-w-0 text-xs font-mono px-2 py-1.5 bg-transparent text-stone-900 dark:text-white focus:outline-hidden"
+              className={inputClass}
             />
-            <span className="px-2 flex items-center text-[10px] font-mono text-stone-500 dark:text-stone-400 bg-stone-50 dark:bg-stone-800/70 border-l border-stone-200 dark:border-stone-700 select-none shrink-0 pointer-events-none">
-              px
-            </span>
+            <span className="absolute right-2 top-1.5 text-[10px] text-stone-400">px</span>
           </div>
         </div>
 
@@ -169,7 +167,7 @@ export function RibbonTrailCard({ project, onChange }: CardProps) {
           <label htmlFor="ribbon-glow" className={labelClass}>
             Glow width (`glow_w`)
           </label>
-          <div className="flex items-stretch w-full rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden focus-within:ring-2 focus-within:ring-forge-500 focus-within:border-forge-500">
+          <div className="relative">
             <input
               id="ribbon-glow"
               type="number"
@@ -178,11 +176,9 @@ export function RibbonTrailCard({ project, onChange }: CardProps) {
               step={0.5}
               value={ribbon.glowWidth}
               onChange={(e) => update({ glowWidth: Number(e.target.value) })}
-              className="flex-1 min-w-0 text-xs font-mono px-2 py-1.5 bg-transparent text-stone-900 dark:text-white focus:outline-hidden"
+              className={inputClass}
             />
-            <span className="px-2 flex items-center text-[10px] font-mono text-stone-500 dark:text-stone-400 bg-stone-50 dark:bg-stone-800/70 border-l border-stone-200 dark:border-stone-700 select-none shrink-0 pointer-events-none">
-              px
-            </span>
+            <span className="absolute right-2 top-1.5 text-[10px] text-stone-400">px</span>
           </div>
           <p className="text-[10px] text-stone-400">0 draws the core only.</p>
         </div>

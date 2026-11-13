@@ -121,10 +121,8 @@ wsvb` are 245-248 -- ids that would be drawn underneath our sheet). Digging is
 then only an animation: `dig = true` makes the builder probe the terrain around
 the nose every frame (four samples across the heading, two hits = digging, PX's
 Bunker Buster test) and cycle the role's own sheet frames while it is in the
-land, keeping the heading locked. You can tune the probe or override the
-underground animation and transform (`anim`, `spin`, `anim_speed`, `cyclical`,
-`scale`, `mirror`, `z`) while digging, reverting cleanly in open air:
-`dig = { anim = "fast", spin = 2.5, anim_speed = 1.8, probe = 6, spread = 3, hold = 3, need = 2 }`.
+land, keeping the heading locked. Tune it with
+`dig = { probe = 6, spread = 3, hold = 3, need = 2 }`.
 
 A weapon cannot start digging later in its life: the action is fixed when the
 record is installed, so "is this missile digging" is purely terrain contact.

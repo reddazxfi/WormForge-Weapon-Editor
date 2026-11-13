@@ -21,13 +21,6 @@ export const DEFAULT_ROLE_ART: FlightRoleArt = {
   z: 5,
 };
 
-/** Digging defaults to Probe (`builder`) mode with `track` rotation. */
-export const DEFAULT_DIG_ROLE_ART: FlightRoleArt = {
-  ...DEFAULT_ROLE_ART,
-  mode: 'builder',
-  anim: 'track',
-};
-
 export interface BehaviorArtDef {
   key: BehaviorArtKey;
   label: string;

@@ -24,6 +24,7 @@ export const DEFAULT_FIRE_SEQUENCE: FireSequenceConfig = {
   offsetY: -3,
   liveAim: true,
   cancelOnWeaponChange: true,
+  repeatFirePose: true,
   actorSprite: '',
   actorGravity: false,
   actorCollide: false,

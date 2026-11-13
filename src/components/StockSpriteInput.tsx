@@ -1,5 +1,4 @@
 import React from 'react';
-import { HelpCircle } from 'lucide-react';
 import {
   STOCK_SPRITE_OPTIONS,
   decodeRecordId,
@@ -17,7 +16,6 @@ import {
 export const StockSpriteInput: React.FC<{
   id: string;
   label: string;
-  code?: string;
   desc?: string;
   /** Current value: a name, an id, or a number when `numeric`. */
   value: string | number;
@@ -29,12 +27,11 @@ export const StockSpriteInput: React.FC<{
   /** Shown when the field is empty, e.g. `0`. */
   placeholder?: string;
   disabled?: boolean;
-}> = ({ id, label, code, desc, value, onChange, options, numeric, placeholder, disabled }) => {
+}> = ({ id, label, desc, value, onChange, options, numeric, placeholder, disabled }) => {
   const raw = value === undefined || value === null ? '' : String(value);
   const decoded = decodeRecordId(Number(raw));
   const resolved = resolveStockSprite(raw === '' ? undefined : raw);
   const list = options ?? STOCK_SPRITE_OPTIONS;
-  const tooltip = [desc, code ? `Field: ${code}` : undefined].filter(Boolean).join('\n') || undefined;
 
   const handle = (text: string) => {
     if (!numeric) {
@@ -58,21 +55,9 @@ export const StockSpriteInput: React.FC<{
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-1">
-        <label
-          htmlFor={id}
-          className="text-xs font-semibold text-stone-700 dark:text-stone-300 truncate cursor-pointer"
-          title={tooltip}
-        >
+        <label htmlFor={id} className="text-xs font-semibold text-stone-700 dark:text-stone-300 truncate" title={desc}>
           {label}
         </label>
-        {tooltip && (
-          <span
-            className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0 transition-colors"
-            title={tooltip}
-          >
-            <HelpCircle className="w-3.5 h-3.5" />
-          </span>
-        )}
       </div>
       <input
         id={id}
@@ -81,9 +66,8 @@ export const StockSpriteInput: React.FC<{
         value={raw}
         placeholder={placeholder}
         disabled={disabled}
-        title={tooltip}
         onChange={(e) => handle(e.target.value)}
-        className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white disabled:opacity-50"
+        className="w-full text-xs font-mono px-3 py-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white disabled:opacity-50"
       />
       <datalist id={`${id}-sprites`}>
         {list.map((sprite) => (
@@ -92,14 +76,17 @@ export const StockSpriteInput: React.FC<{
           </option>
         ))}
       </datalist>
+      {desc && <p className="text-[10px] text-stone-400">{desc}</p>}
       {decoded.flagged && (
         <p className="text-[10px] text-amber-700 dark:text-amber-300">
-          0x{Number(raw).toString(16).toUpperCase()} is 0x10000 + {decoded.id} (id {decoded.id}).
+          0x{Number(raw).toString(16).toUpperCase()} is `0x10000 + id`: the file
+          spells the 16.16 phase beside the id, so this is id {decoded.id}.
         </p>
       )}
       {raw !== '' && resolved === null ? (
         <p className="text-[10px] text-rose-600 dark:text-rose-400">
-          Not a WA stock sprite: pick a name from the list or a valid id.
+          Not a WA stock sprite: the engine would read &quot;{raw}&quot; as a
+          bundle path and fail the install. Pick a name from the list or an id.
         </p>
       ) : (
         raw !== '' &&

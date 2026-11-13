@@ -35,10 +35,8 @@ import {
   packArtPath,
   sanitizeModFolder,
   wfwsRoleFlags,
-  flashSheetPath,
 } from '../src/utils/luaGenerator';
 import { DEFAULT_EXPLOSION_EFFECT, EXPLOSION_PRESETS } from '../src/data/explosionPresets';
-import { stockDonor } from '../src/data/stockDonors';
 import { DEFAULT_CUSTOM_SOUNDS } from '../src/data/soundPresets';
 import { DEFAULT_FIRE_SEQUENCE } from '../src/data/fireSequence';
 import {
@@ -386,9 +384,7 @@ function makeOp(partial: {
     slot: partial.slot,
     based_on: partial.slot,
     fireType: partial.fireType ?? 'power',
-    // The donor's own fire subtype (the worm fire animation + sound), not an
-    // invented one: an untouched weapon writes no `fires` table.
-    specialSubtype: partial.specialSubtype ?? stockDonor(partial.slot)?.specialSubtype ?? 0,
+    specialSubtype: 1,
     teleport: false,
     panel_icon: 'grenade',
     defaults: { ammo: -1, delay: 0, crateChance: 0, crateType: 'weapon', afterUse: '', ...partial.defaults },
@@ -957,6 +953,7 @@ const TESTS: TestCase[] = [
         offsetY: -3,
         liveAim: true,
         cancelOnWeaponChange: true,
+        repeatFirePose: true,
       },
       // One report per shot, from `on_shot(i, w)`.
       customSounds: {
@@ -1029,6 +1026,7 @@ const TESTS: TestCase[] = [
         offsetY: -3,
         liveAim: true,
         cancelOnWeaponChange: true,
+        repeatFirePose: true,
       },
     }),
     intent:
@@ -1037,39 +1035,6 @@ const TESTS: TestCase[] = [
       'After the first shot the held art stays on screen every frame for the rest of the burst, at the same size as while aiming (0.7x), and still follows the live aim.',
     watch:
       'The grenade blinking out on every other frame (px_hold_art missing or its `weapon` id wrong), the firing frames drawing at 1x instead of 0.7x (`size` missing the scale), or art drawn at a fixed 90 px cell.',
-  },
-  {
-    project: makeOp({
-      id: 'wftest.32_hold_flash',
-      name: 'WF 32 Hold Flash',
-      slot: 'minigun',
-      fireType: 'hitscan',
-      body: { sprite: 'minigun', damage: 6 },
-      // The firing-state sprite (`hold.flash`): the engine draws it at the
-      // gun's muzzle on WA's firing frames, for `frames` + 1 ticks.
-      hold: {
-        enabled: true,
-        handType: 'mid',
-        handRadius: 10,
-        weapRadius: -8,
-        weapRotation: 0,
-        scale: 1,
-        drawHand: true,
-        thrown: false,
-        keepWhileFiring: true,
-        flashFile: file(GRENADE_PNG, 'flash.png'),
-        flashFrames: 3,
-        flashOut: 14,
-        flashSide: 2,
-        flashScale: 1.5,
-      },
-    }),
-    intent:
-      '`hold.flash`: a firing-state sprite drawn at the gun\'s muzzle while WA is in its firing states (0x6A / 0x6B).',
-    expect:
-      'Every shot lights the flash for four game frames (frames = 3, plus the first) 14 px out along the aim, 2 px to the side, at 1.5x, on top of the held gun.',
-    watch:
-      'No flash (the hold table has no flash, or keep_while_firing is off so WA hides the hold on those frames), the flash sitting on the worm centre (out/side lost), or the gun blinking out while firing.',
   },
 ];
 
@@ -1131,11 +1096,6 @@ for (const test of TESTS) {
   if (project.hold?.enabled) {
     mkdirSync(join(BUNDLE, 'sprites', folder), { recursive: true });
     writeFileSync(join(BUNDLE, holdSheetPath(project)), GRENADE_PNG);
-    // The firing-state sprite (`hold.flash`). Loaded through the hold table,
-    // so it needs no `mod.toml` declaration — only the file.
-    if (project.hold.flashFile) {
-      writeFileSync(join(BUNDLE, flashSheetPath(project)), GRENADE_PNG);
-    }
   }
 
   // Sprite-builder flight sheet.

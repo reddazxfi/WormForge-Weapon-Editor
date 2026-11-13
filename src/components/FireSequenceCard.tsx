@@ -184,14 +184,14 @@ export const FireSequenceCard: React.FC<Props> = ({ project, onChange }) => {
               checked={seq.cancelOnWeaponChange}
               onChange={(v) => update({ cancelOnWeaponChange: v })}
             />
+            <Toggle
+              id="seq-repeat-pose"
+              label="Repeat-fire pose"
+              hint="fires = { subtype = 4 }: WA’s minigun repeat-fire pose, so the worm keeps aiming through the burst instead of leaving the fire method after the first shot."
+              checked={seq.repeatFirePose}
+              onChange={(v) => update({ repeatFirePose: v })}
+            />
           </div>
-
-          <p className="text-[11px] text-stone-500 dark:text-stone-400">
-            The worm&apos;s fire animation and sound come from the weapon&apos;s{' '}
-            <span className="font-mono">fires.subtype</span> (Flight &amp; Physics), not from
-            this card. 4 is the Minigun (shells + firing loop), 5 the Shotgun&apos;s pump; a
-            burst keeps whatever the record uses.
-          </p>
 
           {seq.mode === 'actors' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">

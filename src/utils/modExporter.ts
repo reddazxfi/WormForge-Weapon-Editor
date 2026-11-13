@@ -10,7 +10,6 @@ import {
   bitFlightSheetPath,
   behaviorStateSheetPath,
   customSoundPath,
-  flashSheetPath,
   missileFlightSheetPath,
   packArtPath,
   wfwsRoleFlags,
@@ -65,11 +64,6 @@ export async function exportModZip(project: WeaponProject): Promise<Blob> {
       ? project.hold.sheetFile
       : await createDefaultHoldSheet(project, project.hold.frames);
     zip.file(`${modFolder}/sprites/${modFolder}/hold.png`, holdBlob);
-    // The optional firing-state sprite. Only declared in the Lua when a file
-    // exists, so nothing dangles when it is off.
-    if (project.hold.flashFile) {
-      zip.file(`${modFolder}/${flashSheetPath(project)}`, project.hold.flashFile);
-    }
   }
 
   // Missile/Projectile Sprite Sheet (custom mode always declares the sheet).
