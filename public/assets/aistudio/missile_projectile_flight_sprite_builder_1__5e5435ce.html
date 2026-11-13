@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Missile & Projectile Flight Sprite Builder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            stone: {
+              75: '#f5f4f0',
+              850: '#1c1917',
+              950: '#0c0a09',
+            },
+            forge: {
+              50: '#fef2f2',
+              100: '#ffe1e1',
+              200: '#fec7c7',
+              400: '#f87171',
+              500: '#ef4444',
+              600: '#dc2626',
+              700: '#b91c1c',
+              800: '#991b1b',
+              950: '#450a0a',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Terraria/Starbound Workbench Crafting UI Visual Details */
+    .slot-bevel {
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.06), inset 0 -1px 2px rgba(255,255,255,0.8);
+    }
+    .slot-bevel-dark {
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.4), inset 0 -1px 1px rgba(255,255,255,0.05);
+    }
+    .workbench-card {
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.9);
+    }
+    /* Pixelated Canvas */
+    canvas {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    /* Custom Slider Accent Styling */
+    input[type="range"]::-webkit-slider-thumb {
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      background: #dc2626;
+      border: 2px solid #ffffff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      cursor: pointer;
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      background: #dc2626;
+      border: 2px solid #ffffff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body class="bg-stone-100 text-stone-900 font-sans antialiased min-h-full p-3 sm:p-6 flex flex-col justify-center">
+
+  <main class="max-w-7xl mx-auto w-full space-y-4">
+
+    <!-- TOP SIMULATOR CONTROL BAR: WEAPON CAPABILITIES TESTER -->
+    <div class="bg-white border-2 border-stone-300 rounded-2xl p-3 sm:p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5">
+        <div class="w-7 h-7 rounded-lg bg-amber-500 text-white flex items-center justify-center font-bold text-xs shadow-2xs border border-amber-600">
+          ⚙️
+        </div>
+        <div>
+          <h2 class="text-xs font-bold uppercase tracking-wider text-stone-900">Weapon Capabilities Simulator</h2>
+          <p class="text-[11px] text-stone-500">Toggle weapon behaviors to show/hide corresponding hotbar role tabs</p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 sm:gap-4">
+        <!-- Homing Toggle -->
+        <label class="flex items-center gap-2 cursor-pointer bg-stone-50 hover:bg-stone-100 px-3 py-1.5 rounded-lg border border-stone-300 text-xs font-semibold text-stone-800 transition-colors">
+          <input id="sim-toggle-homing" type="checkbox" checked class="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer accent-blue-600" />
+          <span class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>
+            Homing Flight Phase
+          </span>
+        </label>
+
+        <!-- Clusters Toggle -->
+        <label class="flex items-center gap-2 cursor-pointer bg-stone-50 hover:bg-stone-100 px-3 py-1.5 rounded-lg border border-stone-300 text-xs font-semibold text-stone-800 transition-colors">
+          <input id="sim-toggle-clusters" type="checkbox" checked class="rounded text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer accent-purple-600" />
+          <span class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-purple-500 inline-block"></span>
+            Cluster Payload Burst
+          </span>
+        </label>
+
+        <!-- Roam / Super Sheep Toggle -->
+        <label class="flex items-center gap-2 cursor-pointer bg-stone-50 hover:bg-stone-100 px-3 py-1.5 rounded-lg border border-stone-300 text-xs font-semibold text-stone-800 transition-colors">
+          <input id="sim-toggle-roam" type="checkbox" checked class="rounded text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer accent-rose-600" />
+          <span class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-rose-600 inline-block"></span>
+            Super Sheep / Roaming Action
+          </span>
+        </label>
+      </div>
+    </div>
+
+    <!-- MAIN WORKBENCH PANEL -->
+    <div class="bg-stone-75 border-2 border-stone-300 rounded-2xl p-4 sm:p-6 workbench-card transition-colors">
+      
+      <!-- HEADER BAR WITH TERRARIA HOTBAR -->
+      <div class="pb-4 mb-4 border-b border-stone-200 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <div class="flex flex-wrap items-center gap-2.5">
+            <div class="w-8 h-8 rounded-lg bg-forge-600 text-white flex items-center justify-center shadow-xs border-2 border-forge-700 shrink-0">
+              <!-- Rocket Icon -->
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 00-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 00-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 01-2.448-2.448 14.9 14.9 0 01.06-.312m-2.24 2.24A6 6 0 002.05 13.5v.75A5.25 5.25 0 007.3 19.5h.75a6 6 0 004.81-2.41m-5.92-2.15l-1.07 1.07" />
+              </svg>
+            </div>
+            <h1 class="font-bold text-base sm:text-lg text-stone-900 uppercase tracking-wide">
+              Missile & Projectile Flight Sprite Builder
+            </h1>
+            <span id="role-badge" class="text-[11px] font-mono px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-800 font-bold border border-amber-300 shadow-2xs">
+              Primary Round (normal.png)
+            </span>
+          </div>
+          <p class="text-xs text-stone-600 mt-1">
+            Select a projectile role from the hotbar below to customize sprite sheets, rotation modes, trajectories, and parameters.
+          </p>
+        </div>
+
+        <!-- TERRARIA / STARBOUND 4-SLOT INVENTORY HOTBAR -->
+        <div class="flex items-center gap-2 bg-stone-200/80 p-2 rounded-2xl border-2 border-stone-300 shadow-inner shrink-0">
+          <!-- Slot 1: Primary Bazooka Missile -->
+          <button type="button" data-role="primary" class="hotbar-slot relative w-14 h-14 rounded-xl border-2 border-amber-500 bg-amber-500/10 shadow-[0_0_12px_rgba(245,158,11,0.3)] ring-2 ring-amber-500 transition-all cursor-pointer overflow-hidden group" title="Primary Round (Hotkey: 1)">
+            <span class="absolute top-1 left-1.5 font-mono font-black text-[10px] text-amber-700 bg-amber-100 px-1 rounded border border-amber-300 z-10">1</span>
+            <!-- Embedded Pixel Art SVG of normal.png (Diagonal Bazooka with Orange Motion Trail) -->
+            <svg class="w-full h-full p-1.5 transition-transform group-hover:scale-110" viewBox="0 0 48 48" style="image-rendering: pixelated;">
+              <defs>
+                <linearGradient id="normal-trail" x1="0%" y1="100%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#ea580c" stop-opacity="0" />
+                  <stop offset="40%" stop-color="#f97316" stop-opacity="0.3" />
+                  <stop offset="70%" stop-color="#fdba74" stop-opacity="0.7" />
+                  <stop offset="100%" stop-color="#eab308" stop-opacity="1" />
+                </linearGradient>
+              </defs>
+              <!-- Motion Blur Trail -->
+              <polygon points="4,44 14,40 38,16 44,4 32,10 8,34" fill="url(#normal-trail)" />
+              <line x1="6" y1="42" x2="36" y2="12" stroke="#ea580c" stroke-width="3" stroke-linecap="round" opacity="0.5" />
+              <!-- Missile Body -->
+              <path d="M 24,24 L 38,10 C 42,6 44,4 44,4 C 44,4 42,6 38,10 L 28,20 Z" fill="#44403c" />
+              <!-- Warhead Tip -->
+              <polygon points="36,12 44,4 40,16" fill="#dc2626" />
+              <polygon points="38,10 44,4 40,12" fill="#eab308" />
+              <!-- Fins -->
+              <polygon points="20,28 16,36 24,32" fill="#1c1917" />
+              <polygon points="28,20 36,16 32,24" fill="#1c1917" />
+            </svg>
+            <span class="absolute bottom-0.5 right-1 text-[9px] font-bold font-mono text-stone-800 bg-white/90 px-1 rounded shadow-2xs">Main</span>
+          </button>
+
+          <!-- Slot 2: Homing Missile -->
+          <button id="slot-homing" type="button" data-role="homing" class="hotbar-slot relative w-14 h-14 rounded-xl border-2 border-stone-300 bg-white hover:border-blue-400 transition-all cursor-pointer overflow-hidden group" title="Homing Phase (Hotkey: 2)">
+            <span class="absolute top-1 left-1.5 font-mono font-black text-[10px] text-blue-700 bg-blue-50 px-1 rounded border border-blue-200 z-10">2</span>
+            <!-- Embedded Pixel Art SVG of hmissil1.png (Blue Rocket with Blue Motion Trail) -->
+            <svg class="w-full h-full p-1.5 transition-transform group-hover:scale-110" viewBox="0 0 48 48" style="image-rendering: pixelated;">
+              <defs>
+                <linearGradient id="homing-trail" x1="0%" y1="100%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#2563eb" stop-opacity="0" />
+                  <stop offset="50%" stop-color="#3b82f6" stop-opacity="0.4" />
+                  <stop offset="100%" stop-color="#93c5fd" stop-opacity="0.9" />
+                </linearGradient>
+              </defs>
+              <!-- Blue Trail -->
+              <polygon points="2,46 16,38 40,14 46,2 34,8 8,32" fill="url(#homing-trail)" />
+              <line x1="4" y1="44" x2="38" y2="10" stroke="#3b82f6" stroke-width="4" stroke-linecap="round" opacity="0.6" />
+              <!-- Blue Rocket Body -->
+              <path d="M 22,26 L 38,10 C 42,6 46,2 46,2 C 46,2 42,6 38,10 L 26,22 Z" fill="#2563eb" />
+              <!-- Nosecone -->
+              <polygon points="36,12 46,2 38,16" fill="#1d4ed8" />
+              <polygon points="40,8 46,2 42,12" fill="#60a5fa" />
+              <!-- Triple Rear Nozzles -->
+              <circle cx="20" cy="28" r="2.5" fill="#1e40af" />
+              <circle cx="24" cy="32" r="2.5" fill="#1e40af" />
+            </svg>
+            <span class="absolute bottom-0.5 right-1 text-[9px] font-bold font-mono text-stone-700 bg-white/90 px-1 rounded shadow-2xs">Home</span>
+          </button>
+
+          <!-- Slot 3: Cluster Bits -->
+          <button id="slot-clusters" type="button" data-role="clusters" class="hotbar-slot relative w-14 h-14 rounded-xl border-2 border-stone-300 bg-white hover:border-purple-400 transition-all cursor-pointer overflow-hidden group" title="Cluster Bits Payload (Hotkey: 3)">
+            <span class="absolute top-1 left-1.5 font-mono font-black text-[10px] text-purple-700 bg-purple-50 px-1 rounded border border-purple-200 z-10">3</span>
+            <!-- Embedded Pixel Art SVG of clusters.png (Blue & Red Cluster Bomblets with Motion Trail) -->
+            <svg class="w-full h-full p-1.5 transition-transform group-hover:scale-110" viewBox="0 0 48 48" style="image-rendering: pixelated;">
+              <defs>
+                <linearGradient id="cluster-trail" x1="0%" y1="100%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#9333ea" stop-opacity="0" />
+                  <stop offset="60%" stop-color="#c084fc" stop-opacity="0.5" />
+                  <stop offset="100%" stop-color="#f43f5e" stop-opacity="0.8" />
+                </linearGradient>
+              </defs>
+              <!-- Multi-Bomblet Trail -->
+              <polygon points="2,46 20,32 44,8 46,2 38,12 10,38" fill="url(#cluster-trail)" />
+              <!-- Red Cluster Bomblet -->
+              <ellipse cx="36" cy="16" rx="6" ry="8" transform="rotate(-45 36 16)" fill="#dc2626" stroke="#991b1b" stroke-width="1.5" />
+              <circle cx="38" cy="14" r="2" fill="#fef08a" />
+              <!-- Blue Cluster Bomblet -->
+              <ellipse cx="24" cy="28" rx="5" ry="7" transform="rotate(-45 24 28)" fill="#2563eb" stroke="#1e40af" stroke-width="1.5" />
+              <circle cx="25" cy="26" r="1.5" fill="#93c5fd" />
+            </svg>
+            <span class="absolute bottom-0.5 right-1 text-[9px] font-bold font-mono text-stone-700 bg-white/90 px-1 rounded shadow-2xs">Bits</span>
+          </button>
+
+          <!-- Slot 4: Super Sheep / Roaming Action -->
+          <button id="slot-roam" type="button" data-role="roam" class="hotbar-slot relative w-14 h-14 rounded-xl border-2 border-stone-300 bg-white hover:border-rose-400 transition-all cursor-pointer overflow-hidden group" title="Super Sheep / Roaming Animal (Hotkey: 4)">
+            <span class="absolute top-1 left-1.5 font-mono font-black text-[10px] text-rose-700 bg-rose-50 px-1 rounded border border-rose-200 z-10">4</span>
+            <!-- Embedded Pixel Art SVG of sspsheep1.png (Super Sheep with Red Flying Cape & Trail) -->
+            <svg class="w-full h-full p-1.5 transition-transform group-hover:scale-110" viewBox="0 0 48 48" style="image-rendering: pixelated;">
+              <defs>
+                <linearGradient id="sheep-trail" x1="0%" y1="100%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#dc2626" stop-opacity="0" />
+                  <stop offset="50%" stop-color="#ef4444" stop-opacity="0.5" />
+                  <stop offset="100%" stop-color="#fca5a5" stop-opacity="0.9" />
+                </linearGradient>
+              </defs>
+              <!-- Red Speed Trail -->
+              <polygon points="2,46 14,40 34,20 44,4 28,14 6,36" fill="url(#sheep-trail)" />
+              <!-- Red Waving Cape -->
+              <path d="M 16,34 C 20,28 24,20 34,12 L 24,18 Z" fill="#dc2626" />
+              <path d="M 18,32 L 36,10 L 26,22 Z" fill="#b91c1c" />
+              <!-- White Sheep Body -->
+              <ellipse cx="34" cy="14" rx="7" ry="5" transform="rotate(-35 34 14)" fill="#f5f5f4" stroke="#78716c" stroke-width="1.5" />
+              <!-- Sheep Head -->
+              <circle cx="41" cy="8" r="3.5" fill="#44403c" />
+              <!-- Yellow Emblem -->
+              <circle cx="31" cy="16" r="1.8" fill="#eab308" />
+            </svg>
+            <span class="absolute bottom-0.5 right-1 text-[9px] font-bold font-mono text-stone-700 bg-white/90 px-1 rounded shadow-2xs">Sheep</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ROLE DYNAMIC BANNER -->
+      <div id="role-banner" class="mb-4 p-3 rounded-xl border-2 border-amber-200 bg-amber-50/70 text-amber-900 text-xs flex items-center justify-between gap-3 shadow-2xs">
+        <div class="flex items-center gap-2">
+          <span class="text-base">🚀</span>
+          <div>
+            <strong id="role-title" class="font-bold">Editing Role: Primary Missile (`normal.png`)</strong>
+            <p id="role-desc" class="text-[11px] text-amber-800">Standard initial flight round fired directly from launcher before any payload split or homing phase.</p>
+          </div>
+        </div>
+        <span class="text-[10px] font-mono font-bold uppercase px-2 py-1 rounded bg-white border border-amber-300 text-amber-800 shrink-0">Role Slot 1 / 4</span>
+      </div>
+
+      <!-- TOP ASSET & ENABLE BAR (Mirrors Worm Aim & Hold Art Builder Top Row) -->
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-5">
+        <!-- Bordered Asset Slot Bar -->
+        <div class="flex-1 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 px-3.5 py-2 rounded-xl border-2 border-stone-300 bg-white slot-bevel min-w-0">
+          <div class="flex items-center gap-2.5 min-w-0 truncate">
+            <div id="asset-icon-box" class="w-7 h-7 rounded-md border-2 border-stone-300 bg-stone-100 flex items-center justify-center shrink-0">
+              <svg class="w-4 h-4 text-forge-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+            </div>
+            <span class="text-xs font-bold text-stone-900 uppercase tracking-wide shrink-0">
+              Projectile Sprite Sheet
+            </span>
+            <div id="asset-status-container" class="flex items-center gap-2 min-w-0 truncate">
+              <span id="asset-status-text" class="text-xs text-stone-500 truncate" title="Using default Grenade art — upload a PNG to replace it">
+                Using default Grenade art — upload a PNG to replace it
+              </span>
+              <button id="btn-remove-sheet" type="button" class="hidden text-xs text-rose-600 hover:text-rose-700 font-semibold shrink-0 cursor-pointer">
+                Remove Sheet
+              </button>
+            </div>
+          </div>
+
+          <div class="shrink-0 flex items-center gap-2">
+            <input id="input-sheet-file" type="file" accept="image/png,image/gif" class="hidden" />
+            <button id="btn-upload-sheet" type="button" class="px-3.5 py-1.5 text-xs font-bold text-stone-800 bg-stone-100 border-2 border-stone-300 rounded-lg hover:bg-stone-200 active:bg-stone-300 shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer">
+              <svg class="w-3.5 h-3.5 text-forge-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              <span>Upload PNG</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Enable Pill Toggle -->
+        <label htmlFor="chk-enable-flight" class="flex items-center gap-2.5 cursor-pointer bg-white px-4 py-2.5 rounded-xl border-2 border-stone-300 shadow-2xs shrink-0 self-start sm:self-auto hover:border-stone-400 transition-colors">
+          <input id="chk-enable-flight" type="checkbox" checked class="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer accent-forge-600" />
+          <span class="text-xs font-bold text-stone-900 whitespace-nowrap">
+            Enable Missile Flight Sprite
+          </span>
+        </label>
+      </div>
+
+      <!-- 3-COLUMN WORKBENCH GRID -->
+      <div class="grid grid-cols-1 lg:grid-cols-[1fr_1.35fr_1.85fr] gap-4 items-start">
+        
+        <!-- =================================================================== -->
+        <!-- LEFT COLUMN: Scale, Orientation & Modifiers (Terraria Slots)         -->
+        <!-- =================================================================== -->
+        <div class="order-3 lg:order-1 flex flex-col gap-4">
+          
+          <!-- Beveled Inventory Item Toggles -->
+          <div class="grid grid-cols-2 gap-2.5">
+            <label htmlFor="chk-mirror" title="Flips sprite horizontally when moving left (vx < 0)" class="h-10 flex items-center justify-between px-3 rounded-xl border-2 border-stone-300 bg-white cursor-pointer shadow-2xs hover:border-stone-400 transition-colors slot-bevel">
+              <span class="text-xs font-bold text-stone-800 select-none">Mirror Left</span>
+              <input id="chk-mirror" type="checkbox" checked class="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer accent-forge-600" />
+            </label>
+
+            <label htmlFor="chk-log" title="Logs one line per missile's first frames with id, m.sprite, and classified role." class="h-10 flex items-center justify-between px-3 rounded-xl border-2 border-stone-300 bg-white cursor-pointer shadow-2xs hover:border-stone-400 transition-colors slot-bevel">
+              <span class="text-xs font-bold text-stone-800 select-none">Log Debug</span>
+              <input id="chk-log" type="checkbox" class="rounded text-forge-600 focus:ring-forge-500 w-4 h-4 cursor-pointer accent-forge-600" />
+            </label>
+          </div>
+
+          <!-- Primary Scale Slider -->
+          <div class="space-y-1 bg-white p-3 rounded-xl border-2 border-stone-300 shadow-2xs">
+            <div class="flex justify-between items-center text-xs">
+              <label htmlFor="slider-scale" class="font-bold text-stone-700">Primary Scale</label>
+              <span id="val-scale" class="font-mono text-forge-600 font-bold text-xs bg-forge-50 px-2 py-0.5 rounded border border-forge-200">1.00x</span>
+            </div>
+            <input id="slider-scale" type="range" min="0.20" max="3.00" step="0.05" value="1.00" class="w-full cursor-pointer" />
+          </div>
+
+          <!-- Global Size (All Roles) Slider -->
+          <div class="space-y-1 bg-white p-3 rounded-xl border-2 border-stone-300 shadow-2xs" title="Multiplies every role's own scale so one number resizes the whole weapon.">
+            <div class="flex justify-between items-center text-xs">
+              <label htmlFor="slider-size" class="font-bold text-stone-700">Global Size (All Roles)</label>
+              <span id="val-size" class="font-mono text-forge-600 font-bold text-xs bg-forge-50 px-2 py-0.5 rounded border border-forge-200">1.35x</span>
+            </div>
+            <input id="slider-size" type="range" min="0.25" max="3.00" step="0.05" value="1.35" class="w-full cursor-pointer" />
+          </div>
+
+          <!-- Angle Offset Slider -->
+          <div class="space-y-1 bg-white p-3 rounded-xl border-2 border-stone-300 shadow-2xs" title="Added to whatever rotation the animation asks for. Sheets drawn pointing right need -90°.">
+            <div class="flex justify-between items-center text-xs">
+              <label htmlFor="slider-angle" class="font-bold text-stone-700">Angle Offset</label>
+              <span id="val-angle" class="font-mono text-forge-600 font-bold text-xs bg-forge-50 px-2 py-0.5 rounded border border-forge-200">0°</span>
+            </div>
+            <input id="slider-angle" type="range" min="-180" max="180" step="5" value="0" class="w-full cursor-pointer" />
+          </div>
+
+          <!-- Native Sprite Hidden Tooltip Badge -->
+          <div class="p-3 rounded-xl border-2 border-forge-200 bg-forge-50/60 flex items-center justify-between gap-2 shadow-2xs" title="Always written while the builder is active: hides WA's native round (m.sprite = 0).">
+            <div class="flex items-center gap-2 min-w-0">
+              <svg class="w-4 h-4 text-forge-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span class="text-xs font-bold text-stone-900 truncate">Native Sprite Hidden</span>
+            </div>
+            <code class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-white border border-forge-300 text-forge-700 shrink-0">
+              sprite = 0
+            </code>
+          </div>
+
+        </div>
+
+        <!-- =================================================================== -->
+        <!-- CENTER COLUMN: Pixel Viewport & Trajectory Controls (Worm View)     -->
+        <!-- =================================================================== -->
+        <div class="order-1 lg:order-2 flex flex-col items-center gap-3 w-full">
+          
+          <!-- 320x270 Pixel-Perfect Canvas Container -->
+          <div class="relative w-full aspect-[320/270] border-2 border-stone-800 rounded-xl overflow-hidden shadow-lg bg-stone-950">
+            <canvas id="flight-canvas" width="320" height="270" class="block w-full h-full cursor-pointer" title="Click canvas to toggle Play / Pause"></canvas>
+
+            <!-- Top-Left HUD Badge -->
+            <div class="absolute top-2 left-2 flex items-center gap-1.5 text-[10px] font-mono bg-black/80 backdrop-blur-xs text-stone-200 px-2 py-0.5 rounded border border-white/15 shadow-xs">
+              <span id="hud-anim-mode" class="uppercase text-forge-400 font-bold">ROTATION</span>
+              <span>·</span>
+              <span id="hud-frame-count">Frame 1/1</span>
+            </div>
+
+            <!-- Top-Right Backdrop Switcher -->
+            <div class="absolute top-2 right-2 flex items-center gap-0.5 bg-black/80 backdrop-blur-xs p-0.5 rounded border border-white/15 text-[10px]">
+              <button type="button" data-bg="grid" class="btn-backdrop px-2 py-0.5 rounded capitalize font-bold text-white bg-forge-600 cursor-pointer">Grid</button>
+              <button type="button" data-bg="sky" class="btn-backdrop px-2 py-0.5 rounded capitalize text-stone-400 hover:text-white cursor-pointer">Sky</button>
+              <button type="button" data-bg="cavern" class="btn-backdrop px-2 py-0.5 rounded capitalize text-stone-400 hover:text-white cursor-pointer">Cavern</button>
+            </div>
+
+            <!-- Bottom-Left Telemetry Badge -->
+            <div class="absolute bottom-2 left-2 flex items-center gap-1.5 text-[10px] font-mono bg-black/80 backdrop-blur-xs text-stone-200 px-2 py-0.5 rounded border border-white/15">
+              <span id="hud-telemetry-status">Simulating Flight</span>
+              <span>·</span>
+              <span id="hud-telemetry-mode" class="text-stone-400 capitalize">Arc</span>
+            </div>
+          </div>
+
+          <!-- Trajectory Selector Card -->
+          <div class="w-full space-y-2 bg-white p-2.5 rounded-xl border-2 border-stone-300 shadow-2xs">
+            <div class="grid grid-cols-3 gap-1 p-1 bg-stone-100 rounded-lg text-xs font-bold border border-stone-200">
+              <button type="button" data-path="arc" class="btn-path py-1.5 rounded text-[11px] text-center bg-white text-stone-900 shadow-2xs border border-stone-300 font-bold cursor-pointer">Parabolic Arc</button>
+              <button type="button" data-path="orbit" class="btn-path py-1.5 rounded text-[11px] text-center text-stone-600 hover:text-stone-900 cursor-pointer">Circle Path</button>
+              <button type="button" data-path="static" class="btn-path py-1.5 rounded text-[11px] text-center text-stone-600 hover:text-stone-900 cursor-pointer">Static Vector</button>
+            </div>
+
+            <!-- Inline Static Vector Controls -->
+            <div id="static-vector-controls" class="hidden grid-cols-2 gap-3 pt-1 px-1 border-t border-stone-100">
+              <div class="space-y-0.5">
+                <div class="flex justify-between text-[11px] font-bold text-stone-700">
+                  <span>Vector Angle</span>
+                  <span id="val-vector-angle" class="font-mono text-forge-600 font-bold">25°</span>
+                </div>
+                <input id="slider-vector-angle" type="range" min="-90" max="90" step="5" value="25" class="w-full cursor-pointer accent-forge-600" />
+              </div>
+              <div class="space-y-0.5">
+                <div class="flex justify-between text-[11px] font-bold text-stone-700">
+                  <span>Vector Speed</span>
+                  <span id="val-vector-speed" class="font-mono text-forge-600 font-bold">14 px/f</span>
+                </div>
+                <input id="slider-vector-speed" type="range" min="2" max="30" step="1" value="14" class="w-full cursor-pointer accent-forge-600" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Playback & Zoom Controls Bar -->
+          <div class="w-full flex items-center gap-2">
+            <button id="btn-toggle-play" type="button" class="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl text-white bg-amber-600 hover:bg-amber-700 active:bg-amber-800 shadow-2xs transition-colors cursor-pointer border border-amber-700">
+              <svg id="icon-pause" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <svg id="icon-play" class="w-3.5 h-3.5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span id="text-toggle-play">Pause Flight</span>
+            </button>
+
+            <div class="flex items-center gap-0.5 bg-white p-1 rounded-xl border-2 border-stone-300 shadow-2xs">
+              <button type="button" data-zoom="2" class="btn-zoom px-2 py-1 rounded-lg text-[11px] font-mono font-bold text-stone-600 hover:bg-stone-100 cursor-pointer">2x</button>
+              <button type="button" data-zoom="3" class="btn-zoom px-2 py-1 rounded-lg text-[11px] font-mono font-bold text-stone-600 hover:bg-stone-100 cursor-pointer">3x</button>
+              <button type="button" data-zoom="4" class="btn-zoom px-2 py-1 rounded-lg text-[11px] font-mono font-bold bg-forge-600 text-white cursor-pointer">4x</button>
+              <button type="button" data-zoom="5" class="btn-zoom px-2 py-1 rounded-lg text-[11px] font-mono font-bold text-stone-600 hover:bg-stone-100 cursor-pointer">5x</button>
+              <button type="button" data-zoom="6" class="btn-zoom px-2 py-1 rounded-lg text-[11px] font-mono font-bold text-stone-600 hover:bg-stone-100 cursor-pointer">6x</button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- =================================================================== -->
+        <!-- RIGHT COLUMN: Animation Mode Slots, Sheet Spec & Lua Code           -->
+        <!-- =================================================================== -->
+        <div class="order-2 lg:order-3 flex flex-col gap-4">
+          
+          <!-- DYNAMIC ROLE CONFIGURATION PANEL (Shows Role-Specific Options) -->
+          <div id="role-config-panel" class="p-3.5 rounded-xl border-2 border-stone-300 bg-white shadow-2xs space-y-3">
+            <div class="flex items-center justify-between border-b border-stone-200 pb-2">
+              <span class="text-xs font-bold text-stone-900 uppercase tracking-wide flex items-center gap-1.5">
+                <span>Role Overrides & Behavior</span>
+              </span>
+              <span id="role-mode-indicator" class="text-[10px] font-mono font-bold text-forge-700 bg-forge-50 px-2 py-0.5 rounded border border-forge-200">
+                Primary Sheet Mode
+              </span>
+            </div>
+
+            <!-- Content injected dynamically via JS based on active hotbar slot -->
+            <div id="role-dynamic-controls" class="space-y-2.5 text-xs">
+              <!-- Controls populated by updateRoleUI() -->
+            </div>
+          </div>
+
+          <!-- Terraria / Starbound 3x2 Animation Mode Recipe Slot Grid -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-stone-900 uppercase tracking-wide flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-forge-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M11.933 12.8a1 1 0 000-1.6L6.587 7.2A1 1 0 005 8v8a1 1 0 001.587.8l5.346-4zm5.68 0a1 1 0 000-1.6l-5.346-4A1 1 0 0010.879 8v8a1 1 0 001.587.8l5.346-4z" />
+                </svg>
+                <span>Animation Mode (`opts.anim`)</span>
+              </span>
+              <span id="anim-code-tag" class="text-[10px] font-mono font-bold text-forge-700 bg-forge-50 px-1.5 py-0.5 rounded border border-forge-200">
+                rotation = 3
+              </span>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              
+              <!-- Slot 1: Track Vector -->
+              <button type="button" data-anim="track" class="btn-anim-mode relative p-2.5 rounded-xl border-2 border-stone-300 bg-white text-left hover:border-stone-400 transition-all cursor-pointer slot-bevel">
+                <span class="pip-active hidden absolute top-1.5 right-1.5 w-2 h-2 rounded-xs bg-forge-600"></span>
+                <div class="text-xs font-bold text-stone-900 leading-tight pr-2">Track Vector</div>
+                <div class="text-[11px] text-stone-500 mt-0.5 leading-tight">Points flight angle</div>
+                <div class="text-[10px] font-mono text-stone-400 mt-1">track = 2</div>
+              </button>
+
+              <!-- Slot 2: Speed Tumble (Active Default) -->
+              <button type="button" data-anim="rotation" class="btn-anim-mode relative p-2.5 rounded-xl border-2 border-forge-500 bg-forge-50/50 text-left ring-2 ring-forge-500 transition-all cursor-pointer slot-bevel">
+                <span class="pip-active absolute top-1.5 right-1.5 w-2 h-2 rounded-xs bg-forge-600"></span>
+                <div class="text-xs font-bold text-forge-800 leading-tight pr-2">Speed Tumble</div>
+                <div class="text-[11px] text-stone-600 mt-0.5 leading-tight">Velocity spin</div>
+                <div class="text-[10px] font-mono text-stone-500 mt-1">rotation = 3</div>
+              </button>
+
+              <!-- Slot 3: Slow Spin -->
+              <button type="button" data-anim="slow" class="btn-anim-mode relative p-2.5 rounded-xl border-2 border-stone-300 bg-white text-left hover:border-stone-400 transition-all cursor-pointer slot-bevel">
+                <span class="pip-active hidden absolute top-1.5 right-1.5 w-2 h-2 rounded-xs bg-forge-600"></span>
+                <div class="text-xs font-bold text-stone-900 leading-tight pr-2">Slow Spin</div>
+                <div class="text-[11px] text-stone-500 mt-0.5 leading-tight">0.5 rad/f spin</div>
+                <div class="text-[10px] font-mono text-stone-400 mt-1">slow = 1</div>
+              </button>
+
+              <!-- Slot 4: Medium Spin -->
+              <button type="button" data-anim="medium" class="btn-anim-mode relative p-2.5 rounded-xl border-2 border-stone-300 bg-white text-left hover:border-stone-400 transition-all cursor-pointer slot-bevel">
+                <span class="pip-active hidden absolute top-1.5 right-1.5 w-2 h-2 rounded-xs bg-forge-600"></span>
+                <div class="text-xs font-bold text-stone-900 leading-tight pr-2">Medium Spin</div>
+                <div class="text-[11px] text-stone-500 mt-0.5 leading-tight">0.8 rad/f spin</div>
+                <div class="text-[10px] font-mono text-stone-400 mt-1">medium = 1</div>
+              </button>
+
+              <!-- Slot 5: Fast Spin -->
+              <button type="button" data-anim="fast" class="btn-anim-mode relative p-2.5 rounded-xl border-2 border-stone-300 bg-white text-left hover:border-stone-400 transition-all cursor-pointer slot-bevel">
+                <span class="pip-active hidden absolute top-1.5 right-1.5 w-2 h-2 rounded-xs bg-forge-600"></span>
+                <div class="text-xs font-bold text-stone-900 leading-tight pr-2">Fast Spin</div>
+                <div class="text-[11px] text-stone-500 mt-0.5 leading-tight">1.35 rad/f spin</div>
+                <div class="text-[10px] font-mono text-stone-400 mt-1">fast = 1</div>
+              </button>
+
+              <!-- Slot 6: Fixed Upright -->
+              <button type="button" data-anim="none" class="btn-anim-mode relative p-2.5 rounded-xl border-2 border-stone-300 bg-white text-left hover:border-stone-400 transition-all cursor-pointer slot-bevel">
+                <span class="pip-active hidden absolute top-1.5 right-1.5 w-2 h-2 rounded-xs bg-forge-600"></span>
+                <div class="text-xs font-bold text-stone-900 leading-tight pr-2">Fixed Upright</div>
+                <div class="text-[11px] text-stone-500 mt-0.5 leading-tight">Locked 0° turn</div>
+                <div class="text-[10px] font-mono text-stone-400 mt-1">none = 5</div>
+              </button>
+
+            </div>
+          </div>
+
+          <!-- Cyclical Sheet Animation 3-Column Numeric Card -->
+          <div class="p-3.5 rounded-xl border-2 border-stone-300 bg-white shadow-2xs space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-stone-900 uppercase tracking-wider">
+                Flight Sheet Animation
+              </span>
+              <span class="text-[10px] font-mono text-stone-400">
+                50 Hz loop
+              </span>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2.5">
+              <div class="space-y-1 text-center">
+                <label htmlFor="num-frames" class="block text-[11px] font-bold text-stone-600">Total Frames</label>
+                <input id="num-frames" type="number" min="1" max="64" value="1" class="w-full text-xs font-mono text-center px-2 py-1.5 rounded-lg border-2 border-stone-300 bg-stone-50 font-bold focus:border-forge-500 focus:bg-white" />
+              </div>
+
+              <div class="space-y-1 text-center">
+                <label htmlFor="num-anim-speed" class="block text-[11px] font-bold text-stone-600">Anim Speed</label>
+                <input id="num-anim-speed" type="number" step="0.1" min="0.1" max="10.0" value="1.0" class="w-full text-xs font-mono text-center px-2 py-1.5 rounded-lg border-2 border-stone-300 bg-stone-50 font-bold focus:border-forge-500 focus:bg-white" />
+              </div>
+
+              <div class="space-y-1 text-center">
+                <label htmlFor="num-spin-rate" class="block text-[11px] font-bold text-stone-600">Spin Rate</label>
+                <input id="num-spin-rate" type="number" step="0.1" min="0.1" max="5.0" value="1.0" class="w-full text-xs font-mono text-center px-2 py-1.5 rounded-lg border-2 border-stone-300 bg-stone-50 font-bold focus:border-forge-500 focus:bg-white" />
+              </div>
+            </div>
+          </div>
+
+          <!-- WFWS Role Art Overrides Compact Slot Bar -->
+          <div class="p-3 rounded-xl border-2 border-stone-300 bg-white shadow-2xs flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-xs font-bold text-stone-900 uppercase tracking-wide">
+                Cluster Bit Art
+              </div>
+              <div class="text-[11px] text-stone-500 truncate">
+                Child missiles after payload burst
+              </div>
+            </div>
+
+            <div class="flex items-center gap-1 bg-stone-100 p-1 rounded-lg border border-stone-300 shrink-0">
+              <button type="button" data-bit="native" class="btn-bit px-2.5 py-1 rounded text-[11px] font-bold text-stone-600 hover:text-stone-900 cursor-pointer">Native</button>
+              <button type="button" data-bit="builder" class="btn-bit px-2.5 py-1 rounded text-[11px] font-bold bg-forge-600 text-white cursor-pointer shadow-2xs">Builder</button>
+              <button type="button" data-bit="inherit" class="btn-bit px-2.5 py-1 rounded text-[11px] font-bold text-stone-600 hover:text-stone-900 cursor-pointer">Inherit</button>
+            </div>
+          </div>
+
+          <!-- Generated Lua Code Box -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-mono font-bold text-stone-500 uppercase tracking-wider">
+                Generated Lua `sb.flight` Call
+              </span>
+              <button id="btn-copy-lua" type="button" class="text-[11px] font-bold text-forge-700 hover:text-forge-800 bg-forge-50 hover:bg-forge-100 px-2.5 py-1 rounded-lg border border-forge-200 transition-colors flex items-center gap-1 cursor-pointer">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <span id="copy-lua-text">Copy Lua</span>
+              </button>
+            </div>
+
+            <pre class="text-[11px] font-mono bg-stone-950 text-forge-400 p-3.5 rounded-xl border-2 border-stone-800 overflow-x-auto shadow-inner leading-relaxed"><code id="code-output">-- inside install, after wa.weapons.replace{ ... }
+sb.flight(ctx, {
+  weapon = ctx.id,
+  sheet = "sprites/my_weapon/missile.png",
+  anim = "rotation",
+  scale = 1.0,
+  size = 1.35,
+  bits = { sheet = "sprites/my_weapon/bit_flight.png", anim = "rotation" },
+})</code></pre>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- JAVASCRIPT SIMULATION & WORKBENCH LOGIC -->
+  <script>
+    // State store with Role Tab management
+    const state = {
+      activeRole: 'primary', // 'primary', 'homing', 'clusters', 'roam'
+      enabled: true,
+      sheetFile: null,
+      sheetPreview: null,
+      sheetImage: null,
+      anim: 'rotation', // track, rotation, slow, medium, fast, none
+      frames: 1,
+      animSpeed: 1.0,
+      spinRate: 1.0,
+      scale: 1.0,
+      size: 1.35,
+      angle: 0,
+      mirror: true,
+      logIdentity: false,
+      backdrop: 'grid', // grid, sky, cavern
+      flightMode: 'arc', // arc, orbit, static
+      flightAngle: 25,
+      flightSpeed: 14,
+      isPlaying: true,
+      zoom: 4,
+      bitMode: 'builder', // native, builder, inherit
+      homingMode: 'builder', // native, builder, inherit
+      homingArmMs: 750,
+      homingTimeMs: 3000,
+      roamGasPose: 174,
+      capabilities: {
+        homing: true,
+        clusters: true,
+        roam: true,
+      }
+    };
+
+    // Role Info Registry
+    const ROLES = {
+      primary: {
+        title: 'Editing Role: Primary Missile (`normal.png`)',
+        desc: 'Standard initial flight round fired directly from launcher before any payload split or homing phase.',
+        badge: 'Primary Round (normal.png)',
+        badgeClass: 'bg-amber-100 text-amber-800 border-amber-300',
+        bannerClass: 'border-amber-200 bg-amber-50/70 text-amber-900',
+        borderHex: '#f59e0b',
+        animDefault: 'rotation',
+      },
+      homing: {
+        title: 'Editing Role: Homing Missile (`hmissil1.png`)',
+        desc: 'Active guidance phase triggered after homing arm delay. Steers toward target crosshair with blue propulsion trail.',
+        badge: 'Homing Phase (hmissil1.png)',
+        badgeClass: 'bg-blue-100 text-blue-800 border-blue-300',
+        bannerClass: 'border-blue-200 bg-blue-50/70 text-blue-900',
+        borderHex: '#3b82f6',
+        animDefault: 'track',
+      },
+      clusters: {
+        title: 'Editing Role: Cluster Bits (`clusters.png`)',
+        desc: 'Child bomblets spawned after primary round detonates or timer expires. Multiple bomblets scatter with spin.',
+        badge: 'Cluster Bits (clusters.png)',
+        badgeClass: 'bg-purple-100 text-purple-800 border-purple-300',
+        bannerClass: 'border-purple-200 bg-purple-50/70 text-purple-900',
+        borderHex: '#9333ea',
+        animDefault: 'rotation',
+      },
+      roam: {
+        title: 'Editing Role: Super Sheep / Roaming Action (`sspsheep1.png`)',
+        desc: 'Controllable flying animal action. Uses dual direction-baked rotation strips and optional gas cloud pose.',
+        badge: 'Super Sheep (sspsheep1.png)',
+        badgeClass: 'bg-rose-100 text-rose-800 border-rose-300',
+        bannerClass: 'border-rose-200 bg-rose-50/70 text-rose-900',
+        borderHex: '#dc2626',
+        animDefault: 'track',
+      }
+    };
+
+    // DOM Elements
+    const canvas = document.getElementById('flight-canvas');
+    const ctx = canvas.getContext('2d');
+
+    const simToggleHoming = document.getElementById('sim-toggle-homing');
+    const simToggleClusters = document.getElementById('sim-toggle-clusters');
+    const simToggleRoam = document.getElementById('sim-toggle-roam');
+
+    const slotHoming = document.getElementById('slot-homing');
+    const slotClusters = document.getElementById('slot-clusters');
+    const slotRoam = document.getElementById('slot-roam');
+
+    const roleBadge = document.getElementById('role-badge');
+    const roleBanner = document.getElementById('role-banner');
+    const roleTitle = document.getElementById('role-title');
+    const roleDesc = document.getElementById('role-desc');
+    const roleModeIndicator = document.getElementById('role-mode-indicator');
+    const roleDynamicControls = document.getElementById('role-dynamic-controls');
+
+    // Capabilities Toggle Listeners
+    simToggleHoming.addEventListener('change', (e) => {
+      state.capabilities.homing = e.target.checked;
+      slotHoming.style.display = e.target.checked ? 'block' : 'none';
+      if (!e.target.checked && state.activeRole === 'homing') switchRole('primary');
+      updateLuaOutput();
+    });
+
+    simToggleClusters.addEventListener('change', (e) => {
+      state.capabilities.clusters = e.target.checked;
+      slotClusters.style.display = e.target.checked ? 'block' : 'none';
+      if (!e.target.checked && state.activeRole === 'clusters') switchRole('primary');
+      updateLuaOutput();
+    });
+
+    simToggleRoam.addEventListener('change', (e) => {
+      state.capabilities.roam = e.target.checked;
+      slotRoam.style.display = e.target.checked ? 'block' : 'none';
+      if (!e.target.checked && state.activeRole === 'roam') switchRole('primary');
+      updateLuaOutput();
+    });
+
+    // Hotbar Slot Click Handlers & Keyboard 1-4 Hotkeys
+    document.querySelectorAll('.hotbar-slot').forEach((slot) => {
+      slot.addEventListener('click', () => {
+        const role = slot.getAttribute('data-role');
+        switchRole(role);
+      });
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (['1', '2', '3', '4'].includes(e.key) && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+        if (e.key === '1') switchRole('primary');
+        if (e.key === '2' && state.capabilities.homing) switchRole('homing');
+        if (e.key === '3' && state.capabilities.clusters) switchRole('clusters');
+        if (e.key === '4' && state.capabilities.roam) switchRole('roam');
+      }
+    });
+
+    // Switch Role Function
+    function switchRole(roleKey) {
+      if (!ROLES[roleKey]) return;
+      state.activeRole = roleKey;
+      const info = ROLES[roleKey];
+
+      // Update Hotbar Visual Selection States
+      document.querySelectorAll('.hotbar-slot').forEach((slot) => {
+        const isCurrent = slot.getAttribute('data-role') === roleKey;
+        slot.className = isCurrent
+          ? `hotbar-slot relative w-14 h-14 rounded-xl border-2 shadow-md transition-all cursor-pointer overflow-hidden group border-[${info.borderHex}] bg-[${info.borderHex}]/10 ring-2 ring-[${info.borderHex}]`
+          : 'hotbar-slot relative w-14 h-14 rounded-xl border-2 border-stone-300 bg-white hover:border-stone-400 transition-all cursor-pointer overflow-hidden group';
+      });
+
+      // Update Header Banner & Badges
+      roleTitle.textContent = info.title;
+      roleDesc.textContent = info.desc;
+      roleBadge.textContent = info.badge;
+      roleBadge.className = `text-[11px] font-mono px-2.5 py-0.5 rounded-md font-bold border shadow-2xs ${info.badgeClass}`;
+      roleBanner.className = `mb-4 p-3 rounded-xl border-2 text-xs flex items-center justify-between gap-3 shadow-2xs ${info.bannerClass}`;
+
+      // Set default animation mode for role if user hasn't explicitly customized
+      if (roleKey === 'homing' || roleKey === 'roam') {
+        setAnimMode('track');
+      } else {
+        setAnimMode('rotation');
+      }
+
+      // Update Role Specific Controls Panel
+      updateRoleUI();
+      updateLuaOutput();
+    }
+
+    function setAnimMode(animName) {
+      state.anim = animName;
+      document.querySelectorAll('.btn-anim-mode').forEach((b) => {
+        const isCurrent = b.getAttribute('data-anim') === animName;
+        b.className = isCurrent
+          ? 'btn-anim-mode relative p-2.5 rounded-xl border-2 border-forge-500 bg-forge-50/50 text-left ring-2 ring-forge-500 transition-all cursor-pointer slot-bevel'
+          : 'btn-anim-mode relative p-2.5 rounded-xl border-2 border-stone-300 bg-white text-left hover:border-stone-400 transition-all cursor-pointer slot-bevel';
+        b.querySelector('.pip-active').classList.toggle('hidden', !isCurrent);
+      });
+      hudAnimMode.textContent = animName;
+      animCodeTag.textContent = ANIM_CODES[animName] || animName;
+    }
+
+    function updateRoleUI() {
+      const container = roleDynamicControls;
+      container.innerHTML = '';
+
+      if (state.activeRole === 'primary') {
+        roleModeIndicator.textContent = 'Primary Round Config';
+        container.innerHTML = `
+          <div class="p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-900">
+            <strong>Primary Weapon Round:</strong> Fired on initial launch. All secondary roles (homing, cluster bits, dig state) build on top of this round.
+          </div>
+        `;
+      } else if (state.activeRole === 'homing') {
+        roleModeIndicator.textContent = 'Homing Behavior Config';
+        container.innerHTML = `
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-stone-700">Homing Art Source:</label>
+              <select id="select-homing-mode" class="px-2 py-1 bg-stone-100 border border-stone-300 rounded font-mono text-[11px]">
+                <option value="builder" ${state.homingMode === 'builder' ? 'selected' : ''}>Builder Sheet (Custom PNG)</option>
+                <option value="inherit" ${state.homingMode === 'inherit' ? 'selected' : ''}>Inherit Primary Art</option>
+                <option value="native" ${state.homingMode === 'native' ? 'selected' : ''}>Native WA Sprite</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-2 pt-1">
+              <div>
+                <label class="text-[11px] font-bold text-stone-600">Arm Delay (arm_ms):</label>
+                <input id="input-homing-arm" type="number" step="50" value="${state.homingArmMs}" class="w-full px-2 py-1 border rounded font-mono text-center" />
+              </div>
+              <div>
+                <label class="text-[11px] font-bold text-stone-600">Duration (time_ms):</label>
+                <input id="input-homing-time" type="number" step="100" value="${state.homingTimeMs}" class="w-full px-2 py-1 border rounded font-mono text-center" />
+              </div>
+            </div>
+          </div>
+        `;
+        document.getElementById('select-homing-mode')?.addEventListener('change', (e) => {
+          state.homingMode = e.target.value;
+          updateLuaOutput();
+        });
+        document.getElementById('input-homing-arm')?.addEventListener('change', (e) => {
+          state.homingArmMs = parseInt(e.target.value, 10) || 750;
+          updateLuaOutput();
+        });
+        document.getElementById('input-homing-time')?.addEventListener('change', (e) => {
+          state.homingTimeMs = parseInt(e.target.value, 10) || 3000;
+          updateLuaOutput();
+        });
+      } else if (state.activeRole === 'clusters') {
+        roleModeIndicator.textContent = 'Cluster Payload Config';
+        container.innerHTML = `
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-stone-700">Bit Art Mode:</label>
+              <select id="select-bit-mode" class="px-2 py-1 bg-stone-100 border border-stone-300 rounded font-mono text-[11px]">
+                <option value="builder" ${state.bitMode === 'builder' ? 'selected' : ''}>Builder Sheet (Custom PNG)</option>
+                <option value="inherit" ${state.bitMode === 'inherit' ? 'selected' : ''}>Inherit Primary Art</option>
+                <option value="native" ${state.bitMode === 'native' ? 'selected' : ''}>Native WA Clustlet</option>
+              </select>
+            </div>
+            <p class="text-[11px] text-stone-500">
+              When the primary round explodes, 5 child cluster bits spawn with spin & radial velocity.
+            </p>
+          </div>
+        `;
+        document.getElementById('select-bit-mode')?.addEventListener('change', (e) => {
+          state.bitMode = e.target.value;
+          updateLuaOutput();
+        });
+      } else if (state.activeRole === 'roam') {
+        roleModeIndicator.textContent = 'Roaming Animal Config';
+        container.innerHTML = `
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-stone-700">Gas Pose ID:</label>
+              <input id="input-roam-gas" type="number" value="${state.roamGasPose}" class="w-16 px-2 py-1 border rounded font-mono text-center" />
+            </div>
+            <div class="p-2 bg-rose-50 border border-rose-200 rounded text-[11px] text-rose-900">
+              Roaming action takes off into a 32-frame direction strip when Space is pressed. Gas pose 174 is drawn while releasing skunk gas.
+            </div>
+          </div>
+        `;
+        document.getElementById('input-roam-gas')?.addEventListener('change', (e) => {
+          state.roamGasPose = parseInt(e.target.value, 10) || 174;
+          updateLuaOutput();
+        });
+      }
+    }
+
+    // --- ENHANCED CANVAS SIMULATOR FOR ALL 4 ROLES ---
+    function renderProceduralGrenade(ctx, animType, frame) {
+      if (state.activeRole === 'homing') {
+        // Homing Missile with Blue Flame & Target Crosshair Simulation
+        ctx.save();
+        ctx.fillStyle = '#2563eb';
+        ctx.beginPath();
+        ctx.moveTo(0, -16);
+        ctx.lineTo(6, 6);
+        ctx.lineTo(0, 3);
+        ctx.lineTo(-6, 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#1d4ed8';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Blue guidance flame
+        ctx.fillStyle = frame % 2 === 0 ? '#60a5fa' : '#93c5fd';
+        ctx.beginPath();
+        ctx.arc(0, 8, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else if (state.activeRole === 'clusters') {
+        // Multi Cluster Bit Scatter
+        ctx.fillStyle = '#9333ea';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 6, 8, Math.PI / 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#6b21a8';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.fillStyle = '#f43f5e';
+        ctx.beginPath();
+        ctx.arc(-2, -2, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (state.activeRole === 'roam') {
+        // Super Sheep Flying with Cape
+        ctx.save();
+        // Red Cape
+        ctx.fillStyle = '#dc2626';
+        ctx.beginPath();
+        ctx.moveTo(-4, -2);
+        ctx.lineTo(-12, 10);
+        ctx.lineTo(-2, 6);
+        ctx.closePath();
+        ctx.fill();
+
+        // Sheep body
+        ctx.fillStyle = '#f5f5f4';
+        ctx.beginPath();
+        ctx.arc(0, 0, 7, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Sheep head
+        ctx.fillStyle = '#27272a';
+        ctx.beginPath();
+        ctx.arc(6, -2, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else {
+        // Primary Missile Bazooka Round
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.moveTo(0, -15);
+        ctx.lineTo(7, 5);
+        ctx.lineTo(0, 2);
+        ctx.lineTo(-7, 5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = '#991b1b';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.fillStyle = frame % 2 === 0 ? '#38bdf8' : '#f59e0b';
+        ctx.beginPath();
+        ctx.arc(0, 0, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Initialize Role UI
+    updateRoleUI();
+  </script>
+</body>
+</html>

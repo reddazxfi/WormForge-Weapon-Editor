@@ -11,9 +11,12 @@
 --
 --   ROAM (`roam = true`): a roaming animal walks until the turn's player
 --     presses Space, then flies. WA draws the walk from `m.sprite`, which is
---     normal-flight art only, so it is never zeroed here; the generator zeroes
---     `sheep.flight_1/2` instead. The builder draws nothing until the Space
---     press, then owns the flown art.
+--     normal-flight art only; the generator zeroes `sheep.flight_1/2` (the
+--     flown art) and leaves the walk pose alone when WA can draw it, passing its
+--     id as `walk` so the classifier still knows the primary. When that pose
+--     cannot draw (an imported Project X sprite number, or none), the record
+--     `sprite` is zeroed too and the builder draws the walk itself: upright,
+--     with the owning role's frames.
 --
 --   DIG is not a state: a digging round has no art of its own. The record's
 --     dig sprite indexes are zeroed (a mole or the wsv* frames would draw
@@ -48,12 +51,14 @@
 -- arm/time in ms) or probe for it (dig) instead of matching ids. `sig` stays
 -- only for bundles that still pass one.
 --
--- Default bit test: "zero means cluster bit". WA seeds a missile's flight
--- sprite (`m.sprite`) from its fire params, and a cluster bit's params are the
--- *parent's* copy -- so the primary is the one carrying the record's `sprite`
--- (zeroed while the builder owns the art) and the bits are the zero ones, the
--- opposite of what the field's name suggests. `is_bit` overrides it; when the
--- engine exposes the pellet flag (`m.bit`, MissileEntity+0x150) that is exact.
+-- Default bit test: `m.sprite ~= 0` at first sight. `m.sprite` is the sprite
+-- WA blits for the missile (+0x2EC): for a fired round that is the record's
+-- `missile.sprite`, which the generator zeroes while the builder owns the art,
+-- and for a cluster bit it is the record's `clusters.bit.sprite` (WA's
+-- constructor picks the cluster half of the record when the pellet index is
+-- set), which the generator keeps nonzero. So a nonzero value at first sight is
+-- a bit. The exception is a roaming animal whose walk pose WA draws natively:
+-- the record `sprite` then holds that pose's id, passed back as `walk`.
 --
 -- Pure data at load: `wa` is touched only inside M.flight and its callbacks.
 --
@@ -117,14 +122,24 @@ local DIG_HOLD = 3      -- frames a clear nose keeps the dig animation on
 local DIG_NEED = 2      -- probes that must be solid
 local DIG_OFFSETS = { -1.0, -0.34, 0.34, 1.0 }
 
-local function dig_settings(o)
+local function dig_settings(o, size)
   if o == nil or o == false then return nil end
   local t = type(o) == "table" and o or {}
+  local anim = t.anim
   return {
     probe = t.probe or DIG_PROBE,
     spread = t.spread or DIG_SPREAD,
     hold = t.hold or DIG_HOLD,
     need = t.need or DIG_NEED,
+    sheet = t.sheet,
+    anim = anim,
+    anim_type = anim and ANIM_TYPE[anim] or nil,
+    spin = t.spin,
+    cyclical = t.cyclical,
+    anim_speed = t.anim_speed,
+    scale = t.scale ~= nil and (t.scale * (size or 1.0)) or nil,
+    mirror = t.mirror,
+    z = t.z,
   }
 end
 
@@ -286,14 +301,20 @@ function M.flight(ctx, opts)
   local cycl_phase = {}
   local dig_dir = {}     -- [id] = last heading, for the terrain probes
   local dig_hold = {}    -- [id] = frames left of "digging"
-  local dig = dig_settings(opts.dig)
+  local dig = dig_settings(opts.dig, size)
   -- Roaming animals: WA walks the animal until the turn's player presses
   -- Space, and only then does it fly. The press is synchronized lockstep input
   -- (`wa.world.keys().space`), so every peer draws the flight art from the
-  -- same frame. `m.sprite` stays WA's walking pose; the generator zeroes
-  -- `sheep.flight_1/2` so nothing draws under ours once it takes off.
+  -- same frame. `walk` is the id of the record sprite WA animates on the
+  -- ground: when it is set WA keeps drawing that pose and the builder only
+  -- takes over in the air. A weapon whose walk pose cannot draw (an imported
+  -- Project X sprite number, or none) passes no `walk`, the generator zeroes
+  -- the record `sprite`, and the builder draws the walk itself: upright, with
+  -- the owning role's frames.
   local roam = opts.roam == true
+  local walk_pose = tonumber(opts.walk) or nil
   local flying = {}      -- [id] = true once the animal has taken off
+  local walking = {}     -- [id] = true while a roaming animal is on the ground
   local armed = {}       -- [id] = Space was seen up since the missile appeared
   local age = {}         -- [id] = frames since first sight, for homing ms
   local logged = {}      -- [id] = frames logged so far (opts.log)
@@ -311,13 +332,12 @@ function M.flight(ctx, opts)
       -- The engine's own answer (MissileEntity+0x150, `shoot_desc.pellet`).
       is_bit = m.bit and true or false
     else
-      -- Flipped default: with a bit sheet configured, the cluster bit is the
-      -- missile whose flight sprite is zero (WA hands the primary the
-      -- record's `sprite`; a bit inherits the parent's copy of it). Without a
-      -- bit sheet there are no bits to tell apart, so everything is the
-      -- primary -- otherwise a plain weapon would classify as a bit and draw
-      -- nothing, because the bit role is NATIVE.
-      is_bit = bit_art and (m.sprite == 0)
+      -- A cluster bit carries its own record sprite; the fired round carries
+      -- the record `sprite` unless the builder zeroed it. A roaming animal's
+      -- walk pose is the one nonzero sprite that is NOT a bit. Without a bit
+      -- role there is nothing to tell apart, so everything is the primary --
+      -- otherwise a plain weapon would classify as a bit and draw nothing.
+      is_bit = bit_art and (m.sprite ~= 0) and m.sprite ~= walk_pose
     end
     if is_bit then return { ident = "bit", base = bit_cfg } end
     return { ident = "main", base = main }
@@ -351,6 +371,7 @@ function M.flight(ctx, opts)
       dig_dir[id] = nil
       dig_hold[id] = nil
       flying[id] = nil
+      walking[id] = nil
       armed[id] = nil
       logged[id] = nil
       age[id] = nil
@@ -390,7 +411,7 @@ function M.flight(ctx, opts)
     end
 
     if m.phase == "pre" then
-      if roam and not flying[id] then
+      if roam and ent.ident == "main" then
         -- Walking. The Space press that takes off is the turn's player's, so
         -- the turn's worm has to exist; `wa.world.keys()` is synchronized, so
         -- every peer agrees on the frame the art starts.
@@ -401,8 +422,10 @@ function M.flight(ctx, opts)
         elseif armed[id] and current_worm() then
           flying[id] = true
         end
+        walking[id] = not flying[id]
       end
-      if roam and not flying[id] then
+      if walking[id] and walk_pose then
+        -- WA animates the walk pose itself; our art starts when it takes off.
         active[id] = NATIVE
         return
       end
@@ -412,9 +435,13 @@ function M.flight(ctx, opts)
       if cfg == NATIVE then
         -- Hand the sprite back. If our earlier zero stuck, restore the last
         -- signal (VERIFY: m.sprite is writable and WA draws it again).
-        if not roam and m.sprite == 0 and sig[id] then m.sprite = sig[id] end
-      elseif not roam then
-        -- Roaming keeps `m.sprite`: it is the walking pose, not flight art.
+        if not (roam and ent.ident == "main") and m.sprite == 0 and sig[id] then
+          m.sprite = sig[id]
+        end
+      else
+        -- Hide WA's native sprite while our follower actor draws the custom
+        -- art. A walking wanderer with no usable walk pose reaches this too:
+        -- its record `sprite` was zeroed, so there was nothing to hide.
         m.sprite = 0
       end
       return
@@ -431,6 +458,32 @@ function M.flight(ctx, opts)
     end
     age[id] = (age[id] or 0) + 1
     local cfg = homing_art(base, age[id] * MS_PER_FRAME)
+    -- On the ground a roaming animal stands upright: no track, no spin (WA's
+    -- pointer only matters once it is in the air), and no terrain probes.
+    local on_ground = walking[id] and true or false
+
+    -- Digging: terrain probes around the nose decide whether the round is in
+    -- the land. When `dig = true`, it locks to `track` and cycles the owning
+    -- sheet; any `anim`, `spin`, `anim_speed`, `cyclical`, `scale`, `mirror`,
+    -- `z`, or `sheet` in `dig = { ... }` overrides the owning role while in
+    -- the dirt and reverts smoothly in open air.
+    local digging = (not on_ground and dig and update_dig(m, dig, dig_dir, dig_hold)) or false
+    if digging and dig.sheet and dig.sheet ~= cfg.sheet then
+      local dig_cfg = {
+        sheet = dig.sheet,
+        anim = dig.anim or "track",
+        anim_type = dig.anim_type or ANIM_TYPE[dig.anim or "track"],
+        spin = dig.spin ~= nil and dig.spin or cfg.spin,
+        cyclical = dig.cyclical ~= nil and dig.cyclical or cfg.cyclical,
+        anim_speed = dig.anim_speed ~= nil and dig.anim_speed or cfg.anim_speed,
+        z = dig.z ~= nil and dig.z or cfg.z,
+        scale = dig.scale ~= nil and dig.scale or cfg.scale,
+        mirror = dig.mirror ~= nil and dig.mirror or cfg.mirror,
+        frame_fn = cfg.frame_fn,
+        turn_fn = cfg.turn_fn,
+      }
+      cfg = dig_cfg
+    end
 
     local f = follow[id]
     if f and f.cfg ~= cfg then            -- state changed: new art, new actor
@@ -453,49 +506,66 @@ function M.flight(ctx, opts)
     local b = f.actor
     b.x, b.y, b.vx, b.vy = m.x, m.y, 0, 0
 
-    -- Digging: no art of its own, just the sheet cycling while the nose is in
-    -- the land. It keeps tracking the heading, so the drill points into the
-    -- hole the round is making.
-    local digging = dig and update_dig(m, dig, dig_dir, dig_hold) or false
+    local active_anim = cfg.anim
+    local active_anim_type = cfg.anim_type
+    local active_spin = cfg.spin
+    local active_cyclical = cfg.cyclical
+    local active_anim_speed = cfg.anim_speed
+    local active_mirror = cfg.mirror
+    local active_scale = cfg.scale
+    local active_z = cfg.z
+
+    if digging then
+      active_anim = dig.anim or "track"
+      active_anim_type = dig.anim_type or ANIM_TYPE[active_anim]
+      if dig.spin ~= nil then active_spin = dig.spin end
+      if dig.cyclical ~= nil then active_cyclical = dig.cyclical end
+      if dig.anim_speed ~= nil then active_anim_speed = dig.anim_speed end
+      if dig.mirror ~= nil then active_mirror = dig.mirror end
+      if dig.scale ~= nil then active_scale = dig.scale end
+      if dig.z ~= nil then active_z = dig.z end
+    end
 
     local rot = 0
     local frame = 0
-    if digging then
+    local eff_vx = (digging and (m.vx or 0) == 0 and (m.vy or 0) ~= 0) and 0.001 or m.vx
+    if on_ground then
+      spin_ang[id] = nil
+    elseif cfg.turn_fn then
+      rot = cfg.turn_fn(m, spin_ang[id])
+      spin_ang[id] = rot
+    elseif active_anim_type == 2 then
       rot = M.track_angle(m.vx, m.vy)
-      frame, cycl_phase[id] =
-        M.cyclical_frame(cycl_phase[id], cfg.anim_speed, math.max(1, cfg.cyclical))
-    else
-      if cfg.turn_fn then
-        rot = cfg.turn_fn(m, spin_ang[id])
-        spin_ang[id] = rot
-      elseif cfg.anim_type == 2 then
-        rot = M.track_angle(m.vx, m.vy)
-      elseif cfg.anim_type == 3 then
-        rot = M.rotation_turn(spin_ang[id], m.vx, m.vy, cfg.spin)
-        spin_ang[id] = rot
-      elseif cfg.anim_type == 1 then
-        rot = M.spin_turn(spin_ang[id], m.vx, ANIM_SPEED[cfg.anim] or 0.5)
-        spin_ang[id] = rot
-      end
+    elseif active_anim_type == 3 then
+      rot = M.rotation_turn(spin_ang[id], eff_vx, m.vy, active_spin)
+      spin_ang[id] = rot
+    elseif active_anim_type == 1 then
+      rot = M.spin_turn(spin_ang[id], eff_vx, (ANIM_SPEED[active_anim] or 0.5) * (active_spin or 1.0))
+      spin_ang[id] = rot
+    end
 
-      if cfg.frame_fn then
-        frame = cfg.frame_fn(m)
-      elseif cfg.cyclical > 0 then
-        frame, cycl_phase[id] = M.cyclical_frame(cycl_phase[id], cfg.anim_speed, cfg.cyclical)
+    if cfg.frame_fn then
+      frame = cfg.frame_fn(m)
+    elseif digging or active_cyclical > 0 then
+      local nframes = digging and math.max(1, active_cyclical) or active_cyclical
+      if nframes > 0 then
+        frame, cycl_phase[id] = M.cyclical_frame(cycl_phase[id], active_anim_speed, nframes)
       else
         cycl_phase[id] = nil
       end
+    else
+      cycl_phase[id] = nil
     end
 
-    b.facing = cfg.mirror and (m.vx < 0 and -1 or 1) or 1
+    b.facing = active_mirror and (m.vx < 0 and -1 or 1) or 1
     b:frame(frame)
     -- `angle` is added in the drawn frame, and a mirrored sheet is flipped
     -- about the vertical axis, so the offset is negated on the left side to
     -- keep the art pointing the same way either way.
     b:gfx({
       angle = (math.deg(rot) + (b.facing < 0 and -angle or angle)) % 360,
-      depth = cfg.z,
-      scale = cfg.scale,
+      depth = active_z,
+      scale = active_scale,
     })
   end)
 end

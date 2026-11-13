@@ -88,7 +88,7 @@ export function stockDonorBaseline(slot: string | undefined): WepBaseline | unde
         decay_mode: 'resting',
       }),
     },
-    specialSubtype: donor.specialSubtype ?? 1,
+    specialSubtype: donor.specialSubtype ?? 0,
   };
 }
 

@@ -4,13 +4,14 @@ import {
   ClustletConfig,
   DigActionConfig,
   FlightRoleArt,
+  HoldConfig,
   PackArtSlot,
   RoamActionConfig,
   WeaponProject,
 } from '../types/weapon';
 import { getStockPanelPosition } from '../data/stockWeapons';
 import { stockDonorBaseline } from '../data/stockDonors';
-import { resolveStockSprite } from '../data/stockSprites';
+import { resolveStockSprite, stockSpriteId } from '../data/stockSprites';
 import { supportsFireSequence } from '../data/fireSequence';
 import { COLLISION_FLAGS } from '../data/recordSchema';
 import { defaultArtFor } from './defaultArt';
@@ -195,6 +196,40 @@ export function holdSheetPath(project: WeaponProject): string {
   return sheet && sheet.startsWith(own) ? sheet : `${own}hold.png`;
 }
 
+/**
+ * The firing-state sprite (`hold.flash.sheet`): a still drawn over the worm
+ * while WA is in its firing states, at the gun's muzzle. The engine loads it
+ * like the hold sheet, so it has no record slot and no `mod.toml` declaration —
+ * the file only has to exist at the declared path.
+ */
+export function flashSheetPath(project: WeaponProject): string {
+  return `sprites/${sanitizeModFolder(project.id)}/flash.png`;
+}
+
+/**
+ * Resolves engine-space `hold.flash` parameters (`out`, `side`, `scale`) so
+ * the firing sprite follows the normal weapon's `weapRadius`, `weapRotation`,
+ * and `scale` (`weap_scale`) consistently in both preview and Lua export.
+ */
+export function resolvedHoldFlash(hold: HoldConfig): {
+  out: number;
+  side: number;
+  scale: number;
+} {
+  const weapRadius = Number(hold.weapRadius ?? 6);
+  const weapScale = Number(hold.scale) || 1;
+  const weapRotRad = ((Number(hold.weapRotation) || 0) * Math.PI) / 180;
+  const localOut = Number(hold.flashOut ?? 0) * weapScale;
+  const localSide = Number(hold.flashSide ?? 0) * weapScale;
+  const cos = Math.cos(weapRotRad);
+  const sin = Math.sin(weapRotRad);
+  return {
+    out: -weapRadius + localOut * cos + localSide * sin,
+    side: -localOut * sin + localSide * cos,
+    scale: (Number(hold.flashScale ?? 1) || 1) * weapScale,
+  };
+}
+
 /** Every record slot that accepts pack art during installation. */
 export const PACK_ART_SLOTS: PackArtSlot[] = [
   'strike_sprite',
@@ -282,6 +317,30 @@ export function roamSheetsOwnFlight(project: WeaponProject): boolean {
   return !!roamSheetPaths(project);
 }
 
+/** WA keeps its own sprites below 800; packs are assigned slots from 800 up. */
+const STOCK_SPRITE_LIMIT = 800;
+
+/**
+ * A roaming animal's walking pose: the record `missile.sprite`, which WA
+ * animates while the animal is on the ground (`sheep.flight_1/2` is the flown
+ * art and `m.sprite` is not what draws it). Returns the id, or `0` when the
+ * value cannot draw — unset, a bundle path, or a number outside WA's stock
+ * range. An imported Project X record holds PX's own sprite numbers (the Super
+ * Queen Bee's `34464`, its sheep's `713`); WA masks those to a pack slot that
+ * nothing was installed at, so they draw nothing and the builder has to draw
+ * the walk itself.
+ */
+export function roamWalkPoseId(value: unknown): number {
+  const resolved = resolveStockSprite(value);
+  const id =
+    typeof resolved === 'number'
+      ? resolved
+      : typeof resolved === 'string'
+        ? (stockSpriteId(resolved) ?? 0)
+        : 0;
+  return id > 0 && id < STOCK_SPRITE_LIMIT ? id : 0;
+}
+
 /** Bundle path of one behaviour-state sheet. */
 export function behaviorStateSheetPath(
   project: WeaponProject,
@@ -307,6 +366,30 @@ function homingWindowRow(
 /** The `sb.flight` keys shared by the primary, bit and state roles. */
 function roleArtRows(cfg: FlightRoleArt, indent: string): string[] {
   const rows = [`${indent}anim = ${luaQuote(cfg.anim || 'rotation')},`];
+  if (cfg.frames > 1) rows.push(`${indent}cyclical = ${cfg.frames},`);
+  if (cfg.animSpeed && cfg.animSpeed !== 1) {
+    rows.push(`${indent}anim_speed = ${formatNumber(cfg.animSpeed)},`);
+  }
+  if (cfg.spinRate && cfg.spinRate !== 1) {
+    rows.push(`${indent}spin = ${formatNumber(cfg.spinRate)},`);
+  }
+  if (cfg.scale && cfg.scale !== 1) {
+    rows.push(`${indent}scale = ${formatNumber(cfg.scale)},`);
+  }
+  if (cfg.mirror === false) rows.push(`${indent}mirror = false,`);
+  if (cfg.z !== undefined && cfg.z !== 5) {
+    rows.push(`${indent}z = ${formatNumber(cfg.z)},`);
+  }
+  return rows;
+}
+
+/** Optional animation/transform overrides applied only while `dig` probes are inside terrain. */
+export function digArtOverrideRows(cfg: FlightRoleArt | undefined, indent: string): string[] {
+  if (!cfg) return [];
+  const rows: string[] = [];
+  if (cfg.anim && cfg.anim !== 'track') {
+    rows.push(`${indent}anim = ${luaQuote(cfg.anim)},`);
+  }
   if (cfg.frames > 1) rows.push(`${indent}cyclical = ${cfg.frames},`);
   if (cfg.animSpeed && cfg.animSpeed !== 1) {
     rows.push(`${indent}anim_speed = ${formatNumber(cfg.animSpeed)},`);
@@ -716,7 +799,8 @@ export function generateLuaCode(project: WeaponProject): string {
     holdRows.push(`sheet = ${luaQuote(holdSheetPath(project))},`);
     holdRows.push(`hand = holds.PX_HANDS[${handIdx}],`);
     holdRows.push(`hand_type = ${handIdx},`);
-    holdRows.push(`hand_radius = ${h.handRadius ?? 10},`);
+    const drawHand = h.drawHand !== false;
+    holdRows.push(`hand_radius = ${drawHand ? (h.handRadius ?? 10) : 0.01},`);
     holdRows.push('hand_rotation = 1,');
     holdRows.push('hand_radial_rotation = 1,');
     holdRows.push(`weap_radius = ${h.weapRadius ?? 6},`);
@@ -737,10 +821,24 @@ export function generateLuaCode(project: WeaponProject): string {
       }
     }
     if (h.handScale && h.handScale !== 1) holdRows.push(`hand_scale = ${h.handScale},`);
-    if (!h.drawHand) holdRows.push('draw_hand = false,');
+    if (!drawHand) holdRows.push('draw_hand = false,');
     if (h.keepWhileFiring) holdRows.push('keep_while_firing = true,');
     if (h.thrown) holdRows.push('thrown = true,');
     if (h.putAway) holdRows.push('put_away = true,');
+    if (h.flashFile) {
+      // The firing-state sprite. The engine draws it on the firing states
+      // (0x6A/0x6B) for `frames` + 1 ticks, with `out` / `side` relative to
+      // the worm centre and `scale` standalone — fold the normal weapon's
+      // radius, rotation, and scale in so the muzzle flash stays locked to it.
+      const resolvedFlash = resolvedHoldFlash(h);
+      holdRows.push('flash = {');
+      holdRows.push(`  sheet = ${luaQuote(flashSheetPath(project))},`);
+      holdRows.push(`  out = ${formatNumber(resolvedFlash.out)},`);
+      holdRows.push(`  side = ${formatNumber(resolvedFlash.side)},`);
+      holdRows.push(`  scale = ${formatNumber(resolvedFlash.scale)},`);
+      holdRows.push(`  frames = ${Math.max(1, Math.round(h.flashFrames ?? 3))},`);
+      holdRows.push('},');
+    }
     if (usesHoldArt) {
       // `px_hold_art` takes the same table plus these two presentation keys
       // (the engine ignores them). It has no scale key: `weap_scale` is folded
@@ -841,6 +939,9 @@ export function generateLuaCode(project: WeaponProject): string {
   const packSprites: string[] = [];
   if (usesHold && project.hold?.sheetFile) {
     packSprites.push(luaQuote(holdSheetPath(project)));
+  }
+  if (usesHold && project.hold?.flashFile) {
+    packSprites.push(luaQuote(flashSheetPath(project)));
   }
   if (usesMissileSprite) {
     packSprites.push(luaQuote(missileFlightSheetPath(project)));
@@ -954,6 +1055,18 @@ export function generateLuaCode(project: WeaponProject): string {
   // `oildrum4`. `fullGroup` also covers a fresh `copy_from`, where the donor's
   // slab is simply unknown.
   const fullGroup = actionChanged;
+  // A roaming animal's ground pose. WA animates the record `sprite` while the
+  // animal walks and `sheep.flight_1/2` only once it flies, so the walk is NOT
+  // flight art and must not be zeroed blindly. It can only draw when it names a
+  // stock sprite: an imported Project X record holds PX's own numbers (34464 on
+  // the Super Queen Bee, 713 on its sheep), which WA masks to a pack slot
+  // nothing was installed at and draws as nothing at all. `0` then means the
+  // builder draws the walk from its own sheet (`sb.flight{ walk = … }` is only
+  // written when WA can draw it, and identifies the primary with it).
+  const roamWalkPose =
+    action === 'roam'
+      ? roamWalkPoseId(project.recordOverrides['missile.sprite'] ?? baseOverrides['missile.sprite'])
+      : 0;
   // The cluster bits' action groups share a slab of their own, so their fields
   // get the same treatment (`clustletChanged` includes this).
   const clustletAction = (c: {
@@ -1000,6 +1113,19 @@ export function generateLuaCode(project: WeaponProject): string {
     lines.push('      handling = {');
     lines.push(...handlingRows);
     lines.push('      },');
+  }
+
+  // `fires.subtype` (+0x34) is not family-specific: every record has it, and
+  // WA plays that number's own fire animation and sound (4 = Minigun, 5 =
+  // Shotgun, …). Write it when the author's choice differs from the inherited
+  // record; the archetype buttons and a donor change re-base it with the
+  // donor's own number, so an untouched weapon still writes nothing. It is a
+  // firing-header value only: it never touches the held-art animation.
+  {
+    const subtype = override('fires.subtype') ?? project.specialSubtype;
+    if (subtype !== undefined && (!baseline || subtype !== baseline.specialSubtype)) {
+      lines.push(`      fires = { subtype = ${subtype} },`);
+    }
   }
 
   if (project.fireType === 'hitscan') {
@@ -1105,13 +1231,6 @@ export function generateLuaCode(project: WeaponProject): string {
     }
   } else if (project.fireType === 'cursor' && project.teleport) {
     lines.push('      on_select = { cursor = true },');
-  } else if (project.fireType === 'special') {
-    // Special subtypes have per-subtype layouts; only the selector is generic.
-    // An explicit `fires.subtype` override wins over the archetype's number.
-    const subtype = override('fires.subtype') ?? project.specialSubtype;
-    if (!baseline || subtype !== baseline.specialSubtype) {
-      lines.push(`      fires = { subtype = ${subtype} },`);
-    }
   } else if (
     project.fireType === 'power' ||
     (project.fireType === 'drop' && body.fuse) ||
@@ -1206,16 +1325,18 @@ export function generateLuaCode(project: WeaponProject): string {
     // ANIM_TYPE (`track`, `rotation`, `slow`, ...) must NOT be written to the
     // record's `animation`: that field is WA's native selector (0..5).
     const spriteOverride = override('missile.sprite');
-    if (builderOn && action !== 'roam') {
+    if (builderOn && !(action === 'roam' && roamWalkPose !== 0)) {
       // The builder classifies a missile as the primary only when `m.sprite` is
-      // zero at first sight. This write is unconditional: an imported `.wep`
-      // baseline or a `missile.sprite` override must not leave WA's sprite in
-      // place, or the primary would classify as a cluster bit.
+      // zero at first sight (a cluster bit carries its record's own bit sprite).
+      // This write is unconditional: an imported `.wep` baseline or a
+      // `missile.sprite` override must not leave WA's sprite in place, or the
+      // primary would classify as a cluster bit and draw small.
       //
-      // Roaming is the exception: its `sprite` is the walking pose WA draws
-      // before the player presses Space, and `m.sprite` is not what draws the
-      // flown animal (that is `sheep.flight_1/2`, zeroed below). Zeroing it
-      // here would delete the walk, so a roam record keeps normal diffing.
+      // Roaming is the exception, and only while its walk pose can draw: the
+      // record `sprite` is what WA animates on the ground, so it is kept and
+      // its id is handed to the builder (`walk = <id>`) to identify the primary
+      // with. With no usable pose the sprite is zeroed and the builder draws the
+      // walk from its own sheet too.
       lines.push('        sprite = 0,');
     } else if (spriteOverride !== undefined) {
       if (spriteOverride === 0 || spriteOverride === '0') {
@@ -1503,7 +1624,7 @@ export function generateLuaCode(project: WeaponProject): string {
     } else if (
       action === 'roam' &&
       project.roamConfig &&
-      (roamTouched || !!roamFlightState || !!gasState)
+      (fullGroup || roamTouched || !!roamFlightState || !!gasState)
     ) {
       const r = project.roamConfig;
       lines.push('        roam = {');
@@ -1586,7 +1707,11 @@ export function generateLuaCode(project: WeaponProject): string {
     } else if (
       action === 'dig' &&
       project.digConfig &&
-      (zeroMainDig || digTouched || (digState?.scope === 'main' && !!digState))
+      // `fullGroup` (an action switch): the donor's slab held another action's
+      // values, so the group has to be written even where our own value is the
+      // default -- otherwise `action = "dig"` reaches the engine with no `dig`
+      // table at all.
+      (zeroMainDig || fullGroup || digTouched || (digState?.scope === 'main' && !!digState))
     ) {
       const d = project.digConfig;
       const digMainState = digState?.scope === 'main' ? digState : undefined;
@@ -1680,13 +1805,18 @@ export function generateLuaCode(project: WeaponProject): string {
       // A builder sheet is drawn by its follower, so WA's two flown sprites
       // have to go or they draw underneath it. `missile.sprite` is untouched:
       // for roaming it is the walking pose, not flight art.
+      //
+      // In WA, `flight_1 = 0` disables Super Sheep takeoff on Space press (WA
+      // uses non-zero as a capability check). We use unassigned sentinel 699: it
+      // passes that check and draws nothing, so the builder's own sheet is the
+      // only art once the animal is airborne.
       const flightOne = builderOwnsRoamFlight
-        ? 0
+        ? 699
         : roamFlightState?.assigned.roam_flight_1 !== undefined
           ? roamFlightState.assigned.roam_flight_1
           : roamFlightOne;
       const flightTwo = builderOwnsRoamFlight
-        ? 0
+        ? 699
         : roamFlightState?.assigned.roam_flight_2 !== undefined
           ? roamFlightState.assigned.roam_flight_2
           : roamFlightTwo;
@@ -1791,19 +1921,32 @@ export function generateLuaCode(project: WeaponProject): string {
         lines.push('        bit = {');
         if (bitActionChangedEarly) lines.push(`          action = ${luaQuote(bitAction)},`);
 
-        if (bitRoleActive) {
+        const bitNeedsMarker = builderOn && burst === 'clusters';
+        if (bitNeedsMarker) {
           // The builder's classifier reads `m.sprite` at first sight; a zero
           // bit sprite would classify as the primary. Keep a real stock id and
-          // one sheet id (`sprite_count` counts ids, not frames).
+          // one sheet id (`sprite_count` counts ids, not frames). The id must
+          // also differ from a roaming animal's walk pose: that pose is the one
+          // nonzero sprite that means "primary".
           const raw = String(c.sprite ?? '');
           const numeric = Number(raw);
           const unusable =
             !raw ||
             raw === '0' ||
             raw.includes('/') ||
-            (Number.isFinite(numeric) && numeric === 0);
-          if (unusable) lines.push('          sprite = "clustlet",');
-          lines.push('          sprite_count = 1,');
+            (Number.isFinite(numeric) && numeric === 0) ||
+            (roamWalkPose !== 0 && roamWalkPoseId(c.sprite) === roamWalkPose);
+          if (unusable) {
+            // `cluster` (53) is the fallback marker when the walk pose is
+            // `clustlet` (54) itself: equal ids would make every bit the primary.
+            lines.push(`          sprite = "${roamWalkPose === 54 ? 'cluster' : 'clustlet'}",`);
+          } else if (clustletChanged('sprite') || bitRoleActive) {
+            if (!isNaN(numeric) && numeric > 0) lines.push(`          sprite = ${numeric},`);
+            else lines.push(`          sprite = ${luaQuote(raw)},`);
+          }
+          if (bitRoleActive) {
+            lines.push('          sprite_count = 1,');
+          }
         } else if (clustletChanged('sprite')) {
           const s = c.sprite;
           if (s === '' || s === '0') lines.push('          sprite = 0,');
@@ -2299,8 +2442,9 @@ export function generateLuaCode(project: WeaponProject): string {
 
   // Sequential fire: the first shot leaves from `on_fire`, the rest from
   // fire_seq's hidden timer, which holds WA's shot counters so the worm stays
-  // in its firing pose. `fires = { subtype = 4 }` is the minigun's repeat-fire
-  // pose; without it WA leaves the fire method after the first shot.
+  // in the firing pose. The pose's animation and sound are the record's own
+  // `fires.subtype` (chosen in Flight & Physics); nothing is forced here, so a
+  // burst no longer inherits the Minigun's subtype (shells + firing loop).
   if (usesFireSequence) {
     const f = fireSequence!;
     const count = Math.max(1, Math.round(f.count));
@@ -2326,9 +2470,6 @@ export function generateLuaCode(project: WeaponProject): string {
         }
       : null;
     lines.push('      -- Sequential fire (`wf-lib/fire_seq`): one trigger, a burst.');
-    if (f.repeatFirePose && project.fireType !== 'special') {
-      lines.push('      fires = { subtype = 4 },');
-    }
     lines.push('      on_fire = function(ev)');
     if (!live) {
       // Lock the aim to the moment the trigger was pulled.
@@ -2686,18 +2827,32 @@ export function generateLuaCode(project: WeaponProject): string {
       lines.push('      },');
     }
 
-    // Digging: no state, no sheet. The builder cycles the role's own sheet
-    // while four terrain probes around the nose are solid (PX's Bunker Buster
-    // test), so it only applies when the record's dig sprites were zeroed.
+    // Digging: terrain probes around the nose detect solid land (PX's Bunker
+    // Buster test). Emit `dig = true` at defaults, or `dig = { ... }` when the
+    // author overrides underground animation parameters (e.g. faster spin/speed).
     if (zeroMainDig || zeroBitDig) {
-      lines.push('      dig = true,');
+      const digRows = digArtOverrideRows(project.behaviorArt?.dig, '        ');
+      if (digRows.length > 0) {
+        lines.push('      dig = {');
+        for (const row of digRows) lines.push(row);
+        lines.push('      },');
+      } else {
+        lines.push('      dig = true,');
+      }
     }
 
     // A roaming animal walks until the turn's player presses Space, then
     // flies. The builder owns that flying state: it waits for the press and
     // then draws the sheet (the record's `sheep.flight_1/2` are zeroed above).
+    //
+    // `walk` is the record sprite WA animates on the ground, and the classifier
+    // counts a missile carrying it as the primary (the record `sprite` is not
+    // zeroed then, so `m.sprite == 0` alone cannot identify the primary). A
+    // weapon whose walk pose cannot draw passes no `walk` and the builder draws
+    // that pose itself, upright.
     if (project.action === 'roam') {
       lines.push('      roam = true,');
+      if (roamWalkPose !== 0) lines.push(`      walk = ${roamWalkPose},`);
     }
 
     // Identity debugging: one log line per missile's first frames, so the

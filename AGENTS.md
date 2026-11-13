@@ -40,8 +40,8 @@ different project. Do not modify it from this repository.
 │  │  ├─ Sidebar.tsx           # desktop sidebar + mobile bar
 │  │  ├─ WeaponSettings.tsx    # identity / donor / slot / icon / defaults
 │  │  ├─ RecordEditor.tsx      # the record sections
-│  │  ├─ HoldPreview.tsx       # hold + flight art builders (canvas)
-│  │  ├─ FlightRoleEditor.tsx  # WFWS bit / behaviour-state role cards
+│  │  ├─ HoldPreview.tsx       # hold builder (3-col) + 6-slot flight art builder (canvas)
+│  │  ├─ FlightRoleEditor.tsx  # legacy role cards (superseded by HoldPreview hotbar)
 │  │  ├─ PackSpriteUpload.tsx  # upload for trail / cluster-bit pack art
 │  │  ├─ EffectsCards.tsx      # ribbon trail + explosion burst cards
 │  │  ├─ ExplosionPreview.tsx  # 50 Hz px_effects burst preview (canvas)
@@ -278,14 +278,20 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
     (air strikes are excluded: their munitions have no placed missile).
   - **`sprite = 0` is unconditional on the primary** while the builder is on:
     it is how WA's own draw is hidden, and a `.wep` baseline or a
-    `missile.sprite` override must not survive.
-  - **Identity is "zero means cluster bit"** (`wfws_sprite_builder.lua`,
-    `classify`). WA copies a missile's flight sprite from its fire params and a
-    cluster bit's params are the *parent's* copy, so the primary carries the
-    record `sprite` and the bits are the zero ones — the opposite of the field
-    name. It only applies when a `bits` table is configured (`inherit` or no
+    `missile.sprite` override must not survive. The one exception is a roaming
+    animal whose walk pose WA can draw (below).
+  - **Identity is "a nonzero first-sight `m.sprite` is a bit"**
+    (`wfws_sprite_builder.lua`, `classify`). `m.sprite` is the field WA blits
+    (+0x2EC, `MISSILE_RENDER_SPRITE`), and WA's missile constructor picks the
+    record half with the pellet index: a fired round gets `missile.sprite` (0
+    here, because the generator zeroes it) and a cluster bit gets
+    `clusters.bit.sprite` (kept nonzero — `clustlet` when the record has nothing
+    usable). It only applies when a `bits` table is configured (`inherit` or no
     bits = everything is the primary). `is_bit` overrides it; a future `m.bit`
     (MissileEntity+0x150 pellet flag) is used first when the engine passes it.
+    **Never classify by spawn order** (that broke herd/`fire_seq` bursts: every
+    round after the first drew bit art). The one id that means "primary" while
+    it is nonzero is a roaming animal's walk pose, passed back as `walk`.
     `log = true` prints the first three frames of each missile
     (`id`, `sprite`, `ident`) to settle it from the log; the Hold page's WFWS
     section has a **Log Identity** checkbox that emits it (`missileSprite.logIdentity`).
@@ -295,18 +301,22 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
     `clusters.bit.sprite` to a stock id (`clustlet`) if it was 0/empty and writes
     `sprite_count = 1`, and it **skips** the claim `cluster = { sprite, … }`
     declaration (the builder hides that sheet anyway).
-  - **Digging is not a state and has no sheet.** Whenever the builder owns the
-    flight art and the record digs (`action = "dig"`, or a cluster bit whose
-    action is dig), the generator writes `dig.dive_sprite` and `dig.sprite_1..3`
-    as 0 — WA's mole frames (158-161) and PX's `wsvr/wsvru/wsvrd/wsvb`
-    (245-248) would otherwise draw under our sheet — and passes `dig = true` to
-    `sb.flight`. The builder then probes the terrain four times across the
-    heading (two hits = digging, PX's Bunker Buster test, 3 frames of
-    hysteresis) and cycles the role's own sheet while the round is in the land,
-    heading locked. A `native` dig role leaves the record's indexes alone (only
-    an author-set nonzero id is written, never a zero) and passes no `dig`.
-    `dig.dive_sprite` is not art to upload: the flight sheet is the dig
-    animation.
+  - **Digging is not a state and has no sheet (but can override animation/transform).**
+    Whenever the builder owns the flight art and the record digs (`action = "dig"`,
+    or a cluster bit whose action is dig), the generator writes `dig.dive_sprite`
+    and `dig.sprite_1..3` as 0 — WA's mole frames (158-161) and PX's
+    `wsvr/wsvru/wsvrd/wsvb` (245-248) would otherwise draw under our sheet — and
+    emits `dig = true` (when at defaults) or `dig = { anim, cyclical, anim_speed,
+    spin, scale, mirror, z }` (when customized) to `sb.flight`. The builder probes
+    the terrain four times across the heading (two hits = digging, PX's Bunker
+    Buster test, 3 frames of hysteresis) and applies those underground overrides
+    to the owning sheet while the round is in the land (keeping the follower
+    actor alive if the sheet stays the same, and using a tiny `vx` sign fallback
+    so straight-vertical tunnels still spin), reverting cleanly in open air.
+    `spin` scales `slow`/`medium`/`fast` fixed spins as well as `rotation`. A
+    `native` dig role leaves the record's indexes alone (only an author-set
+    nonzero id is written, never a zero) and passes no `dig`. `dig.dive_sprite`
+    is not art to upload: the flight sheet is the dig animation.
   - **Homing is timed, not detected.** The generator passes the record's own
     numbers as `homing = { arm, time, sheet, anim, … }` (primary) or
     `bits.homing = { … }` (cluster bits) and zeroes `missile.homing.sprite`
@@ -333,13 +343,18 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
     frames from one upload) and a frame count for a strip uploaded as-is; the
     generator declares `frames` in `mod.toml` so the engine slices it.
     **The flight builder can own this state.** With `sb.flight` on for a roam
-    record the generator keeps the record `sprite` (WA's walking pose), zeroes
-    `sheep.flight_1/2` instead, and passes `roam = true`; the builder draws
-    nothing until the turn player's synchronized Space press (a sheep never
-    takes off without it) and then draws and animates its own frames. `m.sprite`
-    is normal-flight art only: zeroing it for roam would delete the walk and
-    would not affect `sheep.flight_*`. While the builder owns the state the two
-    `sheep_sprites` uploads are dormant (not installed or declared).
+    record the generator zeroes `sheep.flight_1/2` (as the unassigned sentinel
+    699, not 0: WA reads a zero `flight_1` as "this animal cannot fly" and the
+    Space press would do nothing) and passes `roam = true`. The walk pose then
+    depends on whether WA can draw it: `roamWalkPoseId()` accepts only a stock
+    id, so a record holding Project X's own sprite numbers (`34464` on the Super
+    Queen Bee, `713` on its sheep) gets `sprite = 0` and the builder draws the
+    walk too, upright and cycling the owning role's frames (`walking[id]`); a
+    stock pose (`sheepwlk`) is kept and its id passed as `walk = <id>` so the
+    classifier still knows the primary. Either way the Space press (synchronized
+    lockstep input) switches to the flight pose, which is where `track`/`spin`
+    start. While the builder owns the state the two `sheep_sprites` uploads are
+    dormant (not installed or declared).
     PX's sheep editor shows five sprites: flying / flying 2 are
     `sheep.flight_1/2` (0xE0/0xE4), farting is `roam.gas.animal_sprite` (0xDC),
     and taking off / during flight are 0xE8/0xEC — two sheep sprite fields WA
@@ -362,11 +377,14 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   - The primary sheet, `bit_flight.png` and `state_<key>.png` are listed in the
     claim `sprites` and declared in `mod.toml`; the exporter writes the uploaded
     file or the default missile art, so a declared path always exists.
-  - The editor UI is `HoldPreview.tsx` → **WFWS role art** (`FlightRoleEditor`
-    cards): bit mode and one row per available behaviour, each with native /
-    builder / inherit, upload, animation, frames/FPS/anim speed/spin/scale/depth,
-    and the resolved `sig` ids. (The `sig`/`states` fields are legacy: nothing in
-    the editor emits them, see `resolveBehaviorStates`.)
+  - The editor UI is `HoldPreview.tsx` → Section 2 **6-role hotbar** (`Main`,
+    `Home`, `Bits`, `HomeBit`, `Sheep`, `Dig` using `spec/normal.png`,
+    `hmissil1.png`, `clusters.png`, `homing_clustlets.png`, `sspsheep1.png`,
+    `dig.png`; unavailable slots are greyed out): mode selector (`Native` /
+    `Builder` / `Inherit` / `Probe`), upload, super-sheet strip slicing,
+    animation, frames/anim speed/spin/scale/depth. (`FlightRoleEditor.tsx` and
+    `sig`/`states` are legacy: nothing in the editor emits `states`, see
+    `resolveBehaviorStates`.)
   - Behaviour art requires the primary builder; with it off the rows are stored
     but not emitted. Strikes have no builder path at all.
   - Known limits: a state does not automatically revert when WA stops writing
@@ -443,7 +461,20 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   and custom sound into a single `on_explode = { on = function(ev) ... end }` callback.
 - Hold geometry is emitted in PX units:
   `weap_rotation = 1 + degrees/180`, `hand_rotation = 1`,
-  `weap_radial_rotation = 1`, `hand_radial_rotation = 1`.
+  `weap_radial_rotation = 1`, `hand_radial_rotation = 1`, and `weap_scale`
+  carries the held weapon's scale multiplier (applied in both preview and Lua).
+  Both `hand_radius` and `weap_radius` sliders span `-35..35` px.
+- **Engine bug fallback for `draw_hand = false`:** WormForge currently still
+  renders the hand even when `draw_hand = false` is set, so `luaGenerator.ts`
+  emits `hand_radius = 0.01,` alongside `draw_hand = false,` whenever
+  `drawHand === false` (while leaving `hold.handRadius` intact in editor state;
+  `importFeatures.ts` restores `fallback.handRadius` if `draw_hand = false` and
+  `hand_radius = 0.01`).
+- **Firing-state flash (`hold.flash`):** `resolvedHoldFlash(hold)` in
+  `luaGenerator.ts` folds the normal weapon's `weapRadius`, `weapRotation`, and
+  `scale` (`weap_scale`) into the emitted `flash = { out, side, scale }` and
+  canvas preview so the muzzle flash stays locked to the gun; `importFeatures.ts`
+  inverts this transform back into weapon-local `flashOut`/`flashSide`/`flashScale`.
 - **Hold animation:** `worm_hold.rs` does
   `phase += anim_speed * 0.03` once per 50 Hz game frame, so the sheet plays
   `1.5 × frames × anim_speed` frames per second. The UI asks for the real
@@ -719,7 +750,7 @@ edits the suffix only, so no id can collide with a mod the reader shows.
 Run these before saying a change is done:
 
 ```powershell
-bun run lint
+bun run lint   # note: tools/gen_test_pack.ts(391,29) has a pre-existing TS2339; src/ must have 0 errors
 bun run build
 ```
 
@@ -947,6 +978,24 @@ that `vite preview` at `/` hides).
     callback is reported (`unmodelledClaimKeys`) instead of guessed. When a new
     feature is added to the generator, add its inverse there and a case to
     `tools/check_mod_import.ts`; otherwise a re-export silently drops it.
+28. **Engine quirk: `draw_hand = false` still draws the hand.** Until the engine
+    fixes `draw_hand = false`, disabling **Draw Hand** must also emit
+    `hand_radius = 0.01` as a fallback alongside `draw_hand = false` while
+    preserving the user's `hold.handRadius` in UI state.
+29. **Firing flash (`hold.flash`) must transform with the held weapon.** Because
+    the engine evaluates `flash.out` / `flash.side` / `flash.scale` relative to
+    the worm centre, both the hold canvas and `luaGenerator` share
+    `resolvedHoldFlash(hold)` to apply `weapRadius`, `weapRotation`, and
+    `weap_scale`, and `importFeatures` inverts it back.
+30. **Use `bun run` (not `npx tsx`) for repo check scripts.** Scripts that
+    import `src/utils/` hit Vite's `import.meta.env`, which `tsx` does not
+    populate cleanly; `bun run tools/check_copyfrom.ts` works directly. Also
+    `vite` imports assets from `spec/` cleanly even with `base: './'`, whereas
+    bare `/assets/...` strings must go through `assetUrl()`.
+31. **Zero-`vx` digging still needs to spin.** `M.spin_turn` multiplies by
+    `sign(vx)`, so a drill or saw tunneling straight up/down (`vx == 0, vy != 0`)
+    would freeze its spin unless `wfws_sprite_builder.lua` and the 50 Hz preview
+    substitute a tiny non-zero `eff_vx` while `digging` is active.
 
 ---
 
@@ -971,8 +1020,10 @@ Done and validated:
   and `strike.plane`.
 - Clustlet bodies for impact/bounce/homing/roam/dig, advanced missile fields,
   gun/mine/strike fields, collision masks.
-- Hold builder (PX posture/hand, put-away, thrown, keep-while-firing) and 50 Hz
-  flight preview.
+- Hold builder (3-column compact layout, PX posture/hand, continuous loop when
+  `frames > 1`, `weap_scale`, `-35..35` px radius range, `draw_hand = false` ->
+  `hand_radius = 0.01` fallback, `resolvedHoldFlash` firing-sprite alignment,
+  put-away, thrown, keep-while-firing) and 50 Hz flight preview.
 - Sidebar UI, light default, forge palette, WormForge logo, mobile layout,
   accessibility pass; Gemini/Antigravity and "API 4.0" copy removed.
 - Default Grenade/Bazooka art used by previews and exports; no dangling sheets.
@@ -980,13 +1031,16 @@ Done and validated:
 - Effects tab: ribbon trail (moved from Indices & Trail) and the effects-SDK
   explosion burst with a 50 Hz preview; Bundle Code page lists auto and manual
   `mod.toml` dependencies.
-- WFWS flight builder: its own `wfws.sdk` library bundle, primary + cluster-bit
-  roles, and per-behaviour state art (homing, homing bit, dig, roam flight, gas)
-  with record signal ids, exporter sheets and `mod.toml` declarations.
+- WFWS flight builder: its own `wfws.sdk` library bundle, 6-role hotbar (`Main`,
+  `Home`, `Bits`, `HomeBit`, `Sheep`, `Dig`) with super-sheet compatibility and
+  underground `dig = { ... }` animation/transform overrides (`anim`, `spin`,
+  `anim_speed`, `cyclical`, `scale`, `mirror`, `z`), exporter sheets, and
+  `mod.toml` declarations.
 - Bundle import for the editor's own WFWS output: record tables plus hold art and
-  its scale, sprite-builder roles and `size`/`angle`, ribbon trail, both
-  explosion modes, sequential fire, custom WAVs, pack sheets and roaming strips,
-  with the bundle's files attached and `tools/check_mod_import.ts` guarding it.
+  `weap_scale`/flash alignment, sprite-builder roles, `dig` overrides, and
+  `size`/`angle`, ribbon trail, both explosion modes, sequential fire, custom
+  WAVs, pack sheets and roaming strips, with the bundle's files attached and
+  `tools/check_mod_import.ts` guarding it.
 - `px_hold_art` + `fire_seq` kept the held sheet on the repeat-fire frames, and
   the exporter now writes the `shot.wav` that `on_shot` names.
 - GitHub Pages workflow, `.gitignore`, Pages-subpath smoke test.

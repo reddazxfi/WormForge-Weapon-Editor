@@ -15,19 +15,28 @@ const TooltipLabel: React.FC<{
   code?: string;
   desc?: string;
   htmlFor?: string;
-}> = ({ label, code, desc, htmlFor }) => (
-  <div className="flex items-center justify-between gap-1 mb-1">
-    <label htmlFor={htmlFor} className="text-xs font-semibold text-stone-700 dark:text-stone-300 truncate cursor-pointer" title={desc}>
-      {label}
-      {code && <span className="ml-1 text-[10px] font-mono text-stone-400 font-normal">({code})</span>}
-    </label>
-    {desc && (
-      <span className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0 transition-colors" title={desc}>
-        <HelpCircle className="w-3.5 h-3.5" />
-      </span>
-    )}
-  </div>
-);
+}> = ({ label, code, desc, htmlFor }) => {
+  const tooltip = [desc, code ? `Field: ${code}` : undefined].filter(Boolean).join('\n') || undefined;
+  return (
+    <div className="flex items-center justify-between gap-1 mb-1">
+      <label
+        htmlFor={htmlFor}
+        className="text-xs font-semibold text-stone-700 dark:text-stone-300 truncate cursor-pointer"
+        title={tooltip}
+      >
+        {label}
+      </label>
+      {tooltip && (
+        <span
+          className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0 transition-colors"
+          title={tooltip}
+        >
+          <HelpCircle className="w-3.5 h-3.5" />
+        </span>
+      )}
+    </div>
+  );
+};
 
 export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChange }) => {
   const iconInputRef = useRef<HTMLInputElement>(null);
@@ -237,9 +246,15 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
 
         {/* Based On Donor */}
         <div>
-          <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-            Based On (`copy_from`)
-          </label>
+          <TooltipLabel
+            label="Based On"
+            code="copy_from"
+            desc={
+              project.useWepFile
+                ? 'Disabled while the imported .wep supplies the firing record.'
+                : `Inherits physics, native handler & sounds from ${selectedDonor?.name || project.based_on}. Changing the base re-bases untouched fields while keeping your edits.`
+            }
+          />
           <select
             value={project.based_on}
             onChange={(e) => onChange({ based_on: e.target.value })}
@@ -252,11 +267,6 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
               </option>
             ))}
           </select>
-          <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1">
-            {project.useWepFile
-              ? 'Disabled while the .wep supplies the firing record.'
-              : `Inherits physics, native handler & sounds from ${selectedDonor?.name || project.based_on}. Changing the donor re-bases the record: values still equal to the old donor follow the new one, and your own edits are kept.`}
-          </p>
         </div>
 
         {/* Imported .wep */}
@@ -366,15 +376,15 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
 
       {/* Defaults Section */}
       <div className="mt-6 pt-5 border-t border-stone-100 dark:border-stone-800">
-        <div className="flex items-center gap-2 mb-3">
+        <div
+          className="flex items-center gap-2 mb-3"
+          title={'Default round settings written to the component. Profile settings in WormForge override these.\nTable: defaults = { ... }'}
+        >
           <Info className="w-4 h-4 text-forge-600 dark:text-forge-400" />
           <h3 className="font-heading font-bold text-xs uppercase tracking-wider text-stone-700 dark:text-stone-300">
-            Weapon Defaults (`defaults = {'{ ... }'}`)
+            Weapon Defaults
           </h3>
         </div>
-        <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">
-          Default round settings written to the component. Profile settings in WormForge lay over these.
-        </p>
 
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <div>

@@ -62,6 +62,7 @@ sb.flight(ctx, {
   angle = -90,                   -- degrees added to the drawn rotation
 
   roam = true,                   -- roaming animal: wait for Space, then draw
+  walk = 153,                    -- WA's walk pose (`sheepwlk`), when it can draw
 
   bits = {                       -- cluster-bit art
     sheet = "sprites/<mod>/bit_flight.png",
@@ -81,18 +82,17 @@ sb.flight(ctx, {
 
 ### Identity
 
-The default classifier is **"zero means cluster bit"**: a **cluster bit** is the
-missile whose `m.sprite` is 0 at first sight, and everything else is the
-primary. That reads backwards until you see how WA seeds it: a missile's flight
-sprite is copied from its fire params, and a cluster bit's params are the
-*parent's* copy, so the primary is the one carrying the record's `sprite`
-(zeroed while the builder owns the art) and the bits are the zero ones.
+The default classifier distinguishes the primary missile from cluster bits using
+`m.sprite`: the generator zeroes the primary's `sprite` in the record (so the
+primary spawns with `m.sprite == 0`), while cluster bits keep a nonzero stock
+sprite (e.g. `clustlet` = 54). Therefore, a missile is classified as a cluster bit
+when `m.sprite ~= 0`.
 
-A `bits` table must be configured for any of this to apply (`bits = "inherit"`
-or no `bits` makes every missile the primary, so a plain weapon never classifies
-as a bit and never goes invisible). `is_bit = function(m)` overrides the test,
-and if the engine ever passes `m.bit` (MissileEntity+0x150, the pellet flag)
-that is used first because it is exact.
+When no `bits` table is configured, `bit_cfg` defaults to `NATIVE`: cluster bits are
+left untouched so WA draws them natively. `bits = "inherit"` draws cluster bits with
+the primary sheet. `is_bit = function(m)` overrides the test, and if the engine ever
+passes `m.bit` (MissileEntity+0x150, the pellet flag) that is used first because it
+is exact.
 
 `log = true` prints the first three frames of each missile
 (`id`, `sprite`, `ident`) so the classification can be checked in the log.
@@ -121,8 +121,10 @@ wsvb` are 245-248 -- ids that would be drawn underneath our sheet). Digging is
 then only an animation: `dig = true` makes the builder probe the terrain around
 the nose every frame (four samples across the heading, two hits = digging, PX's
 Bunker Buster test) and cycle the role's own sheet frames while it is in the
-land, keeping the heading locked. Tune it with
-`dig = { probe = 6, spread = 3, hold = 3, need = 2 }`.
+land, keeping the heading locked. You can tune the probe or override the
+underground animation and transform (`anim`, `spin`, `anim_speed`, `cyclical`,
+`scale`, `mirror`, `z`) while digging, reverting cleanly in open air:
+`dig = { anim = "fast", spin = 2.5, anim_speed = 1.8, probe = 6, spread = 3, hold = 3, need = 2 }`.
 
 A weapon cannot start digging later in its life: the action is fixed when the
 record is installed, so "is this missile digging" is purely terrain contact.
@@ -151,12 +153,26 @@ sprite cannot draw underneath.
 ### Roaming (the builder owns the flying state)
 
 A roaming animal walks until the turn's player presses Space, and only then
-flies. WA draws the walk from the record `sprite` (normal-flight art only), so
-the builder never zeroes it. Pass `roam = true` and the builder waits for the
-synchronized Space press (`wa.world.keys().space`; the press belongs to the
-turn's worm) and then draws the sheet and animates its frames. The generator
-zeroes `sheep.flight_1` / `sheep.flight_2` so WA's flown sprites do not draw
-underneath:
+flies. The walk pose is the record `sprite` (normal-flight art only) and the
+flown art is `sheep.flight_1/2`, which the generator zeroes (to the unassigned
+sentinel 699 — a zero would disable the takeoff) so WA's flown sprites do not
+draw underneath.
+
+The walk has two routes:
+
+- **`walk = <id>`** — WA can draw the pose (it is a stock sprite), so the record
+  keeps it and its id is passed along. It is the one nonzero `m.sprite` that
+  means *primary*, not bit, so the classifier needs it.
+- **no `walk`** — the pose cannot draw (unset, a bundle path, or an imported
+  Project X number such as `34464`, which WA reads as an unassigned pack slot).
+  The generator zeroes the record `sprite` and the builder draws the walk itself:
+  upright (no `track`/`spin`; a walking animal does not point its nose along the
+  ground), cycling the role's frames, and switching to the configured flight
+  pose on the Space press.
+
+Pass `roam = true` and the builder waits for the synchronized Space press
+(`wa.world.keys().space`; the press belongs to the turn's worm) before using the
+flight pose:
 
 ```lua
 sb.flight(ctx, { weapon = ctx.id,

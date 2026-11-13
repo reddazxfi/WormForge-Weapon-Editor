@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ExplosionEffectConfig } from '../types/weapon';
 import { assetUrl } from '../utils/assetUrl';
+import frozenWormSrc from '../../spec/wicestnd.png';
 
 /**
  * 50 Hz playback of the effects SDK's `px_effects` burst, which is what the
@@ -142,7 +143,9 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
   // 1:1 by default: the game draws the ring in pixels, so the preview shows
   // the same size it will have in game. `Fit` is for radii larger than the canvas.
   const [zoom, setZoom] = useState<'fit' | '1x'>('1x');
+  const [showWormRef, setShowWormRef] = useState(true);
   const [sheets, setSheets] = useState<Record<string, HTMLImageElement>>({});
+  const [frozenWormImg, setFrozenWormImg] = useState<HTMLImageElement | null>(null);
   const configKey = JSON.stringify(config);
   const live = Math.max(1, Math.round(config.live));
   const total = live + 14;
@@ -165,6 +168,11 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
       };
       image.src = url;
     }
+    const wormImage = new Image();
+    wormImage.onload = () => {
+      if (!cancelled) setFrozenWormImg(wormImage);
+    };
+    wormImage.src = frozenWormSrc;
     return () => {
       cancelled = true;
     };
@@ -291,6 +299,33 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
       ctx.globalAlpha = 1;
     };
 
+    // Frozen worm scale reference (`spec/wicestnd.png`, 60x60 cell, visible worm
+    // occupies x=21..38, y=19..43) anchored in the bottom-right corner at the
+    // same pixel scale as the ring so users can judge blast size at a glance.
+    if (showWormRef && frozenWormImg && frozenWormImg.complete && frozenWormImg.naturalWidth > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.imageSmoothingEnabled = false;
+      const dx = Math.round(width - 12 - 39 * scale);
+      const dy = Math.round(height - 16 - 44 * scale);
+      ctx.drawImage(
+        frozenWormImg,
+        0,
+        0,
+        frozenWormImg.naturalWidth,
+        frozenWormImg.naturalHeight,
+        dx,
+        dy,
+        frozenWormImg.naturalWidth * scale,
+        frozenWormImg.naturalHeight * scale,
+      );
+      ctx.fillStyle = 'rgba(226, 232, 240, 0.55)';
+      ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('worm ref', width - 10, height - 5);
+      ctx.restore();
+    }
+
     // Smoke lives under the ring, as the SDK draws it first.
     if (config.smoke && age <= live) {
       const particles = smokeParticles(seed, color.r, color.g, color.b);
@@ -375,7 +410,7 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
     if (zoom === 'fit') {
       ctx.fillText(`${scale.toFixed(2)}×`, 10, height - 24);
     }
-  }, [frame, configKey, replay, live, config, total, tinted, zoom]);
+  }, [frame, configKey, replay, live, config, total, tinted, zoom, showWormRef, frozenWormImg]);
 
   return (
     <div className="space-y-2">
@@ -409,13 +444,26 @@ export function ExplosionPreview({ config }: ExplosionPreviewProps) {
             onClick={() => setZoom((value) => (value === 'fit' ? '1x' : 'fit'))}
             aria-pressed={zoom === '1x'}
             title="Fit sizes the canvas to the starting ring; 1× is one canvas pixel per game pixel."
-            className={`px-2.5 py-1 text-[11px] font-semibold rounded border ${
+            className={`px-2.5 py-1 text-[11px] font-semibold rounded border cursor-pointer ${
               zoom === '1x'
                 ? 'bg-forge-600 text-white border-forge-600'
                 : 'bg-white dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700'
             }`}
           >
             {zoom === 'fit' ? 'Fit' : '1×'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowWormRef((value) => !value)}
+            aria-pressed={showWormRef}
+            title="Toggle frozen worm sprite in the corner for 1:1 explosion scale reference."
+            className={`px-2.5 py-1 text-[11px] font-semibold rounded border cursor-pointer ${
+              showWormRef
+                ? 'bg-forge-600 text-white border-forge-600'
+                : 'bg-white dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700'
+            }`}
+          >
+            Worm
           </button>
           <span className="text-[10px] font-mono text-stone-400">
             {String(Math.min(frame, live)).padStart(2, '0')} / {live} frames · 50 Hz

@@ -31,7 +31,7 @@ import type {
   RoamSheetAsset,
   WeaponProject,
 } from '../../types/weapon';
-import { DEFAULT_ROLE_ART } from '../../data/spriteBuilder';
+import { DEFAULT_DIG_ROLE_ART, DEFAULT_ROLE_ART } from '../../data/spriteBuilder';
 import { DEFAULT_EXPLOSION_EFFECT, EXPLOSION_PRESETS } from '../../data/explosionPresets';
 import { DEFAULT_FIRE_SEQUENCE } from '../../data/fireSequence';
 import { DEFAULT_CUSTOM_SOUNDS } from '../../data/soundPresets';
@@ -252,12 +252,17 @@ function readHold(table: LuaTable, fallback: HoldConfig): HoldConfig {
   // frames per second (worm_hold.rs), which is the FPS the panel asks for.
   const animSpeed = num(table.anim_speed) ?? 1;
   const rotation = num(table.weap_rotation);
+  const drawHand = bool(table.draw_hand) ?? true;
+  const rawHandRadius = num(table.hand_radius);
   return {
     ...fallback,
     enabled: true,
     sheet: str(table.sheet) ?? fallback.sheet,
     handType,
-    handRadius: num(table.hand_radius) ?? fallback.handRadius,
+    handRadius:
+      !drawHand && rawHandRadius === 0.01
+        ? fallback.handRadius
+        : (rawHandRadius ?? fallback.handRadius),
     // The record stores PX's rotation unit (`1 + degrees/180`).
     weapRotation:
       rotation !== undefined
@@ -268,7 +273,7 @@ function readHold(table: LuaTable, fallback: HoldConfig): HoldConfig {
     handScale: num(table.hand_scale) ?? fallback.handScale,
     frames,
     fps: frames > 1 ? Math.max(1, Math.round(animSpeed * 1.5 * frames)) : fallback.fps,
-    drawHand: bool(table.draw_hand) ?? true,
+    drawHand,
     keepWhileFiring: bool(table.keep_while_firing) ?? false,
     thrown: bool(table.thrown) ?? false,
     putAway: bool(table.put_away) ?? false,
@@ -426,14 +431,41 @@ export async function readBundleFeatures(args: {
   ) {
     const sheetPath = str(holdTable.sheet);
     const asset = await readAsset(files, bundleDir, sheetPath);
+    const hold = readHold(holdTable, args.holdBase ?? DEFAULT_IMPORT_HOLD);
+    const flashTable = isTable(holdTable.flash) ? holdTable.flash : undefined;
+    const flashAsset = flashTable
+      ? await readAsset(files, bundleDir, str(flashTable.sheet))
+      : undefined;
+    const weapRadius = Number(hold.weapRadius ?? 6);
+    const weapScale = Number(hold.scale) || 1;
+    const weapRotRad = ((Number(hold.weapRotation) || 0) * Math.PI) / 180;
+    const dx = flashTable ? (num(flashTable.out) ?? 0) + weapRadius : 0;
+    const dy = flashTable ? (num(flashTable.side) ?? 0) : 0;
+    const cos = Math.cos(weapRotRad);
+    const sin = Math.sin(weapRotRad);
     project.hold = {
-      ...readHold(holdTable, args.holdBase ?? DEFAULT_IMPORT_HOLD),
+      ...hold,
       sheetFile: asset?.file,
       sheetPreview: asset?.preview,
       sheetWidth: asset?.width,
       sheetHeight: asset?.height,
+      ...(flashTable
+        ? {
+            flashFile: flashAsset?.file,
+            flashPreview: flashAsset?.preview,
+            flashWidth: flashAsset?.width,
+            flashHeight: flashAsset?.height,
+            // `frames` is the flash's lifetime in 50 Hz ticks (`flash_left`),
+            // not a strip length; `out`/`side`/`scale` are stored relative to
+            // the weapon's own pivot, rotation, and scale.
+            flashFrames: Math.max(1, Math.round(num(flashTable.frames) ?? 3)),
+            flashOut: Math.round(((dx * cos - dy * sin) / weapScale) * 100) / 100,
+            flashSide: Math.round(((dx * sin + dy * cos) / weapScale) * 100) / 100,
+            flashScale: Math.round(((num(flashTable.scale) ?? 1) / weapScale) * 1000) / 1000,
+          }
+        : {}),
     };
-    notes.push('hold art');
+    notes.push(flashTable ? 'hold art + muzzle flash' : 'hold art');
   }
 
   // ---- sprite builder -----------------------------------------------------
@@ -504,13 +536,25 @@ export async function readBundleFeatures(args: {
         DEFAULT_ROLE_ART,
       );
     }
-    // Digging is a probe, not a state: `dig = true` means the builder owns the
-    // animation and the record's four dig indexes were zeroed. Without it the
-    // original left WA's dig art alone.
+    // Digging is a probe, not a state: `dig = true` or `dig = { ... }` means
+    // the builder owns the animation and the record's four dig indexes were
+    // zeroed. Without it the original left WA's dig art alone.
     if (f.dig === true) {
-      behaviorArt.dig = { ...DEFAULT_ROLE_ART, mode: 'builder' };
+      behaviorArt.dig = { ...DEFAULT_DIG_ROLE_ART, mode: 'builder' };
+    } else if (isTable(f.dig)) {
+      behaviorArt.dig = {
+        ...DEFAULT_DIG_ROLE_ART,
+        mode: 'builder',
+        anim: animOf(f.dig.anim, 'track'),
+        frames: num(f.dig.cyclical) ?? 1,
+        animSpeed: num(f.dig.anim_speed) ?? 1,
+        spinRate: num(f.dig.spin) ?? 1,
+        scale: num(f.dig.scale) ?? 1,
+        mirror: bool(f.dig.mirror) ?? true,
+        z: num(f.dig.z) ?? 5,
+      };
     } else if (args.digging) {
-      behaviorArt.dig = { ...DEFAULT_ROLE_ART, mode: 'native' };
+      behaviorArt.dig = { ...DEFAULT_DIG_ROLE_ART, mode: 'native' };
     }
     project.behaviorArt = behaviorArt;
     if (isTable(f.states)) {
@@ -606,7 +650,6 @@ export async function readBundleFeatures(args: {
       // The generator locks the aim with `local dx, dy = seq_dir(ev.worm)`.
       liveAim: !/local\s+dx,\s*dy\s*=\s*seq_dir\(ev\.worm\)/.test(moduleText),
       cancelOnWeaponChange: t.cancel_weapon !== undefined,
-      repeatFirePose: isTable(source?.fires),
       actorSprite: str(t.sprite) ?? '',
       actorGravity: bool(t.gravity) ?? false,
       actorCollide: bool(t.collide) ?? false,

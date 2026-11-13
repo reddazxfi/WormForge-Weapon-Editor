@@ -1688,3 +1688,101 @@ of to the game's pixels. It now draws what `px_effects.lua` draws:
   `(damage + 2) * 2` (`lib/custom_explosion.lua`), so a 45-damage blast is a
   94 px ring — the old preset's 30 px was why the preview looked small next to
   the in-game screenshot (the electric mine's 56-damage blast is 116 px).
+
+## 2026-11-12 — Hold builder polish, firing flash sync, 6-role hotbar & underground `dig` overrides
+
+### Hold Art Builder layout, `weap_scale`, radius parity & `draw_hand` fallback
+
+- **Compact 3-column layout** in `HoldPreview.tsx` Section 1: left column
+  for hand controls (Draw Hand, single-button **Hand Type** cycler, Hand Scale,
+  Hand Radius), center column for the 600×600 canvas + Worm Posture (`0–31`) +
+  Flip button, right column for Launchable/Throwable, Weapon Radius/Rotation,
+  Scale Multiplier (`weap_scale`), Put-Away / Keep-While-Firing toggles, and
+  inline muzzle flash controls. Multi-frame hold sheets loop continuously
+  whenever `frames > 1`.
+- **`weap_scale` & firing flash alignment (`resolvedHoldFlash`)**:
+  - `hold.scale` now scales both the preview weapon draw and emits
+    `weap_scale = ...` in Lua.
+  - Because WormForge evaluates `hold.flash` (`out`, `side`, `scale`) relative to
+    the worm centre rather than the weapon pivot, `resolvedHoldFlash(hold)` in
+    `luaGenerator.ts` resolves the weapon's `weapRadius`, `weapRotation`, and
+    `weap_scale` into both the live canvas preview and the exported Lua `flash`
+    table, while `importFeatures.ts` inverts the transform back into local
+    weapon coordinates on bundle import.
+- **Radius parity & `draw_hand = false` engine bug workaround**:
+  - Raised the negative limit on both **Weapon Radius** and **Hand Radius**
+    sliders from `-10` to `-35` px so both sides match (`-35..35` px).
+  - Because WormForge still draws the hand even with `draw_hand = false`,
+    `luaGenerator.ts` emits `hand_radius = 0.01,` alongside `draw_hand = false,`
+    whenever **Draw Hand** is unchecked while leaving the user's `hold.handRadius`
+    value intact in UI state (`importFeatures.ts` restores `fallback.handRadius`
+    when loading `draw_hand = false` with `hand_radius = 0.01`).
+
+### Section 2 Flight Sprite Builder: 6-role hotbar & underground `dig = { ... }` overrides
+
+- **6-slot hotbar** (`Main`, `Home`, `Bits`, `HomeBit`, `Sheep`, `Dig`):
+  replaces the old stacked `FlightRoleEditor` cards with role icon tabs from
+  `spec/` (`normal.png`, `hmissil1.png`, `clusters.png`, `homing_clustlets.png`,
+  `sspsheep1.png`, `dig.png`), greying out roles that do not apply to the
+  current weapon configuration. Multi-frame super-sheets slice and preview cleanly
+  across roles.
+- **Underground `dig` animation & transform overrides**:
+  - `wfws_sprite_builder.lua`: `dig_settings` and `M.flight` now accept optional
+    `anim`, `anim_speed`, `spin`, `cyclical`, `scale` (multiplied by `size`),
+    `mirror`, `z`, and `sheet` inside `dig = { ... }`. When the 4 nose terrain
+    probes detect solid land (`digging == true`), those overrides take effect
+    without despawning/respawning the follower actor when sharing the owning
+    sheet, reverting cleanly in open air.
+  - `M.spin_turn` now multiplies by `(active_spin or 1.0)` so `Spin Rate`
+    scales `slow`/`medium`/`fast` fixed spins as well as `rotation` ("Speed
+    Tumble"), and pure vertical digging (`vx == 0, vy != 0`) uses a tiny
+    `eff_vx = 0.001` fallback in both Lua and the 50 Hz React preview so drills
+    and saws keep spinning straight up/down.
+  - `luaGenerator.ts` keeps `dig = true,` at defaults (`anim = "track"`,
+    `frames <= 1`, `animSpeed = 1`, `spinRate = 1`, `scale = 1`, `mirror = true`,
+    `z = 5`) and emits `dig = { ... }` with only customized keys when overridden;
+    `importFeatures.ts` imports both forms.
+
+
+### Missile vs cluster bit, without spawn order
+
+The builder used to classify a roaming weapon's rounds by spawn order: the
+first missile for the weapon was the primary and every later one a bit. It
+looked right on a single animal, and broke the moment one trigger made several
+rounds — a sequential `fire_seq` burst drew every shot after the first with bit
+art, and so would a herd fire.
+
+The identity has to come from the record. `m.sprite` is `MISSILE_RENDER_SPRITE`
+(+0x2EC), the field WA blits, and WA's missile constructor picks the record half
+with the pellet index (`MISSILE_SHOOT_PELLET`, +0x150): a fired round takes
+`missile.sprite` (the generator writes 0 while the builder owns the art, so
+`m.sprite == 0`), and a cluster bit takes `clusters.bit.sprite` (kept nonzero,
+`clustlet` when the record has nothing usable). A nonzero value at first sight
+is therefore a bit, whatever order it appeared in. (The old note in `AGENTS.md`
+claiming the bits were the zero ones had it backwards.) The engine's own pellet
+flag, if it is ever exposed as `m.bit`, is used first.
+
+One exception: a roaming animal whose walk pose WA draws natively. There the
+record `sprite` holds that pose, so it is the one nonzero `m.sprite` that is the
+primary. The generator passes its id as `walk` and the classifier skips it.
+
+### A roaming walk pose that cannot draw
+
+The Super Queen Bee showed the other half of it. Its PX record points
+`missile.sprite` at `34464`, a *Project X* sprite number; WA masks a record id
+to its low 16 bits and reads it as a pack slot, and nothing is installed there,
+so the queen drew nothing at all while it walked (the flown art did appear after
+takeoff, because that is the builder's). `roamWalkPoseId()` now accepts only a
+stock id (1..799 — packs are assigned slots from 800 up) or a stock name, so:
+
+- a stock pose (`sheepwlk`) is kept, WA animates it, and its id goes to
+  `sb.flight{ walk = … }`;
+- anything else is written as `sprite = 0` and the builder draws the walk as
+  well: upright, cycling the owning role's frames, switching to the configured
+  (track/spin) pose on the Space press.
+
+The same run turned up a generator gap the audit had been reporting: switching
+the action to `dig` or `roam` while every value of the destination group already
+equalled the *donor's* (unused) values emitted `action = "dig"` with no `dig`
+table at all. Those two branches now include `fullGroup`, like the bounce and
+homing groups already did.

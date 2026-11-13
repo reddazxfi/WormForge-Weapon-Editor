@@ -549,7 +549,7 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
     mineExplosionPush = rawOffsets[0x50] ?? 100;
     pushPct = mineExplosionPush;
     damage = rawOffsets[0x54] ?? 0;
-  } else if (isGun) {
+  } else if (isGun || isSpray) {
     gunBullets = rawOffsets[0x3c] ?? 0;
     gunShotInterval = rawOffsets[0x40] ?? 0;
     gunSpread = rawOffsets[0x44] ?? 0;
@@ -646,6 +646,8 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
     if (isStrike) summary.push(`Strike: ${strikeCount} munition(s)`);
   } else if (isGun) {
     summary.push(`Gun: ${gunBullets || 1} bullet(s), ${gunSpread}° spread, ${damage} damage`);
+  } else if (isSpray) {
+    summary.push(`Spray / Flame (gun slab): ${gunBullets || 1} shot(s), ${gunSpread}° spread, ${damage} damage`);
   } else if (isMine) {
     summary.push(`Mine: proximity ${mineProx}, arm ${mineArm}ms, fuse ${mineFuse}ms, ${damage} damage`);
   } else if (isArrow) {
@@ -760,7 +762,7 @@ export function parseWepBinary(buffer: ArrayBuffer, fileName: string): WepParseR
     recordOverrides['mine.explosion.bias'] = mineExplosionBias;
     recordOverrides['mine.explosion.push_pct'] = mineExplosionPush;
   }
-  if (isGun) {
+  if (isGun || isSpray) {
     recordOverrides['gun.bullets'] = gunBullets;
     recordOverrides['gun.spread_deg'] = gunSpread;
     recordOverrides['gun.shot_interval_ms'] = gunShotInterval;

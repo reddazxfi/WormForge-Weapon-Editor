@@ -52,17 +52,17 @@ export const COLLISION_FLAGS: Record<string, number> = {
  * 0.5 / 0.8 / 1.35 spin rates for slow / faster / fast.
  */
 export const MISSILE_ANIM_TYPES: { value: number; label: string }[] = [
-  { value: 0, label: 'Horiz. velocity (frames follow |vx|, mirrored left)' },
-  { value: 1, label: 'Cycle (spins through the sheet; WA grenade)' },
-  { value: 2, label: 'Track movement (faces the flight; WA bazooka)' },
-  { value: 3, label: 'Track speed (PX speed-tracking mode)' },
-  { value: 4, label: 'Slow cycle (0.5x spin)' },
-  { value: 5, label: 'Faster cycle (0.8x spin)' },
-  { value: 6, label: 'Fast cycle (1.35x spin)' },
+  { value: 0, label: 'Horizontal speed (tracks left/right velocity)' },
+  { value: 1, label: 'Continuous spin (cycles sheet frames)' },
+  { value: 2, label: 'Face flight direction (Bazooka style)' },
+  { value: 3, label: 'Speed-tracked rotation' },
+  { value: 4, label: 'Slow spin (0.5x)' },
+  { value: 5, label: 'Medium spin (0.8x)' },
+  { value: 6, label: 'Fast spin (1.35x)' },
 ];
 
 export const MISSILE_ANIM_HINT =
-  'WA animation type, by PX\u2019s own names: 0 horiz. velocity, 1 cycle, 2 track movement, 3 track speed, 4 slow / 5 faster / 6 fast cycle. The sheet frame count comes from the art, not this number.';
+  'Controls how WA selects frames from the sprite sheet during flight (spinning, facing flight direction, or tracking horizontal speed). Frame count comes from the sprite art itself.';
 export const RECORD_GROUPS: { id: string; label: string; icon?: string }[] = [
   { id: 'fires', label: 'Firing & Launch' },
   { id: 'handling', label: 'Handling & Shots' },
