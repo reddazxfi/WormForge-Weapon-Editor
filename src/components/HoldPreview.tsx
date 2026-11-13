@@ -708,7 +708,12 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const SIZE = 60;
+    // The offscreen scratch cell is 2x the 60x60 worm cell (120x120), with the
+    // worm cell centred in it, so a weapon/hand at a large radius or a scaled-up
+    // sprite is no longer clipped by the square.
+    const CELL = 60;
+    const SIZE = CELL * 2;
+    const CELL_OFF = (SIZE - CELL) / 2;
     const offscreen = document.createElement('canvas');
     offscreen.width = SIZE;
     offscreen.height = SIZE;
@@ -749,7 +754,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     if (aimImg && aimImg.complete && aimImg.naturalHeight >= 60) {
       const sy = Math.min(31, Math.max(0, aimAngleIndex)) * 60;
       offCtx.save();
-      offCtx.translate(SIZE, 0);
+      offCtx.translate(CELL_OFF + CELL, CELL_OFF);
       offCtx.scale(-1, 1);
       offCtx.drawImage(aimImg, 0, sy, 60, 60, 0, 0, 60, 60);
       offCtx.restore();
@@ -886,7 +891,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     const WORM_Y = 176; // feet, `WORM_SITE_Y`
     const CELL_FEET_Y = 43; // feet row inside the 60x60 aim cell
     const cellX = WORM_X - SIZE / 2;
-    const cellY = WORM_Y - CELL_FEET_Y;
+    const cellY = WORM_Y - CELL_FEET_Y - CELL_OFF;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
