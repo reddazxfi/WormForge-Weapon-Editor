@@ -38,6 +38,8 @@ interface Token {
   kind: 'name' | 'string' | 'number' | 'punct';
   value: string;
   line: number;
+  /** Byte offset in the source, so a caller can slice the exact literal. */
+  at: number;
 }
 
 const LONG_BRACKET = /^\[(=*)\[/;
@@ -48,7 +50,8 @@ function tokenize(code: string): { tokens: Token[]; diagnostics: string[] } {
   let i = 0;
   let line = 1;
 
-  const push = (kind: Token['kind'], value: string) => tokens.push({ kind, value, line });
+  const push = (kind: Token['kind'], value: string, at = i) =>
+    tokens.push({ kind, value, line, at });
 
   /** `[==[ ... ]==]` at `i`: returns the body, or null when it is not one. */
   const readLongBracket = (): string | null => {
@@ -90,6 +93,7 @@ function tokenize(code: string): { tokens: Token[]; diagnostics: string[] } {
     // Strings: quoted, or `[[ … ]]`.
     if (c === '"' || c === "'") {
       const quote = c;
+      const start = i;
       let out = '';
       i += 1;
       while (i < code.length) {
@@ -117,13 +121,14 @@ function tokenize(code: string): { tokens: Token[]; diagnostics: string[] } {
         out += ch;
         i += 1;
       }
-      push('string', out);
+      push('string', out, start);
       continue;
     }
     if (c === '[') {
+      const start = i;
       const long = readLongBracket();
       if (long !== null) {
-        push('string', long);
+        push('string', long, start);
         continue;
       }
     }
@@ -420,6 +425,73 @@ export function firstTable(scan: LuaScan, ...paths: string[]): LuaTable | undefi
     for (const [key, table] of Object.entries(scan.assignments)) {
       if (key === path || key.endsWith(`.${path}`)) return table;
     }
+  }
+  return undefined;
+}
+
+/**
+ * The table literal passed to a call, with its source text.
+ *
+ * `scanLua` deliberately skips function bodies when it reads a table, so a
+ * call inside a callback (`fx.burst{ … }` in `on_explode`) is invisible to it.
+ * This searches the token stream for the call itself instead, then reads the
+ * first `{ … }` argument: `wa.weapons.replace{…}`, `fx.burst{…}`, or
+ * `sb.flight(ctx, {…})` all resolve. `text` is the literal, kept because some
+ * of the generator's values are expressions (`vx = function(i, w) … * 14 end`)
+ * that are not table data.
+ */
+export function readCallTable(
+  code: string,
+  path: string,
+): { table: LuaTable; text: string } | undefined {
+  const { tokens } = tokenize(code);
+  const parts = path.split('.');
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    let j = i;
+    let matches = true;
+    for (let p = 0; p < parts.length; p += 1) {
+      if (tokens[j]?.kind !== 'name' || tokens[j].value !== parts[p]) {
+        matches = false;
+        break;
+      }
+      j += 1;
+      if (p < parts.length - 1) {
+        if (!(tokens[j]?.kind === 'punct' && tokens[j].value === '.')) {
+          matches = false;
+          break;
+        }
+        j += 1;
+      }
+    }
+    if (!matches) continue;
+
+    // Walk the call's arguments to the first table. Parentheses nest, so
+    // `sb.flight(ctx, { … })` is found at the argument level, not inside a
+    // nested call before it.
+    let k = j;
+    let depth = 0;
+    while (k < tokens.length) {
+      const token = tokens[k];
+      if (token.kind === 'punct') {
+        if (token.value === '(') depth += 1;
+        else if (token.value === ')') {
+          if (depth === 0) break;
+          depth -= 1;
+        } else if (token.value === '{' && depth <= 1) break;
+      }
+      k += 1;
+    }
+    if (!(tokens[k]?.kind === 'punct' && tokens[k].value === '{')) continue;
+
+    const reader = new Reader(tokens, k);
+    const table = reader.table();
+    const end = tokens[reader.position - 1];
+    const closer = end?.kind === 'punct' && end.value === '}' ? 1 : 0;
+    return {
+      table,
+      text: code.slice(tokens[k].at, (end?.at ?? tokens[k].at) + closer),
+    };
   }
   return undefined;
 }

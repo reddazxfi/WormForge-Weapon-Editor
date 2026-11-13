@@ -53,7 +53,7 @@ export function ModBrowserModal({ onClose, showToast, onImport }: Props) {
   const ingest = async (files: Awaited<ReturnType<typeof readFileTexts>>) => {
     if (files.length === 0) {
       setPhase('error');
-      setError('No `.lua` or `mod.toml` files in what was chosen.');
+      setError('No bundle files in what was chosen (expected .lua, .toml, and the art or sounds they use).');
       return;
     }
     setPhase('reading');
@@ -137,8 +137,9 @@ export function ModBrowserModal({ onClose, showToast, onImport }: Props) {
             </h2>
             <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
               Pick a `Mods/` folder, one bundle, or a `.zip`. Bundles, their weapon
-              components and the record tables in their Lua are read here; nothing is imported
-              into the project.
+              components, the record tables in their Lua and the WFWS features this editor
+              writes (hold art, sprite-builder roles, trail, burst, sequential fire, sounds)
+              are read here; importing also attaches the bundle's own sheets and WAVs.
             </p>
           </div>
           <button
@@ -366,15 +367,15 @@ export function ModBrowserModal({ onClose, showToast, onImport }: Props) {
                             <button
                               type="button"
                               onClick={() => {
-                                const { project, notes, replaceProject } = importBundleWeapon(
-                                  selectedWeapon,
-                                  files,
-                                );
-                                onImport({ ...project, replaceProject });
-                                showToast(
-                                  `Imported ${selectedWeapon.name}${notes.length > 0 ? ` — ${notes.join(', ')}` : ''}`,
-                                );
-                                onClose();
+                                void (async () => {
+                                  const { project, notes, replaceProject } =
+                                    await importBundleWeapon(selectedWeapon, files);
+                                  onImport({ ...project, replaceProject });
+                                  showToast(
+                                    `Imported ${selectedWeapon.name}${notes.length > 0 ? ` — ${notes.join(', ')}` : ''}`,
+                                  );
+                                  onClose();
+                                })();
                               }}
                               className="inline-flex items-center gap-1 rounded-md bg-forge-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-forge-700"
                             >

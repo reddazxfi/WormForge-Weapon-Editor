@@ -1,10 +1,15 @@
 /**
- * Getting bundle text into the page.
+ * Getting bundle text (and its art) into the page.
  *
  * Everything runs in the browser's own file APIs, so the same code works on
  * GitHub Pages, in the Vite dev server and inside the Tauri webview: a folder
  * picker (`webkitdirectory`) yields every file with its path, and a dropped or
  * chosen `.zip` is read with the JSZip the exporter already depends on.
+ *
+ * Only `.lua` / `.toml` / `.wep` are read eagerly. PNG / GIF / WAV entries are
+ * listed with a lazy reader: an installed `Mods/` tree can hold hundreds of
+ * megabytes of art, and an import only needs the sheets its own weapon names.
+ * `bytesOf` reads one on demand from the picked file or the ZIP entry.
  *
  * A native path read (`@tauri-apps/plugin-fs`) would avoid the extra click, but
  * that package is not a dependency yet; the folder picker opens Tauri's native
@@ -16,6 +21,8 @@ import type { ModFile } from './scan';
 const TEXT_FILE = /\.(lua|toml)$/i;
 /** A bundled `.wep` is the weapon's base record, so it is read as bytes. */
 const BINARY_FILE = /\.wep$/i;
+/** Art and sounds the importer can attach back to a project. */
+const ASSET_FILE = /\.(png|gif|wav)$/i;
 
 function pathOf(file: File): string {
   const relative = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
@@ -26,8 +33,16 @@ function pathOf(file: File): string {
 export function textFilesOf(list: FileList | File[] | null): File[] {
   if (!list) return [];
   return Array.from(list).filter(
-    (file) => TEXT_FILE.test(file.name) || BINARY_FILE.test(file.name),
+    (file) => TEXT_FILE.test(file.name) || BINARY_FILE.test(file.name) || ASSET_FILE.test(file.name),
   );
+}
+
+/** The bytes of an entry the importer needs, whichever source it came from. */
+export async function bytesOf(file: ModFile): Promise<Uint8Array | undefined> {
+  if (file.bytes) return file.bytes;
+  if (file.readBytes) return file.readBytes();
+  if (file.file) return new Uint8Array(await file.file.arrayBuffer());
+  return undefined;
 }
 
 export async function readFileTexts(list: FileList | File[] | null): Promise<ModFile[]> {
@@ -37,6 +52,8 @@ export async function readFileTexts(list: FileList | File[] | null): Promise<Mod
     const path = pathOf(file).split('\\').join('/');
     if (BINARY_FILE.test(file.name)) {
       out.push({ path, text: '', bytes: new Uint8Array(await file.arrayBuffer()) });
+    } else if (ASSET_FILE.test(file.name)) {
+      out.push({ path, text: '', file });
     } else {
       out.push({ path, text: await file.text() });
     }
@@ -53,6 +70,9 @@ export async function readZipTexts(file: File): Promise<ModFile[]> {
     if (TEXT_FILE.test(name)) out.push({ path, text: await entry.async('string') });
     else if (BINARY_FILE.test(name))
       out.push({ path, text: '', bytes: await entry.async('uint8array') });
+    else if (ASSET_FILE.test(name)) {
+      out.push({ path, text: '', readBytes: () => entry.async('uint8array') });
+    }
   }
   return out;
 }
@@ -74,6 +94,10 @@ export async function readDroppedItems(items: DataTransferItemList): Promise<Mod
       const path = entry.fullPath.replace(/^\//, '');
       if (BINARY_FILE.test(file.name)) {
         out.push({ path, text: '', bytes: new Uint8Array(await file.arrayBuffer()) });
+        return;
+      }
+      if (ASSET_FILE.test(file.name)) {
+        out.push({ path, text: '', file });
         return;
       }
       if (!TEXT_FILE.test(file.name)) return;
@@ -104,6 +128,8 @@ export async function readDroppedItems(items: DataTransferItemList): Promise<Mod
     if (/\.zip$/i.test(file.name)) out.push(...(await readZipTexts(file)));
     else if (BINARY_FILE.test(file.name)) {
       out.push({ path: file.name, text: '', bytes: new Uint8Array(await file.arrayBuffer()) });
+    } else if (ASSET_FILE.test(file.name)) {
+      out.push({ path: file.name, text: '', file });
     } else if (TEXT_FILE.test(file.name)) out.push({ path: file.name, text: await file.text() });
   }
 

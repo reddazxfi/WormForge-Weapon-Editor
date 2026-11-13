@@ -34,6 +34,7 @@ import {
   roamSheetsOwnFlight,
   packArtPath,
   sanitizeModFolder,
+  wfwsRoleFlags,
 } from '../src/utils/luaGenerator';
 import { DEFAULT_EXPLOSION_EFFECT, EXPLOSION_PRESETS } from '../src/data/explosionPresets';
 import { DEFAULT_CUSTOM_SOUNDS } from '../src/data/soundPresets';
@@ -1128,6 +1129,23 @@ for (const test of TESTS) {
       writeFileSync(join(BUNDLE, statePath), ROT_32);
       usedSheets.add(statePath);
       spriteDecls.set(statePath, { frames: 32, fps: 15, play: 'loop' });
+    }
+    // Timed homing art is not a `states` entry any more; its sheets are
+    // declared by `wfwsRoleFlags`. Write them, or a declared path dangles.
+    const roles = wfwsRoleFlags(project);
+    for (const [owned, key] of [
+      [roles.homing, 'homing'] as const,
+      [roles.bitHoming, 'homing_bit'] as const,
+    ]) {
+      if (!owned) continue;
+      const statePath = behaviorStateSheetPath(project, key);
+      writeFileSync(join(BUNDLE, statePath), ROT_32);
+      usedSheets.add(statePath);
+      spriteDecls.set(statePath, {
+        frames: project.behaviorArt?.[key]?.frames ?? 32,
+        fps: project.behaviorArt?.[key]?.fps ?? 15,
+        play: 'loop',
+      });
     }
   }
 

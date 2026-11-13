@@ -1298,9 +1298,9 @@ covers both.
 
 ### Reading installed mods
 
-A reader for bundles that are already installed, so their records can be
-inspected (and, next, imported) without decoding a `.wep`. It lives in
-`src/utils/modLib/`:
+A reader for bundles that are already installed, so their records and the
+editor's own WFWS features can be inspected and imported without decoding a
+`.wep`. It lives in `src/utils/modLib/`:
 
 - `luaTable.ts` — a Lua **data** reader, not an evaluator. It walks a file's
   tokens and keeps every table literal it can see: `a.b = { … }`,
@@ -1325,6 +1325,9 @@ inspected (and, next, imported) without decoding a `.wep`. It lives in
 - `loadFiles.ts` — folder picker (`webkitdirectory`, which also opens Tauri's
   native dialog), `.zip` through the JSZip the exporter already uses, and
   dropped folders/files through `webkitGetAsEntry`. Nothing is uploaded.
+  `.lua`/`.toml`/`.wep` are read eagerly; PNG/GIF/WAV entries are listed with a
+  lazy reader (`bytesOf`) so a whole `Mods/` tree can be opened without reading
+  every sheet up front.
 
 `ModBrowserModal` (sidebar → **Read installed mods**, also the mobile bar) shows
 the bundles, filters their weapons, and prints the flattened record of the
@@ -1391,16 +1394,73 @@ record, so the export is faithful before the typed panels know every key:
 Explicit assignments, not a `pairs` merge: the order is fixed in the file
 (wfcheck's `lockstep-pairs` note), parents are guarded so a group the generated
 record never created still exists, and the output reads like the record it came
-from. Only the six native record groups are carried (`missile`, `clusters`,
-`handling`, `gun`, `mine`, `strike`): a bundle's `wa.weapons.replace{ … }` also
-holds claim keys (`sprites`, `hold`, `params`, `worm_sprites`, `sounds`,
-callbacks) that name art inside *that* bundle, and writing those into an export
-would point at files we do not copy.
+from. Only the native record groups are carried (`missile`, `clusters`,
+`handling`, `gun`, `mine`, `strike`, `sheep`): a bundle's
+`wa.weapons.replace{ … }` also holds claim keys (`sprites`, `hold`, `params`,
+`worm_sprites`, `sounds`, callbacks) that name art inside *that* bundle, and
+writing those into an export would point at files we do not copy.
 
-A bundle's Lua code is never carried either: its callbacks require that
-bundle's own libraries, so the import sets `enableCustomLua = false`. Full
-mapping of `recordExtra` into the typed panels is the next step; until then the
-panels show the `.wep`/donor values while the export writes the real record.
+A bundle's Lua code is not carried as a snippet: its callbacks require that
+bundle's own libraries. The exception is the custom part of `on_explode`, which
+the editor already merges with its own burst/sound when exporting; the reader
+strips the generated `fx.burst` / `blast.explode` / sound lines and keeps the
+rest. Full mapping of `recordExtra` into the typed panels is the next step;
+until then the panels show the `.wep`/donor values while the export writes the
+real record.
+
+### Importing the editor's own features, not just the record
+
+The record tables were only half of a WFWS bundle: its hold art, sprite builder,
+trail, explosion burst, sequential fire and WAVs live outside them, as claim
+keys or calls inside `install` and its callbacks. `importFeatures.ts` is the
+inverse of the generator's feature emission:
+
+- **`hold`** (claim key, or the pre-claim `local hold` table `px_hold_art`
+  needs): `hand_type` back to lower/mid/upper, `weap_rotation` back from PX's
+  `1 + degrees/180`, `weap_scale` to the hold scale, and `anim_speed` back to
+  the in-game FPS (`fps = anim_speed × 1.5 × frames`, the inverse of the
+  generator's conversion). The sheet is read from the bundle and attached, and
+  its PNG/GIF header supplies `sheetWidth`/`sheetHeight` for `px_hold_art.size`.
+- **`sb.flight`** (`readCallTable`, which finds the table argument even though
+  `on_explode`'s function body is skipped by the data reader): primary sheet,
+  `bits` (builder/inherit/native), `bits.homing`, `homing`, `dig`, and the
+  weapon-wide `size`/`angle`/`log`. Role sheets and their `anim`, `cyclical`,
+  `anim_speed`, `spin`, `scale`, `mirror` and `z` come back onto the role cards.
+  Digging is inferred: `dig = true` means builder, no key on a digging record
+  means native (otherwise the generator would start emitting `dig = true`).
+- **Ribbon trail**: the `TRAIL` table, colour from `r/g/b`, and `target` from the
+  presence of the live-id guard (`trail_live`).
+- **Explosion burst**: `fx.burst{ … }` (overlay) or `blast.explode{ … }` (blast),
+  with every burst field, `damage`/`push`/`hole`/`sound`, the positional
+  `ellipse`, and the named preset matched back from the numbers.
+- **Sequential fire**: `seq.fire_seq_mis` / `fire_sequential_actor`, including
+  the fields the table reader cannot see because they are expressions —
+  `vx = function … * 14`, `x`/`y` offsets, and `on_shot`'s path, priority and
+  every-Nth guard.
+- **WAVs, sheets and dependencies**: the claim `sounds` paths and `on_shot`,
+  `sprites` / `cluster` / `sprite` / `sheep_sprites` styles, the icon, and any
+  manifest dependency that is not one of the four the generator adds. The files
+  are attached as `File`s, so a re-export writes the same pixels and samples.
+- The custom `on_explode` body survives (minus the generated burst/sound lines),
+  and `unmodelledClaimKeys()` names function-valued claim keys the reader still
+  cannot carry, so the import can say what it skipped instead of silently
+  dropping it.
+
+`tools/check_mod_import.ts` round-trips all 31 weapons in the generated test
+pack and asserts these values and their files, then regenerates each weapon and
+checks the feature calls survive.
+
+Two bugs the round-trip exposed:
+
+- The test pack declared `state_homing.png` in the claim's `sprites` and in
+  `mod.toml` but only wrote files for the legacy `states` list, so a timed
+  homing role shipped a declared path that did not exist. `gen_test_pack.ts`
+  now walks `wfwsRoleFlags` as well. A declared path is a load-time contract, in
+  the test pack as much as in an export.
+- A bundle import inherited the *open* project's `defaults`, so re-exporting
+  WF 29 (whose module declares only `ammo`) added `crate = { chance_pct = 15 }`
+  and `after_use = "retreat"` from whatever was on screen. A bundle import now
+  starts from neutral defaults and applies only the module's own table.
 
 ### Full mapping: a bundle's record tables become the editor's fields
 

@@ -383,7 +383,7 @@ for (const weapon of weapons) {
   let lua = '';
   let merged: any;
   try {
-    const { project } = importBundleWeapon(weapon, files);
+    const { project } = await importBundleWeapon(weapon, files);
     merged = {
       ...shell,
       ...project,

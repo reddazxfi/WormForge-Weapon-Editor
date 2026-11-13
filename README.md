@@ -13,6 +13,9 @@ Maintenance and hand-off notes live in [AGENTS.md](AGENTS.md).
   - Automatically exports modern `wa.weapons.replace{ ... }` component specifications.
   - Generates complete bundle layout with `mod.toml`, `weapons/<mod_name>.lua`, and `profiles/<Profile Name>.toml`.
   - Automatically declares `dependencies = ["wf.sdk"]` for holds and `["wfws.sdk"]` for the flight sprite builder.
+- **Read installed mods**:
+  - Opens a `Mods/` folder or `.zip`, lists every bundle and weapon, and reads records kept in Lua (including `copy_from`, bundled `.wep` files and the native record groups).
+  - Imports the WFWS features this editor writes: hold art, sprite-builder roles and `size`/`angle`, ribbon trail, explosion burst, sequential fire, custom WAVs and pack sheets — with the bundle's own PNG/GIF/WAV files attached for re-export.
 - **Project X `.wep` Binary Importer**:
   - Parses binary header `[0x06, 0xDD, 0xBB, 0x5A]`, Latin-1 name strings at `0x1E4`, and 0x1D0 bytes weapon record slabs.
   - Computes minimal diffs against stock templates (`stock.<slot>`) to prevent boilerplate noise.
@@ -56,7 +59,7 @@ bun run dev
 # 3. Build for production (web / dist)
 bun run build
 
-# 4. Dev only: generate the in-game behaviour test pack (22 weapons + profile)
+# 4. Dev only: generate the in-game behaviour test pack (31 weapons + profile)
 bun run tools/gen_test_pack.ts
 ```
 

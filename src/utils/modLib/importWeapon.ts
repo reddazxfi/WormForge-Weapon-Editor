@@ -15,6 +15,7 @@ import type { WeaponProject } from '../../types/weapon';
 import { parseWepBinary } from '../wepParser';
 import { withWfwsPrefix } from '../weaponId';
 import { mapRecord } from './mapRecord';
+import { readBundleFeatures, unmodelledClaimKeys } from './importFeatures';
 import { DEFAULT_BODY, DEFAULT_DIG, DEFAULT_FIRE, DEFAULT_ROAM } from '../../data/defaults';
 import { stockDonor, stockDonorBaseline } from '../../data/stockDonors';
 import type { LuaTable } from './luaTable';
@@ -75,7 +76,10 @@ function fireTypeOf(record: LuaTable | undefined): WeaponProject['fireType'] {
   return 'power';
 }
 
-export function importBundleWeapon(weapon: ModWeapon, files: ModFile[]): BundleImport {
+export async function importBundleWeapon(
+  weapon: ModWeapon,
+  files: ModFile[],
+): Promise<BundleImport> {
   const notes: string[] = [];
   const name = weapon.name || weapon.componentId;
   const id = withWfwsPrefix(name);
@@ -159,17 +163,54 @@ export function importBundleWeapon(weapon: ModWeapon, files: ModFile[]): BundleI
     notes.push(`${mappedKeys} record fields mapped`);
   }
 
+  // Features live outside the record: the held art table, the `sb.flight`
+  // roles, the ribbon trail, the explosion burst and hooks, the `fire_seq`
+  // burst, custom WAVs and the claim's own sheets. The reader attaches the
+  // bundle's files, so a re-export writes the same art and samples.
+  const moduleText = files.find((file) => file.path === weapon.modulePath)?.text ?? '';
+  const bitAction =
+    mapped.body.clustlet.bit_action ??
+    (mapped.body.clustlet.homing !== 'off'
+      ? 'homing'
+      : mapped.body.clustlet.contact === 'bounce'
+        ? 'bounce'
+        : 'none');
+  const features = await readBundleFeatures({
+    weapon,
+    files,
+    moduleText,
+    mappedPackArt: mapped.packArt,
+    digging:
+      mapped.action === 'dig' || (mapped.burst === 'clusters' && bitAction === 'dig'),
+  });
+  notes.push(...features.notes);
+  const unmodelled = unmodelledClaimKeys(weapon.source);
+  if (unmodelled.length > 0) {
+    notes.push(`not carried: ${unmodelled.join(', ')}`);
+  }
+
   return {
     replaceProject: true,
     project: {
       ...project,
+      ...features.project,
       id,
       name,
       description:
         weapon.description ?? `${name}, read from ${weapon.bundleName} (${weapon.bundleId}).`,
       author: weapon.author ?? 'WormForge Author',
-      panel_icon: project.panel_icon ?? donor,
-      defaults: { ...(project.defaults ?? ({} as WeaponProject['defaults'])), ...defaultsFrom(weapon.defaults) },
+      panel_icon: features.project.panel_icon ?? project.panel_icon ?? donor,
+      // A bundle import starts a new weapon, so only the module's own defaults
+      // apply; the open/project baseline must not supply crate or retreat
+      // settings the bundle never declared.
+      defaults: {
+        ammo: 1,
+        delay: 0,
+        crateChance: 0,
+        crateType: 'weapon',
+        afterUse: '',
+        ...defaultsFrom(weapon.defaults),
+      },
       body: mapped.body,
       action: mapped.action,
       burst: mapped.burst,
@@ -178,25 +219,15 @@ export function importBundleWeapon(weapon: ModWeapon, files: ModFile[]): BundleI
       fireConfig: mapped.fireConfig,
       recordOverrides: mapped.recordOverrides,
       recordExtra: mapped.recordExtra,
-      // A trail sheet the record points at inside its own bundle: the engine
-      // loads it and writes its id into the record field, so it is claim art.
-      packArt: {
-        ...(project.packArt ?? {}),
-        ...Object.fromEntries(
-          Object.entries(mapped.packArt).map(([slot, path]) => [
-            slot,
-            { fileName: path.split('/').pop(), frames: 1, fps: 15, play: 'loop' },
-          ]),
-        ),
-      },
       teleport: mapped.teleport ?? project.teleport,
       // The decoded `.wep` is the diff base; without one the donor is.
       wepBaseline: baseline,
       donorBaseline,
-      // A bundle import never carries the module's Lua code: its callbacks
-      // reference that bundle's own libraries.
-      enableCustomLua: false,
-      customLuaSnippet: '',
+      // The module's own callbacks are not carried (`features.project` only
+      // extracts the custom part of `on_explode`); anything else would need
+      // that bundle's libraries to run.
+      enableCustomLua: features.project.enableCustomLua ?? false,
+      customLuaSnippet: features.project.customLuaSnippet ?? '',
     },
     notes,
   };

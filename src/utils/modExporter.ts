@@ -148,9 +148,14 @@ export async function exportModZip(project: WeaponProject): Promise<Blob> {
 
   // Custom WAVs the claim plays by path. The Lua's `sounds` list and the file
   // written here are one contract: a declared path must exist at load.
-  for (const role of ['explosion', 'interval'] as const) {
+  for (const role of ['explosion', 'interval', 'shot'] as const) {
     const path = customSoundPath(project, role);
-    const asset = role === 'explosion' ? project.customSounds?.explosion : project.customSounds?.interval;
+    const asset =
+      role === 'explosion'
+        ? project.customSounds?.explosion
+        : role === 'interval'
+          ? project.customSounds?.interval
+          : project.customSounds?.shot;
     if (path && asset?.file) {
       zip.file(`${modFolder}/${path}`, asset.file);
     }

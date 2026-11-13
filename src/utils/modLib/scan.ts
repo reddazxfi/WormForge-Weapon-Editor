@@ -19,6 +19,10 @@ export interface ModFile {
   text: string;
   /** Raw bytes, for a bundled `.wep` the module points at. */
   bytes?: Uint8Array;
+  /** The picked file, for an asset whose bytes have not been read yet. */
+  file?: File;
+  /** A ZIP entry's bytes, read on demand (`JSZip` keeps the archive open). */
+  readBytes?: () => Promise<Uint8Array>;
 }
 
 export interface ModComponent {
@@ -51,6 +55,12 @@ export interface ModBundle {
 export interface ModWeapon {
   bundleId: string;
   bundleName: string;
+  /** Folder the bundle's `mod.toml` sits in, `''` at the root of what was opened. */
+  bundleDir: string;
+  /** The manifest's dependency list, for carrying a bundle's own libraries. */
+  dependencies: string[];
+  /** `[sprites."…"]` declarations, keyed by the bundle-relative path. */
+  spriteDecls: Record<string, Record<string, unknown>>;
   /** The bundle's `author`, used as the imported project's credit. */
   author?: string;
   componentId: string;
@@ -172,6 +182,9 @@ const RECORD_KEYS = ['missile', 'clusters', 'handling', 'gun', 'mine', 'strike']
  */
 const RECORD_GROUPS = [
   ...RECORD_KEYS,
+  // `sheep.flight_1/2` are native record fields (not named by
+  // `record::fields()`, but the engine reads them), so they are carried too.
+  'sheep',
   'fires',
   'arrow',
   'baseball_bat',
@@ -327,6 +340,9 @@ export function readWeapons(bundles: ModBundle[], files: ModFile[]): ModWeapon[]
       const base: ModWeapon = {
         bundleId: bundle.id,
         bundleName: bundle.name,
+        bundleDir: bundle.dir,
+        dependencies: bundle.dependencies,
+        spriteDecls: bundle.spriteDecls,
         author: bundle.author,
         componentId: component.id,
         name: component.name,

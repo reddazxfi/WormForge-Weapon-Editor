@@ -537,6 +537,9 @@ bundle, its weapon components and the record tables each one keeps in Lua.
   skipped as values but still walked through, because this editor's own
   bundles put `wa.weapons.replace{ … }` inside `install = function(ctx)`.
   Anything that is not a literal becomes `null` instead of failing the file.
+  `readCallTable(code, "fx.burst")` finds a table passed to a call even inside a
+  callback the table reader skipped, and returns the literal text too (some of
+  the generator's values are expressions, like `vx = function … * 14 end`).
 - `modToml.ts` reads the manifest (scalars, `dependencies`, `[[components]]`,
   `[sprites."…"]`).
 - `scan.ts` finds nested bundles by their own `mod.toml` and resolves each
@@ -545,18 +548,33 @@ bundle, its weapon components and the record tables each one keeps in Lua.
   `require("lib/…")`. A table is accepted as a record by shape (`missile`,
   `clusters`, `handling`, `gun`, `mine`, `strike`) when nothing names it.
 - `loadFiles.ts` is the web-safe input: `webkitdirectory`, JSZip, and
-  `webkitGetAsEntry` drops; `.lua`/`.toml` as text, `.wep` as bytes. A native
-  path read would need `@tauri-apps/plugin-fs`, which is not a dependency.
+  `webkitGetAsEntry` drops; `.lua`/`.toml` as text, `.wep` as bytes. PNG/GIF/WAV
+  entries are listed with a **lazy** reader (`bytesOf`), because a whole `Mods/`
+  tree can hold far more art than an import needs. A native path read would need
+  `@tauri-apps/plugin-fs`, which is not a dependency.
 - A module can name a `.wep` (`wep = "X.wep"`, sometimes assembled as
   `M.WEP .. o.wep`): the literal is matched against the bundle's own files by
   base name, so 41 of 262 weapons on the dev machine resolve one.
 - `importWeapon.ts` builds a project the way the engine loads a bundle: the
   `.wep` first (`parseWepBinary`, `useWepFile` + the file kept for export), else
   `copy_from = "stock.<donor>"`; then the module's declared tables are carried
-  as **`recordExtra`**. `defaults` map to the project's defaults, and
-  `missile.action` / `missile.burst` to `action` / `burst`. The bundle's Lua
-  code is never carried (`enableCustomLua = false`) — its callbacks require
-  that bundle's own libraries.
+  as **`recordExtra`**. `defaults` map to the project's defaults (a bundle
+  import starts from neutral defaults, not the open project's), and
+  `missile.action` / `missile.burst` to `action` / `burst`.
+- **Features** (`importFeatures.ts`) are the inverse of the generator's feature
+  emission, for the bundles this editor writes (the WFWS corpus): the `hold`
+  table (`sheet`/`hand_type`/`weap_rotation` reversed to degrees/`weap_scale`/
+  `anim_speed` back to FPS), the `sb.flight` argument (primary sheet, `bits`,
+  `bits.homing`, `homing`, `dig`, `size`/`angle`/`log`), the `TRAIL` table and
+  its `target`, `fx.burst` / `blast.explode` (mode, damage/push/hole/sound and
+  every burst field, preset matched back), `seq.fire_seq_mis` /
+  `fire_sequential_actor` (including the expression fields `vx`/`x`/`y`), custom
+  WAVs and their priorities/timing, the claim `sprites`/`cluster`/`sprite`/
+  `sheep_sprites` sheets, the custom part of `on_explode`, and any manifest
+  dependency that is not one of the four automatic ones. The sheets and WAVs are
+  read from the bundle and attached as `File`s, so a re-export writes the same
+  art instead of the defaults. `unmodelledClaimKeys()` reports function-valued
+  claim keys the reader does not carry (a bundle's own callbacks).
 - **Full mapping** (`mapRecord.ts`) is the inverse of the generator's emission:
   `missile`/`clusters`/`handling`/`gun`/`mine`/`strike` become the typed fields
   (`body`, `clustlet`, `roamConfig`, `digConfig`, `fireConfig`, `action`,
@@ -571,12 +589,12 @@ bundle, its weapon components and the record tables each one keeps in Lua.
   `.wep` as `wepBaseline` while the mapped values are the project, so a
   `.wep`-backed weapon exports the file plus only its module's edits
   (`App.handleApplyWepImport` honours `parsed.wepBaseline`).
-- **`recordExtra` emission** (`luaGenerator`): only the six native record groups
-  (`missile`, `clusters`, `handling`, `gun`, `mine`, `strike`) are carried; a
-  bundle's spec table also holds claim keys (`sprites`, `hold`, `params`,
-  `worm_sprites`, sounds, callbacks) that name art inside *that* bundle. The
-  values are written as explicit `rec.<path> = …` assignments with guarded
-  parents (`rec.missile = rec.missile or {}`) after a `local rec = { … }`
+- **`recordExtra` emission** (`luaGenerator`): only the native record groups
+  (`missile`, `clusters`, `handling`, `gun`, `mine`, `strike`, `sheep`) are
+  carried; a bundle's spec table also holds claim keys (`sprites`, `hold`,
+  `params`, `worm_sprites`, sounds, callbacks) that name art inside *that*
+  bundle. The values are written as explicit `rec.<path> = …` assignments with
+  guarded parents (`rec.missile = rec.missile or {}`) after a `local rec = { … }`
   record, then `wa.weapons.replace(rec)` — never a `pairs` merge, which wfcheck
   reports as `lockstep-pairs`. Full mapping of these values into the typed
   panels is the next step.
@@ -676,6 +694,11 @@ edits the suffix only, so no id can collide with a mod the reader shows.
   weapon id on every export (`packArtPath`), so renaming cannot leave a stale
   folder. `packArtPath` returns null for `cluster_homing_sprite` on a strike
   (see `packArtSlotApplies`).
+- Uploaded WAVs (`project.customSounds`) are written as
+  `sounds/<mod>/explosion.wav`, `interval.wav` and `shot.wav` whenever the role
+  is enabled and has a file. The claim's `sounds` list, the `on_explode` play
+  call and `fire_seq`'s `on_shot` path are the same contract: a declared path
+  must exist at load.
 - `mod.toml` `dependencies` merges the features' own entries (`wf.sdk` for
   holds, `wfws.sdk` for the flight builder, `effects.sdk` for effects,
   `px.fire_seq` for sequential fire) with
@@ -706,7 +729,7 @@ Test pack for engine behaviour (dev only, output is git-ignored):
 bun run tools/gen_test_pack.ts   # -> test_pack/wftest_pack/ + test_pack/README.md
 ```
 
-It writes one bundle with 22 components, one profile ("WF Test Pack") and all
+It writes one bundle with 31 components, one profile ("WF Test Pack") and all
 art derived from `spec/default_grenade.png` (single frame for the sprite builder,
 32/16-frame rotation strips for bits, a 4-frame strip for native trails). Each
 test carries its intent, expected result and failure symptom in
@@ -734,6 +757,19 @@ record tables, that a Mortar with its clustlets off and a 100% push writes
 `burst = "nothing"` + `push_pct = 100` (with a correct *and* a stale baseline),
 and that re-basing a donor keeps the author's edits while adopting the new
 donor's record.
+
+WFWS bundle import check (no server, exits 1 on a failure):
+
+```powershell
+bun run tools/gen_test_pack.ts
+bun run tools/check_mod_import.ts
+```
+
+It imports all 31 test weapons and asserts the features come back with their
+files: held art and its scale, `sb.flight` roles and `size`/`angle`, the ribbon
+trail and its target, both explosion modes with every burst field and the preset,
+`fire_seq` counts/speed/offsets, custom WAVs, pack sheets and roaming strips.
+It also regenerates each weapon and checks the original feature calls survive.
 
 Compiler check (lives in the code-editor repo):
 
@@ -897,6 +933,20 @@ that `vite preview` at `/` hides).
     only the values the author actually edited. Never add a donor without
     updating `stockDonors.json`; an unknown donor falls back to writing the
     whole record rather than silently inheriting one nobody can diff.
+26. **A declared sheet path must be written.** `gen_test_pack.ts` listed
+    `state_homing.png` in the claim's `sprites` and `mod.toml` but only walked the
+    legacy `states` list when writing files, so the homing-state test shipped a
+    declared path that did not exist. Walk `wfwsRoleFlags` too. The same test
+    applies to every exporter path: `mod.toml` may not name a file the ZIP does
+    not carry.
+27. **Feature import inverts the generator, not the engine.** `importFeatures.ts`
+    reads the exact shapes this editor emits. The values that are Lua
+    *expressions* (`vx = function … * 14 end`, `x = ev.worm.x - 3`,
+    `on_shot`'s guard) are recovered from `readCallTable`'s literal text, the
+    attached files come from the bundle through `bytesOf`, and an unrecognised
+    callback is reported (`unmodelledClaimKeys`) instead of guessed. When a new
+    feature is added to the generator, add its inverse there and a case to
+    `tools/check_mod_import.ts`; otherwise a re-export silently drops it.
 
 ---
 
@@ -933,6 +983,12 @@ Done and validated:
 - WFWS flight builder: its own `wfws.sdk` library bundle, primary + cluster-bit
   roles, and per-behaviour state art (homing, homing bit, dig, roam flight, gas)
   with record signal ids, exporter sheets and `mod.toml` declarations.
+- Bundle import for the editor's own WFWS output: record tables plus hold art and
+  its scale, sprite-builder roles and `size`/`angle`, ribbon trail, both
+  explosion modes, sequential fire, custom WAVs, pack sheets and roaming strips,
+  with the bundle's files attached and `tools/check_mod_import.ts` guarding it.
+- `px_hold_art` + `fire_seq` kept the held sheet on the repeat-fire frames, and
+  the exporter now writes the `shot.wav` that `on_shot` names.
 - GitHub Pages workflow, `.gitignore`, Pages-subpath smoke test.
 
 Likely next steps:
@@ -940,7 +996,8 @@ Likely next steps:
 - Task 3 in `reqs/wfws_builder_findings.md`: harden `gen_test_pack.ts`
   (generated `mod.toml`/profile, distinct art per state, golden snapshots, new
   builder cases).
-- Task 4: `fire_seq` integration.
+- Carry the remaining arbitrary `install` callbacks on import (`wa.on.*`), which
+  are still reported as `not carried` rather than imported.
 - Add the GitHub remote and publish Pages.
 - Keep `wf_weapon_editor_notes.md` updated with any engine behaviour discovered.
 - If a field is added, update: type → parser → generator → editor UI → notes.
