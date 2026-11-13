@@ -115,19 +115,34 @@ end
 --
 -- WA walks a roaming animal with no velocity of its own, so `track` leaves the
 -- art pointing at the last heading and a moving animal looks dead on the
--- ground. This points the art along the velocity while it moves, clamped to
--- `up` above and `down` below `rest`, and returns `rest` when the animal has no
--- speed. Angles are radians; the caller keeps the three limits.
-function M.roam_angle(vx, vy, rest, up, down, speed)
+-- ground. On the ground (`grounded`) this holds `rest` and lets the art lean at
+-- most `up` degrees above it or `down` below it while the animal steps. In the
+-- air it tracks the velocity exactly like `track`: a flying animal points where
+-- it flies, which is what PX's own sheep art does. Angles are radians; the
+-- caller keeps the three limits.
+function M.roam_angle(vx, vy, rest, up, down, speed, grounded, prev)
+  if not grounded then
+    -- Airborne: full tracking. A hop with no velocity keeps the last heading
+    -- instead of snapping to nonsense (`track_angle(0, 0)` is due south).
+    if (speed or 0) < 0.05 then return prev or rest end
+    return M.track_angle(vx, vy)
+  end
   if (speed or 0) < 0.05 then return rest end
-  local want = M.track_angle(vx, vy)
+  -- The ground pose is mirrored by `facing` when it walks left, so measure the
+  -- lean on the right-facing side only. Using the signed `vx` made every step
+  -- left look like a steep climb and tilt the art up.
+  local ax = vx
+  if ax < 0 then ax = -ax end
+  local want = M.track_angle(ax, vy)
   -- Shortest signed difference, so a heading across the wrap point still clamps
   -- on the near side.
   local delta = (want - rest + math.pi) % (2 * math.pi) - math.pi
-  if delta > up then
-    delta = up
-  elseif delta < -down then
-    delta = -down
+  -- Angles grow clockwise, so a positive delta leans the nose down (`down`
+  -- limits it) and a negative one raises it (`up` limits that side).
+  if delta > down then
+    delta = down
+  elseif delta < -up then
+    delta = -up
   end
   return rest + delta
 end
@@ -286,8 +301,11 @@ function M.flight(ctx, opts)
   local angle = opts.angle or 0.0
   -- `anim = "roam"` limits: a resting angle and how far the art may tilt either
   -- way from it, in degrees. One preset for every role, like `size`/`angle`.
+  -- `rest = 90` lays a walking animal flat (its sheet points up), which is the
+  -- editor's default; keep the two in step, or the art rests upright in game
+  -- while the preview shows it flat.
   local tilt = opts.tilt or {}
-  local rest = math.rad(tilt.rest or 0.0)
+  local rest = math.rad(tilt.rest or 90.0)
   local up = math.rad(math.abs(tilt.up or 25.0))
   local down = math.rad(math.abs(tilt.down or 25.0))
 
@@ -345,10 +363,18 @@ function M.flight(ctx, opts)
   -- up. `fly` is that id (the unassigned sentinel the generator writes so the
   -- Space takeoff stays enabled). With neither, the builder draws the animal
   -- from the first frame and `roam` only documents the record's action.
+  --
+  -- A `sheet` in that table is the animal's own flight art: the builder draws it
+  -- from the takeoff instead of the primary sheet, with that role's own `anim`,
+  -- `cyclical`, `spin`, `scale` and `z`.
   local roam = opts.roam == true or type(opts.roam) == "table"
   local roam_ids = type(opts.roam) == "table" and opts.roam or nil
   local walk_pose = roam_ids and tonumber(roam_ids.walk) or nil
   local fly_pose = roam_ids and tonumber(roam_ids.fly) or nil
+  -- A roaming animal may fly on art of its own (`roam = { sheet = ...,
+  -- anim = ..., ... }`) instead of the primary sheet. It is still WA's animal
+  -- until Space, so this only takes over from the takeoff on.
+  local roam_cfg = roam_ids and roam_ids.sheet and resolve(roam_ids, size) or nil
   local flying = {}      -- [id] = true once WA has the animal airborne
   local armed = {}       -- [id] = Space was seen up since the missile appeared
   local age = {}         -- [id] = frames since first sight, for homing ms
@@ -445,10 +471,11 @@ function M.flight(ctx, opts)
     end
 
     if m.phase == "pre" then
-      if roam and ent.ident == "main" and walk_pose and not flying[id] then
-        -- WA is still drawing the animal's ground pose, so the builder only
-        -- watches for the takeoff. The Space press that takes off is the turn
-        -- player's, so the turn's worm has to exist.
+      if roam and ent.ident == "main" and not flying[id] then
+        -- The Space press that takes off is the turn player's, so the turn's
+        -- worm has to exist. `armed` needs to have seen Space released since
+        -- the animal appeared, so a key already held at launch cannot skip the
+        -- ground phase.
         local keys = wa.world.keys and wa.world.keys() or nil
         local held = keys and keys.space and true or false
         if not held then
@@ -459,13 +486,17 @@ function M.flight(ctx, opts)
         -- WA moves its flown sprite in at the takeoff; if that lands in the
         -- render slot, it is an exact signal that beats the key.
         if fly_pose and m.sprite == fly_pose then flying[id] = true end
-        if not flying[id] then
-          active[id] = NATIVE
-          return
-        end
+      end
+      -- A stock walk pose is WA's own art: leave the ground to WA until the
+      -- animal is airborne. Without one nothing draws the walk, so the builder
+      -- keeps drawing it (`anim = roam` rests it on the ground).
+      if roam and ent.ident == "main" and walk_pose and not flying[id] then
+        active[id] = NATIVE
+        return
       end
       if m.sprite ~= 0 then sig[id] = m.sprite end   -- read BEFORE zeroing
       local cfg = pick(m, ent)
+      if roam_cfg and ent.ident == "main" then cfg = roam_cfg end
       active[id] = cfg
       if cfg == NATIVE then
         -- Hand the sprite back. If our earlier zero stuck, restore the last
@@ -573,7 +604,12 @@ function M.flight(ctx, opts)
       rot = M.spin_turn(spin_ang[id], eff_vx, (ANIM_SPEED[active_anim] or 0.5) * (active_spin or 1.0))
       spin_ang[id] = rot
     elseif active_anim_type == 4 then
-      rot = M.roam_angle(m.vx, m.vy, rest, up, down, math.sqrt((m.vx or 0) ^ 2 + (m.vy or 0) ^ 2))
+      -- `anim = roam`: rest/lean while WA walks the animal (or while the
+      -- builder draws its ground phase), full tracking once it is airborne.
+      rot = M.roam_angle(m.vx, m.vy, rest, up, down,
+        math.sqrt((m.vx or 0) ^ 2 + (m.vy or 0) ^ 2),
+        roam and ent.ident == "main" and not flying[id], spin_ang[id])
+      spin_ang[id] = rot
     end
 
     if cfg.frame_fn then

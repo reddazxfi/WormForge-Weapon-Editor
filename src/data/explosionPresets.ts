@@ -89,6 +89,7 @@ export const DEFAULT_EXPLOSION_EFFECT: ExplosionEffectConfig = {
   push: 90,
   hole: 45,
   sound: 'default',
+  damageType: 'blast',
   preset: 'electric',
   ...EXPLOSION_PRESETS.electric.patch,
 } as ExplosionEffectConfig;

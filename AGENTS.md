@@ -303,14 +303,19 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
     declaration (the builder hides that sheet anyway).
   - **`anim = "roam"`: the walking preset.** A roaming animal is walked by WA
     with no velocity of its own, so `track` freezes the art at the last heading
-    and the animal looks dead on the ground. `anim = "roam"` points the sheet
-    along the velocity but clamps it to `tilt = { up, down, rest }` degrees
-    (`MissileSpriteConfig.roamTilt`, weapon-wide like `size`/`angle`), and holds
-    `rest` whenever the speed is under 0.05 px/frame — i.e. while WA walks it. The
-    clamp is a shortest-signed delta, so a heading across the wrap point still
-    limits on the near side. The Hold page's **Roam Tilt** card edits the three
-    angles and the flight preview gained a **Walk** mode (amble with no velocity,
-    then a hop up and down) that shows exactly what the preset does.
+    and the animal looks dead on the ground. On the ground `anim = "roam"` holds
+    `rest` and lets the art lean at most `up` above / `down` below it
+    (`MissileSpriteConfig.roamTilt`, weapon-wide like `size`/`angle`); **in the
+    air it tracks the velocity exactly like `track`**, because a flying animal
+    points where it flies. `rest` defaults to 90° (a sheet that points up lies
+    flat for a side-on walk) in both the editor and the builder — keep the two in
+    step, or the art rests upright in game while the preview shows it flat. The
+    ground heading is measured right-facing (the sheet is mirrored by `facing`),
+    so walking left does not read as a climb, the clamp uses a shortest-signed
+    delta, and `up`/`down` were swapped before (up tilted down). The Hold page's
+    **Roam Tilt** card edits the three angles and the flight preview's **Walk**
+    mode shows the ground lean; its **Arc/Orbit/Static** modes show the air
+    tracking.
   - **Digging is not a state and has no sheet (but can override animation/transform).**
     Whenever the builder owns the flight art and the record digs (`action = "dig"`,
     or a cluster bit whose action is dig), the generator writes `dig.dive_sprite`
@@ -363,6 +368,16 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
     `roam = { walk = <id>, fly = 699 }` so the classifier still knows the
     primary, and the builder leaves the animal to WA until the takeoff (the
     Space edge, or WA moving the flown sentinel into the render slot).
+    **The flown art can be a role of its own** (the Hold page's Sheep slot,
+    `behaviorArt.roam`): then `roam = { sheet = state_roam.png, anim, cyclical,
+    anim_speed, spin, scale, mirror, z, walk, fly }` carries its own sheet and
+    parameters, the exporter writes `state_roam.png`, and `mod.toml` declares
+    it (walked by `wfwsRoleFlags().roam`, which needs the primary builder and
+    `action = "roam"`). "Round's sheet" (the default) keeps `roam = { walk, fly }`
+    or `roam = true`, so bundles written before the role existed still load. The
+    Sheep slot's parameter controls are read-only in that mode — they belong to
+    Slot 1 — and both the preview and the `sb.flight` snippet use the role's own
+    sheet/params only when it owns them.
     **`track`/`rotation` apply on the ground too** — the pose is never forced
     upright, because that reads as "the main missile has no animation" until the
     takeoff. While the builder owns the state the two `sheep_sprites` uploads
@@ -740,11 +755,12 @@ edits the suffix only, so no id can collide with a mod the reader shows.
 - `sprites/<mod>/missile.png` whenever custom flight art is enabled: uploaded
   sheet, otherwise the default art.
 - `sprites/<mod>/bit_flight.png` when the WFWS bit role is set to Builder, and
-  `sprites/<mod>/state_homing.png` / `state_homing_bit.png` when the homing role
-  is set to Builder (`wfwsRoleFlags`). Uploaded sheet if present, otherwise the
-  default missile art. Digging writes no state sheet (the flight sheet is the
-  dig animation), and roaming uses `sheep_sprites` unless the builder owns the
-  flown art, in which case `missile.png` is that art.
+  `sprites/<mod>/state_homing.png` / `state_homing_bit.png` / `state_roam.png`
+  when the homing or roaming role is set to Builder (`wfwsRoleFlags`). Uploaded
+  sheet if present, otherwise the default missile art. Digging writes no state
+  sheet (the flight sheet is the dig animation), and roaming without an own
+  sheet uses `sheep_sprites` unless the builder owns the flown art, in which
+  case `missile.png` is that art.
 - `sprites/<mod>/sheep_flight1.png` / `sheep_flight2.png` when both roaming
   sheets are uploaded (`sheep_sprites` needs exactly two) and the flight builder
   is off — a builder sheet owns the flying state instead. They are rotation
@@ -798,13 +814,14 @@ Test pack for engine behaviour (dev only, output is git-ignored):
 bun run tools/gen_test_pack.ts   # -> test_pack/wftest_pack/ + test_pack/README.md
 ```
 
-It writes one bundle with 31 components, one profile ("WF Test Pack") and all
-art derived from `spec/default_grenade.png` (single frame for the sprite builder,
-32/16-frame rotation strips for bits, a 4-frame strip for native trails). Each
+It writes one bundle with 35 components, one profile ("WF Test Pack") and art
+derived from `spec/` sheets, one per role (the sprite builder, cluster bits, the
+homing window, the homing bit, the roaming animal and native trails). Each
 test carries its intent, expected result and failure symptom in
 `test_pack/README.md`; the profile places them on distinct stock slots with
 infinite ammo. Tests 21/22 cover the explosion burst in `blast` mode (a
-bazooka) and `effect` overlay mode (a mine).
+bazooka) and `effect` overlay mode (a mine); 34/35 cover the roam tilt and the
+roaming role's own sheet.
 
 Stock record values (PX's default scheme, from `WormForgeNew`):
 
@@ -834,7 +851,7 @@ bun run tools/gen_test_pack.ts
 bun run tools/check_mod_import.ts
 ```
 
-It imports all 31 test weapons and asserts the features come back with their
+It imports all 35 test weapons and asserts the features come back with their
 files: held art and its scale, `sb.flight` roles and `size`/`angle`, the ribbon
 trail and its target, both explosion modes with every burst field and the preset,
 `fire_seq` counts/speed/offsets, custom WAVs, pack sheets and roaming strips.

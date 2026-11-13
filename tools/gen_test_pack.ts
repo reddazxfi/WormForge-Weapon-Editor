@@ -49,6 +49,7 @@ import { stockDonor } from '../src/data/stockDonors';
 import { DEFAULT_CUSTOM_SOUNDS } from '../src/data/soundPresets';
 import { DEFAULT_FIRE_SEQUENCE } from '../src/data/fireSequence';
 import {
+  DEFAULT_ROAM_ROLE_ART,
   DEFAULT_ROLE_ART,
   bitBuilderMode,
   resolveBehaviorStates,
@@ -1045,24 +1046,55 @@ const TESTS: TestCase[] = [
       slot: 'super_sheep',
       action: 'roam',
       body: { sprite: 'sheepwlk' },
-      // `anim = "roam"`: the sheet points along the velocity but may only lean
-      // 35 degrees up or 25 down from a 10 degree rest, and it sits at the rest
-      // angle while WA walks the animal (no velocity at all on the ground).
+      // `anim = "roam"`: the ground pose is side-on (rest), leaning up/down by
+      // the limits as the animal steps; once it flies it tracks its heading
+      // like `track`. WA still draws the stock walk pose here, so the rest only
+      // shows while the animal has no velocity and the builder is drawing it.
       missileSprite: {
         enabled: true,
         mode: 'custom',
         anim: 'roam',
         frames: 1,
-        roamTilt: { up: 35, down: 25, rest: 10 },
+        roamTilt: { up: 35, down: 25, rest: 90 },
         hideStock: true,
       },
     }),
     intent:
-      'The roam tilt preset: `anim = roam` with `tilt = { up = 35, down = 25, rest = 10 }`, WA keeping the ground pose.',
+      'The roam tilt preset: `anim = roam` with `tilt = { up = 35, down = 25, rest = 90 }`, WA keeping the ground pose.',
     expect:
-      'While it walks the art sits 10 degrees off vertical; taking off leans it back up to 35 at the steepest climb, then forward to 25 on the way down, never further.',
+      'The sheep walks with WA\'s pose; after Space it flies on the builder sheet, pointing exactly along its heading (the ground lean does not apply in the air). A record whose walk pose cannot draw instead rests flat (90°) while it walks and leans at most 35° up / 25° down as it steps.',
     watch:
-      'The art pointing at the last heading while walking (`track` instead of the rest angle), no tilt at all (`tilt` lost, or `anim = roam` emitted as another type), the art past the limits, or the sheet 45 degrees off (that is WF 28 and its `angle`).',
+      'The art resting upright on the ground while the editor shows it flat (the builder default rest is not 90), the flying art stuck near horizontal (the ground clamp still applied in the air), the lean limits swapped (up tilts down), a leftward walk tilting up by itself (the signed vx used instead of the mirrored heading), or the sheet 45 degrees off (that is WF 28 and its `angle`).',
+  },
+  {
+    project: makeOp({
+      id: 'wftest.35_roam_role',
+      name: 'WF 35 Roam Own Sheet',
+      slot: 'super_sheep',
+      action: 'roam',
+      body: { sprite: 'sheepwlk' },
+      // The roaming animal's flown art as a role of its own: its own sheet,
+      // animation, frames and scale. WA keeps the walk; the builder takes over
+      // on the Space press. Nothing here may change Slot 1's sheet or params.
+      missileSprite: { enabled: true, mode: 'custom', anim: 'track', frames: 1, hideStock: true },
+      behaviorArt: {
+        roam: {
+          ...DEFAULT_ROAM_ROLE_ART,
+          mode: 'builder',
+          anim: 'roam',
+          frames: 4,
+          animSpeed: 1.5,
+          scale: 1.5,
+          sheetFile: file(roleSheet(SHEEP_BMP, SHEEP_PNG, 4), 'state_roam.png'),
+        },
+      },
+    }),
+    intent:
+      'A roaming animal\'s flown art as its own role: `roam = { sheet = state_roam.png, anim = roam, cyclical = 4, scale = 1.5 }` with `walk`/`fly` for the takeoff.',
+    expect:
+      'The sheep walks with WA\'s pose, then on Space flies on the sheep sheet at 1.5x with its own four-frame cycle; the primary sheet and its `track` animation are unchanged on Slot 1.',
+    watch:
+      'The primary sheet after takeoff (`roam.sheet` missing or overridden by Slot 1), the sheep at the primary scale (role params leaking into or out of Slot 1), no takeoff (`fly` lost), or WA\'s two flight strips drawing under ours.',
   },
   {
     project: makeOp({
@@ -1300,14 +1332,21 @@ for (const test of TESTS) {
     for (const [owned, key] of [
       [roles.homing, 'homing'] as const,
       [roles.bitHoming, 'homing_bit'] as const,
+      [roles.roam, 'roam'] as const,
     ]) {
       if (!owned) continue;
       const statePath = behaviorStateSheetPath(project, key);
       const role = project.behaviorArt![key]!;
       const frames = Math.max(1, role.frames ?? 1);
       // The homing *bit* is the drum's own 20-cell sheet; the primary's homing
-      // art is the bazooka, so the two homing roles are never the same picture.
-      const [base, png] = key === 'homing_bit' ? [DRUM_BMP, DRUM_PNG] : [AIM_BMP, AIM_PNG];
+      // art is the bazooka and a roaming animal is the sheep, so the three
+      // roles are never the same picture.
+      const [base, png] =
+        key === 'homing_bit'
+          ? [DRUM_BMP, DRUM_PNG]
+          : key === 'roam'
+            ? [SHEEP_BMP, SHEEP_PNG]
+            : [AIM_BMP, AIM_PNG];
       writeFileSync(join(BUNDLE, statePath), roleSheet(base, png, frames));
       usedSheets.add(statePath);
       spriteDecls.set(statePath, { frames, fps: role.fps || 15, play: 'loop' });

@@ -375,12 +375,19 @@ export function ExplosionEffectCard({ project, onChange }: CardProps) {
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className="space-y-3">
-          <div className="space-y-1">
-            <span className={labelClass}>Blast</span>
+          {/* Native blast: what the record's own blast does, and what the SDK
+              does instead when it replaces it. */}
+          <div className="rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/40 p-2.5 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className={labelClass}>Native blast</span>
+              <code className="text-[10px] font-mono text-stone-500 dark:text-stone-400">
+                {fx.mode === 'blast' ? 'explosion.power = 0' : 'record blast kept'}
+              </code>
+            </div>
             <div className="grid grid-cols-2 gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-lg border border-stone-200 dark:border-stone-700 text-xs">
               {(
                 [
-                  { id: 'effect', label: 'Add to WA blast' },
+                  { id: 'effect', label: 'Keep WA blast' },
                   { id: 'blast', label: 'Replace WA blast' },
                 ] as const
               ).map((option) => (
@@ -398,11 +405,112 @@ export function ExplosionEffectCard({ project, onChange }: CardProps) {
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-stone-400">
+            <p className="text-[10px] text-stone-500 dark:text-stone-400">
               {fx.mode === 'blast'
-                ? 'The record blast is silenced (power 0) and the SDK supplies the damage, push, crater and sound.'
-                : 'WA still blasts normally; the burst is drawn on top at the same point.'}
+                ? 'The record blast is silenced (power and push 0) and the SDK supplies the damage, push, crater and sound. Only this mode can change the hit kind.'
+                : 'WA blasts normally: the record keeps its damage, push and crater and the burst is drawn on top at the same point. The damage controls below do not apply.'}
             </p>
+
+            {fx.mode === 'blast' && (
+              <>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-0.5">
+                  <NumberField
+                    id="explosion-damage"
+                    label="Damage (`damage`)"
+                    hint="Blast damage. The effect radius follows it when left at the preset's formula."
+                    value={fx.damage}
+                    min={0}
+                    max={200}
+                    step={1}
+                    onChange={(damage) => update({ damage })}
+                  />
+                  <NumberField
+                    id="explosion-push"
+                    label="Push (`push`)"
+                    hint="Knockback percent."
+                    value={fx.push}
+                    min={0}
+                    max={400}
+                    step={1}
+                    onChange={(push) => update({ push })}
+                  />
+                  <NumberField
+                    id="explosion-hole"
+                    label="Crater (`hole`)"
+                    hint="0 leaves the terrain."
+                    value={fx.hole}
+                    min={0}
+                    max={200}
+                    step={1}
+                    onChange={(hole) => update({ hole })}
+                  />
+                  <div className="space-y-1">
+                    <label htmlFor="explosion-sound" className={labelClass}>
+                      Sound (`sound`)
+                    </label>
+                    <select
+                      id="explosion-sound"
+                      value={soundMode}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === 'default' || value === 'none') update({ sound: value });
+                        else update({ sound: typeof fx.sound === 'number' ? fx.sound : 69 });
+                      }}
+                      className={inputClass}
+                    >
+                      <option value="default">PX random 69–71</option>
+                      <option value="none">Silent</option>
+                      <option value="id">Sound id…</option>
+                    </select>
+                    {soundMode === 'id' && (
+                      <input
+                        aria-label="Explosion sound id"
+                        type="number"
+                        min={0}
+                        value={typeof fx.sound === 'number' ? fx.sound : 69}
+                        onChange={(e) => update({ sound: Number(e.target.value) })}
+                        className={inputClass}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <span className={labelClass}>Damage type (`kind`)</span>
+                  <div className="grid grid-cols-2 gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-lg border border-stone-200 dark:border-stone-700 text-xs">
+                    {(
+                      [
+                        { id: 'blast', label: 'Explosive' },
+                        { id: 'electric', label: 'Electrical (taze)' },
+                      ] as const
+                    ).map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        title={
+                          option.id === 'electric'
+                            ? 'Sends the scripted `taze` kind: WA still takes a Prod hit with the same damage, but `wa.on.hit` handlers and PX-style electric weapons read it as electric, and an oil drum goes off at once instead of burning.'
+                            : 'Sends a plain blast hit.'
+                        }
+                        onClick={() => update({ damageType: option.id })}
+                        className={`py-1.5 font-medium rounded-md transition-colors ${
+                          (fx.damageType ?? 'blast') === option.id
+                            ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-bold'
+                            : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-stone-500 dark:text-stone-400">
+                    {(fx.damageType ?? 'blast') === 'electric'
+                      ? 'The blast sends `kind = "taze"`. WA takes it as a Prod hit, so the damage and push above are unchanged; what differs is the hit kind scripts and electric weapons read.'
+                      : 'The blast sends a plain hit. Pair the Electric damage type with the Electric preset for PX’s electric-mine look.'}
+                  </p>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="flex flex-wrap gap-1.5 items-center">
@@ -585,69 +693,6 @@ export function ExplosionEffectCard({ project, onChange }: CardProps) {
             </label>
           </div>
 
-          {fx.mode === 'blast' && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
-              <NumberField
-                id="explosion-damage"
-                label="Damage (`damage`)"
-                hint="Blast damage."
-                value={fx.damage}
-                min={0}
-                max={200}
-                step={1}
-                onChange={(damage) => update({ damage })}
-              />
-              <NumberField
-                id="explosion-push"
-                label="Push (`push`)"
-                hint="Knockback percent."
-                value={fx.push}
-                min={0}
-                max={400}
-                step={1}
-                onChange={(push) => update({ push })}
-              />
-              <NumberField
-                id="explosion-hole"
-                label="Crater (`hole`)"
-                hint="0 leaves the terrain."
-                value={fx.hole}
-                min={0}
-                max={200}
-                step={1}
-                onChange={(hole) => update({ hole })}
-              />
-              <div className="space-y-1">
-                <label htmlFor="explosion-sound" className={labelClass}>
-                  Sound (`sound`)
-                </label>
-                <select
-                  id="explosion-sound"
-                  value={soundMode}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (value === 'default' || value === 'none') update({ sound: value });
-                    else update({ sound: typeof fx.sound === 'number' ? fx.sound : 69 });
-                  }}
-                  className={inputClass}
-                >
-                  <option value="default">PX random 69–71</option>
-                  <option value="none">Silent</option>
-                  <option value="id">Sound id…</option>
-                </select>
-                {soundMode === 'id' && (
-                  <input
-                    aria-label="Explosion sound id"
-                    type="number"
-                    min={0}
-                    value={typeof fx.sound === 'number' ? fx.sound : 69}
-                    onChange={(e) => update({ sound: Number(e.target.value) })}
-                    className={inputClass}
-                  />
-                )}
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="space-y-2">

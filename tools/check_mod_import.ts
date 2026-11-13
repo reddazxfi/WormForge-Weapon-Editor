@@ -57,7 +57,7 @@ const files: ModFile[] = walk(BUNDLE).map((full) => {
 const bundles = readBundles(files);
 const weapons = readWeapons(bundles, files);
 check('test pack has one bundle', bundles.length === 1, String(bundles.length));
-check('test pack has 34 weapons', weapons.length === 34, String(weapons.length));
+check('test pack has 35 weapons', weapons.length === 35, String(weapons.length));
 
 const byName = new Map(weapons.map((weapon) => [weapon.name, weapon]));
 const projects = new Map<string, WeaponProject>();
@@ -167,7 +167,24 @@ for (const weapon of weapons) {
   near('WF 34: anim', tilt.missileSprite.anim, 'roam');
   near('WF 34: tilt up', tilt.missileSprite.roamTilt?.up, 35);
   near('WF 34: tilt down', tilt.missileSprite.roamTilt?.down, 25);
-  near('WF 34: tilt rest', tilt.missileSprite.roamTilt?.rest, 10);
+  near('WF 34: tilt rest (lays the walk flat)', tilt.missileSprite.roamTilt?.rest, 90);
+
+  const roamRole = project('WF 35 Roam Own Sheet')!;
+  near('WF 35: action', roamRole.action, 'roam');
+  near('WF 35: roam role mode', roamRole.behaviorArt.roam?.mode, 'builder');
+  near('WF 35: roam role anim', roamRole.behaviorArt.roam?.anim, 'roam');
+  near('WF 35: roam role frames', roamRole.behaviorArt.roam?.frames, 4);
+  near('WF 35: roam role scale', roamRole.behaviorArt.roam?.scale, 1.5);
+  check(
+    'WF 35: roam role sheet attached',
+    !!roamRole.behaviorArt.roam?.sheetFile,
+    'no sheet attached',
+  );
+  check(
+    'WF 35: primary params untouched',
+    roamRole.missileSprite.anim === 'track' && (roamRole.missileSprite.scale ?? 1) === 1,
+    `${roamRole.missileSprite.anim}/${roamRole.missileSprite.scale}`,
+  );
 
   const roam = project('WF 28 Roam Builder')!;
   near('WF 28: action', roam.action, 'roam');
@@ -325,6 +342,30 @@ function fullProject(p: WeaponProject, name: string): WeaponProject {
     customLuaSnippet: p.customLuaSnippet ?? '',
     useWepFile: false,
   };
+}
+
+// ---- the roam role's own sheet does not touch the primary (WF 35) --------
+{
+  const p = fullProject(project('WF 35 Roam Own Sheet')!, 'WF 35 Roam Own Sheet');
+  const lua = generateLuaCode(p);
+  check(
+    'WF 35: roam role emitted with its own sheet',
+    lua.includes('roam = {') &&
+      lua.includes('state_roam.png') &&
+      lua.includes('anim = "roam"') &&
+      lua.includes('scale = 1.5'),
+    'roam role table missing',
+  );
+  check(
+    'WF 35: primary track stays top level',
+    /\/missile\.png",\n\s+anim = "track",/.test(lua),
+    'primary anim changed',
+  );
+  check(
+    'WF 35: mod.toml declares the roam sheet',
+    generateModToml(p).includes('state_roam.png'),
+    'sheet not declared',
+  );
 }
 
 for (const [name, p] of projects) {

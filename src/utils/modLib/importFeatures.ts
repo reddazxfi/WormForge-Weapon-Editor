@@ -31,7 +31,12 @@ import type {
   RoamSheetAsset,
   WeaponProject,
 } from '../../types/weapon';
-import { DEFAULT_DIG_ROLE_ART, DEFAULT_ROAM_TILT, DEFAULT_ROLE_ART } from '../../data/spriteBuilder';
+import {
+  DEFAULT_DIG_ROLE_ART,
+  DEFAULT_ROAM_ROLE_ART,
+  DEFAULT_ROAM_TILT,
+  DEFAULT_ROLE_ART,
+} from '../../data/spriteBuilder';
 import { DEFAULT_EXPLOSION_EFFECT, EXPLOSION_PRESETS } from '../../data/explosionPresets';
 import { DEFAULT_FIRE_SEQUENCE } from '../../data/fireSequence';
 import { DEFAULT_CUSTOM_SOUNDS } from '../../data/soundPresets';
@@ -580,6 +585,24 @@ export async function readBundleFeatures(args: {
     } else if (args.digging) {
       behaviorArt.dig = { ...DEFAULT_DIG_ROLE_ART, mode: 'native' };
     }
+    // A roaming animal's own flight art rides in the same `roam` table as the
+    // takeoff ids: a `sheet` there is the role, its absence the primary sheet.
+    if (f.roam === true || isTable(f.roam)) {
+      const roam = isTable(f.roam) ? f.roam : undefined;
+      if (roam && str(roam.sheet)) {
+        behaviorArt.roam = await readRoleArt(
+          roam,
+          str(roam.sheet),
+          files,
+          bundleDir,
+          weapon,
+          DEFAULT_ROAM_ROLE_ART,
+        );
+      } else {
+        // Roam has no native role of its own: the round's own sheet flies.
+        behaviorArt.roam = { ...DEFAULT_ROAM_ROLE_ART, mode: 'inherit' };
+      }
+    }
     project.behaviorArt = behaviorArt;
     if (isTable(f.states)) {
       notes.push('legacy state art not imported');
@@ -619,6 +642,8 @@ export async function readBundleFeatures(args: {
         push: num(b.push) ?? effect.push,
         // `destroy = false` is the generator's "no crater"; `hole` is absent.
         hole: num(b.hole) ?? (b.destroy === false ? 0 : effect.hole),
+        // The scripted hit kind; the generator only ever writes `"taze"`.
+        damageType: str(b.kind) === 'taze' ? 'electric' : 'blast',
         sound:
           b.sound === true ? 'default' : (num(b.sound) ?? 'none'),
       };

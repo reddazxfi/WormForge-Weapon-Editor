@@ -29,8 +29,25 @@ export const DEFAULT_DIG_ROLE_ART: FlightRoleArt = {
   anim: 'track',
 };
 
-/** `anim = "roam"`: the resting angle and how far the art may tilt from it. */
-export const DEFAULT_ROAM_TILT = { up: 25, down: 25, rest: 0 };
+/**
+ * A roaming animal's flown art defaults to its own builder role with the tilt
+ * preset: the animal is walked by WA on the ground and flown by the builder
+ * from Space, so `track` would freeze the art while it walks.
+ */
+export const DEFAULT_ROAM_ROLE_ART: FlightRoleArt = {
+  ...DEFAULT_ROLE_ART,
+  mode: 'builder',
+  anim: 'roam',
+};
+
+/**
+ * `anim = "roam"`: the ground pose of a walking animal and how far the art may
+ * lean from it while it steps. `rest = 90` lays the art along the ground's
+ * horizontal (a sheet that points up, as PX's animal sheets do), which is what
+ * a side-on walk needs; once the animal flies the builder tracks its heading
+ * like `track`, so these limits are only the walk.
+ */
+export const DEFAULT_ROAM_TILT = { up: 25, down: 25, rest: 90 };
 
 /** The `anim` selector, in the order the cards list it. */
 export const MISSILE_ANIM_OPTIONS: { id: MissileAnimType; name: string; sub: string }[] = [
@@ -39,7 +56,7 @@ export const MISSILE_ANIM_OPTIONS: { id: MissileAnimType; name: string; sub: str
   { id: 'slow', name: 'Slow Cycle', sub: 'Slow strip' },
   { id: 'medium', name: 'Medium Cycle', sub: 'Medium strip' },
   { id: 'fast', name: 'Fast Cycle', sub: 'Fast strip' },
-  { id: 'roam', name: 'Roam Tilt', sub: 'Clamped tilt, rests on the ground' },
+  { id: 'roam', name: 'Roam Tilt', sub: 'Rests flat on the ground, tracks in flight' },
   { id: 'none', name: 'None', sub: 'Stays upright' },
 ];
 
@@ -72,6 +89,14 @@ export function bitActionOf(project: WeaponProject): string {
  */
 export const BEHAVIOR_ART_DEFS: BehaviorArtDef[] = [
   {
+    key: 'roam',
+    label: 'Roaming flight',
+    scope: () => 'main',
+    record: 'sheep.flight_1 / flight_2 (zeroed)',
+    description:
+      'The art a roaming animal flies with once the turn player presses Space. Builder gives it its own sheet and animation; Primary art keeps the round’s own sheet flying (WA still walks the animal until the takeoff).',
+  },
+  {
     key: 'homing',
     label: 'Homing flight',
     scope: () => 'main',
@@ -95,11 +120,12 @@ export const BEHAVIOR_ART_DEFS: BehaviorArtDef[] = [
   },
 ];
 
-// A roaming animal is not a state role: WA draws its walking pose (record
-// `sprite`), its two flying sheets (`sheep_sprites` -> `sheep.flight_1/2`) and
-// its gas pose (`roam.gas.animal_sprite`) from separate fields, so the Hold
-// page's roam card uploads the two flying sheets instead of swapping art on a
-// signal. See `roamSheetPaths` in luaGenerator.
+// A roaming animal is not a `sig` state either: the takeoff is the turn's own
+// Space press (`roam` in `sb.flight`), not a sprite id the record changes, so
+// `resolveBehaviorStates` skips the row. WA still draws the walking pose (the
+// record `sprite`), the two native flying sheets (`sheep_sprites` ->
+// `sheep.flight_1/2`) and the gas pose (`roam.gas.animal_sprite`), which is why
+// the roam card keeps those uploads for the Native case. See `roamSheetPaths`.
 
 /** The behaviour rows that make sense for the current action and payload. */
 export function availableBehaviorArt(project: WeaponProject): BehaviorArtDef[] {
@@ -107,6 +133,8 @@ export function availableBehaviorArt(project: WeaponProject): BehaviorArtDef[] {
   const clusters = project.burst === 'clusters';
   return BEHAVIOR_ART_DEFS.filter((def) => {
     switch (def.key) {
+      case 'roam':
+        return project.action === 'roam';
       case 'homing':
         return project.action === 'homing';
       case 'homing_bit':
@@ -242,7 +270,13 @@ export function resolveBehaviorStates(project: WeaponProject): ResolvedBehaviorS
     // dig is probe-driven (the builder animates the flight sheet in the dirt),
     // and homing is timed (`arm`/`time` ms). Keeping them here would write a
     // sentinel id into a record sprite field again.
-    if (def.key === 'dig' || def.key === 'homing' || def.key === 'homing_bit') continue;
+    if (
+      def.key === 'dig' ||
+      def.key === 'homing' ||
+      def.key === 'homing_bit' ||
+      def.key === 'roam'
+    )
+      continue;
     const art = project.behaviorArt?.[def.key];
     if (!art || art.mode === 'inherit') continue;
     const sig: number[] = [];

@@ -13,6 +13,8 @@ import {
   digArtOverrideRows,
   roamSheetPath,
   missileFlightSheetPath,
+  ROAM_FLY_SENTINEL,
+  roamWalkPoseId,
 } from '../utils/luaGenerator';
 import { StockSpriteInput } from './StockSpriteInput';
 import { stockSpriteName } from '../data/stockSprites';
@@ -21,6 +23,7 @@ import { defaultArtFor } from '../utils/defaultArt';
 import { buildRotationSheet } from '../utils/rotateSheet';
 import {
   DEFAULT_DIG_ROLE_ART,
+  DEFAULT_ROAM_ROLE_ART,
   DEFAULT_ROAM_TILT,
   DEFAULT_ROLE_ART,
   bitActionOf,
@@ -416,7 +419,12 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     key: BehaviorArtKey,
     patch: Partial<FlightRoleArt>
   ) => {
-    const base = key === 'dig' ? DEFAULT_DIG_ROLE_ART : DEFAULT_ROLE_ART;
+    const base =
+      key === 'dig'
+        ? DEFAULT_DIG_ROLE_ART
+        : key === 'roam'
+          ? DEFAULT_ROAM_ROLE_ART
+          : DEFAULT_ROLE_ART;
     onChange({
       behaviorArt: {
         ...behaviorArt,
@@ -451,6 +459,12 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
   const homingBitRole = behaviorArt.homing_bit ?? defaultBehaviorRole;
   const digRole = behaviorArt.dig ?? DEFAULT_DIG_ROLE_ART;
   const digRoleMode = digRole.mode;
+  // A roaming animal's flown art: `inherit` (no row) keeps the round's own
+  // sheet, which is what every bundle written before the role existed does;
+  // `builder` gives the animal a sheet and animation of its own.
+  const roamRole: FlightRoleArt =
+    behaviorArt.roam ?? { ...DEFAULT_ROAM_ROLE_ART, mode: 'inherit' };
+  const roamRoleMode = roamRole.mode;
 
   // Missile interactive simulation state
   const [isMissilePlaying, setIsMissilePlaying] = useState(true);
@@ -600,9 +614,11 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                 : missile.sheetPreview
               : undefined
           : activeFlightRole === 'roam'
-            ? builderOn
-              ? missile.sheetPreview
-              : project.roamSheets?.flight1?.preview
+            ? roamRoleMode === 'builder'
+              ? roamRole.sheetPreview
+              : builderOn
+                ? missile.sheetPreview
+                : project.roamSheets?.flight1?.preview
             : activeFlightRole === 'dig'
               ? digRoleMode !== 'native'
                 ? digBitEnabled && !digMainEnabled && bitFlight.mode === 'builder'
@@ -920,12 +936,18 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       }
       return { ...homingBitRole, anim: 'track' as MissileAnimType, frames: 1 };
     }
-    if (activeFlightRole === 'roam' && !builderOn && project.roamSheets?.flight1?.preview) {
-      return {
-        ...missile,
-        anim: 'none' as MissileAnimType,
-        frames: project.roamSheets.flight1.frames || 1,
-      };
+    if (activeFlightRole === 'roam') {
+      // Own sheet: the role's own art and animation. Round's sheet: the primary
+      // row is what flies (and what the export keeps), so preview that.
+      if (roamRoleMode === 'builder') return roamRole;
+      if (!builderOn && project.roamSheets?.flight1?.preview) {
+        return {
+          ...missile,
+          anim: 'none' as MissileAnimType,
+          frames: project.roamSheets.flight1.frames || 1,
+        };
+      }
+      return missile;
     }
     if (activeFlightRole === 'dig') {
       if (digRoleMode === 'native') {
@@ -1033,24 +1055,29 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       // Rotation calculation. In static preview mode, smoothly rotate without
       // freezing at 90/270 degrees or strobing at 3000 deg/s.
       if (anim === 'roam') {
-        // `M.roam_angle`: the resting angle when the animal has no speed (WA
-        // walks it), else the heading clamped to `up`/`down` degrees of it.
+        // `M.roam_angle`: on the ground (Walk mode) the art holds `rest` and
+        // leans at most `up`/`down` from it while the animal steps; in the air
+        // it tracks the velocity exactly like `track`. The ground heading is
+        // measured right-facing, because `facing` mirrors the sheet.
         const tilt = {
           up: Math.abs(missile.roamTilt?.up ?? DEFAULT_ROAM_TILT.up),
           down: Math.abs(missile.roamTilt?.down ?? DEFAULT_ROAM_TILT.down),
           rest: missile.roamTilt?.rest ?? DEFAULT_ROAM_TILT.rest,
         };
         const restRad = (tilt.rest * Math.PI) / 180;
+        const up = (tilt.up * Math.PI) / 180;
+        const down = (tilt.down * Math.PI) / 180;
         const speed = Math.hypot(vx, vy);
-        if (speed < 0.05) {
+        const grounded = flightMode === 'walk';
+        if (!grounded) {
+          if (speed >= 0.05) rot = Math.atan2(vy, vx) + Math.PI / 2;
+        } else if (speed < 0.05) {
           rot = restRad;
         } else {
-          const want = Math.atan2(vy, vx) + Math.PI / 2;
+          const want = Math.atan2(vy, Math.abs(vx)) + Math.PI / 2;
           let delta = want - restRad;
           delta = Math.atan2(Math.sin(delta), Math.cos(delta));
-          const up = (tilt.up * Math.PI) / 180;
-          const down = (tilt.down * Math.PI) / 180;
-          rot = restRad + Math.min(up, Math.max(-down, delta));
+          rot = restRad + Math.min(down, Math.max(-up, delta));
         }
       } else if (anim === 'track') {
         rot = Math.atan2(vy, vx) + Math.PI / 2;
@@ -1266,6 +1293,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
           (activeFlightRole === 'homing_bit' &&
             homingBitRole.mode === 'inherit' &&
             bitFlight.mode === 'inherit') ||
+          (activeFlightRole === 'roam' && roamRoleMode === 'builder') ||
           (activeFlightRole === 'dig' &&
             digRoleMode !== 'native' &&
             (!digBitEnabled || digMainEnabled || bitFlight.mode === 'inherit'))) &&
@@ -1301,6 +1329,15 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     digBitEnabled,
     activeFlightRole,
     builderOn,
+    roamRoleMode,
+    roamRole.sheetPreview,
+    roamRole.anim,
+    roamRole.frames,
+    roamRole.animSpeed,
+    roamRole.spinRate,
+    roamRole.scale,
+    roamRole.mirror,
+    roamRole.z,
     project.roamSheets?.flight1?.frames,
     project.roamSheets?.flight1?.preview,
     roleLoadedImg,
@@ -1590,6 +1627,9 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     } else if (activeFlightRole === 'homing_bit') {
       if (homingBitRole.sheetPreview) URL.revokeObjectURL(homingBitRole.sheetPreview);
       updateBehaviorArt('homing_bit', { sheetFile: file, sheetPreview: previewUrl, mode: 'builder' });
+    } else if (activeFlightRole === 'roam') {
+      if (roamRole.sheetPreview) URL.revokeObjectURL(roamRole.sheetPreview);
+      updateBehaviorArt('roam', { sheetFile: file, sheetPreview: previewUrl, mode: 'builder' });
     }
   };
 
@@ -1603,6 +1643,10 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     } else if (activeFlightRole === 'homing_bit') {
       if (homingBitRole.sheetPreview) URL.revokeObjectURL(homingBitRole.sheetPreview);
       updateBehaviorArt('homing_bit', { sheetFile: undefined, sheetPreview: undefined, mode: 'native' });
+    } else if (activeFlightRole === 'roam') {
+      if (roamRole.sheetPreview) URL.revokeObjectURL(roamRole.sheetPreview);
+      // Back to the round's own sheet: the roam role only exists when it owns art.
+      updateBehaviorArt('roam', { sheetFile: undefined, sheetPreview: undefined, mode: 'inherit' });
     }
     if (roleFileInputRef.current) roleFileInputRef.current.value = '';
   };
@@ -1689,7 +1733,28 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
         modLines.push(`  dig = true,`);
       }
     }
-    if (roamEnabled) modLines.push(`  roam = true,`);
+    if (roamEnabled) {
+      const roamWalkPose = roamWalkPoseId(
+        project.recordOverrides['missile.sprite'] ?? project.body.sprite,
+      );
+      if (roamRoleMode === 'builder') {
+        modLines.push(`  roam = {`);
+        modLines.push(`    sheet = "${behaviorStateSheetPath(project, 'roam')}",`);
+        modLines.push(...roleRowsForPreview(roamRole, '    '));
+        modLines.push(
+          roamWalkPose !== 0
+            ? `    walk = ${roamWalkPose}, fly = ${ROAM_FLY_SENTINEL},`
+            : `    fly = ${ROAM_FLY_SENTINEL},`,
+        );
+        modLines.push(`  },`);
+      } else {
+        modLines.push(
+          roamWalkPose !== 0
+            ? `  roam = { walk = ${roamWalkPose}, fly = ${ROAM_FLY_SENTINEL} },`
+            : `  roam = true,`,
+        );
+      }
+    }
     if (project.missileSprite.logIdentity) modLines.push(`  log = true,`);
     modLines.push(`})`);
     return modLines.join('\n');
@@ -2318,7 +2383,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
             icon: roamIconSrc,
             badge: 'Roaming Action (sspsheep1.png)',
             title: 'Editing Role: Super Sheep / Roaming Animal',
-            desc: 'Steerable flying animal. Builder mode waits for Space to fly (roam = true); when builder is off, dual rotation strips drive sheep_sprites.',
+            desc: 'Steerable flying animal. Own sheet makes the flown state its own role (its own animation, frames, spin, scale); the round’s sheet keeps Slot 1’s art. WA walks the animal until Space either way, and the two native rotation strips only apply with the flight builder off.',
             enabled: roamEnabled,
             disabledHint: 'Requires Missile Action = Roam in Record Editor',
             activeClass:
@@ -2353,7 +2418,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
         const isSecondaryRole =
           activeFlightRole === 'clusters' ||
           activeFlightRole === 'homing' ||
-          activeFlightRole === 'homing_bit';
+          activeFlightRole === 'homing_bit' ||
+          activeFlightRole === 'roam';
         const isDigRole = activeFlightRole === 'dig';
         const secondaryRoleObj =
           activeFlightRole === 'clusters'
@@ -2362,55 +2428,63 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
               ? homingRole
               : activeFlightRole === 'homing_bit'
                 ? homingBitRole
+              : activeFlightRole === 'roam'
+                ? roamRole
                 : null;
         const updateSecondaryRole = (patch: Partial<FlightRoleArt>) => {
           if (activeFlightRole === 'clusters') updateBitFlight(patch);
           else if (activeFlightRole === 'homing') updateBehaviorArt('homing', patch);
           else if (activeFlightRole === 'homing_bit') updateBehaviorArt('homing_bit', patch);
+          else if (activeFlightRole === 'roam') updateBehaviorArt('roam', patch);
         };
 
+        // The roam slot in `inherit` mode shows the round's own flight row: the
+        // animal keeps the primary sheet, so every parameter here belongs to
+        // Slot 1 and editing it there is the only thing that changes the export.
+        const roamInheritsPrimary = activeFlightRole === 'roam' && roamRoleMode !== 'builder';
         const activeSheetLocked =
           (isDigRole && digRoleMode === 'native') ||
-          (isSecondaryRole && secondaryRoleObj?.mode !== 'builder');
+          (isSecondaryRole && secondaryRoleObj?.mode !== 'builder') ||
+          roamInheritsPrimary;
 
         const digOwningSheetIsBit =
           digBitEnabled && !digMainEnabled && bitFlight.mode === 'builder';
         const digOwningFrames = (digOwningSheetIsBit ? bitFlight.frames : missile.frames) || 1;
         const activeAnim: MissileAnimType = isDigRole
           ? digRole.anim || 'track'
-          : isSecondaryRole
+          : isSecondaryRole && !roamInheritsPrimary
             ? secondaryRoleObj!.anim || 'rotation'
             : missile.anim || 'rotation';
         const activeFrames = isDigRole
           ? digRole.frames > 1
             ? digRole.frames
             : digOwningFrames
-          : isSecondaryRole
+          : isSecondaryRole && !roamInheritsPrimary
             ? secondaryRoleObj!.frames || 1
             : missile.frames || 1;
         const activeAnimSpeed = isDigRole
           ? digRole.animSpeed || 1.0
-          : isSecondaryRole
+          : isSecondaryRole && !roamInheritsPrimary
             ? secondaryRoleObj!.animSpeed || 1.0
             : missile.animSpeed || 1.0;
         const activeSpinRate = isDigRole
           ? digRole.spinRate || 1.0
-          : isSecondaryRole
+          : isSecondaryRole && !roamInheritsPrimary
             ? secondaryRoleObj!.spinRate || 1.0
             : missile.spinRate || 1.0;
         const activeScale = isDigRole
           ? digRole.scale || 1.0
-          : isSecondaryRole
+          : isSecondaryRole && !roamInheritsPrimary
             ? secondaryRoleObj!.scale || 1.0
             : missile.scale || 1.0;
         const activeMirror = isDigRole
           ? digRole.mirror !== false
-          : isSecondaryRole
+          : isSecondaryRole && !roamInheritsPrimary
             ? secondaryRoleObj!.mirror !== false
             : missile.mirror !== false;
         const activeZ = isDigRole
           ? digRole.z ?? 5.0
-          : isSecondaryRole
+          : isSecondaryRole && !roamInheritsPrimary
             ? secondaryRoleObj!.z ?? 5.0
             : missile.z ?? 5.0;
 
@@ -2421,6 +2495,10 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
             updateBehaviorArt('dig', patch);
             return;
           }
+          // A secondary role always edits its own row. The roam slot in
+          // "Round's sheet" mode is read-only (the controls are locked) because
+          // its values are Slot 1's; routing it here anyway means a stray edit
+          // can never overwrite the primary weapon's flight parameters.
           if (isSecondaryRole) {
             updateSecondaryRole(patch);
           } else {
@@ -2445,9 +2523,11 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
               ? 'Primary Homing Sheet'
               : activeFlightRole === 'homing_bit'
                 ? 'Homing Bit Sheet'
-                : activeFlightRole === 'dig'
-                  ? 'Digging Animation'
-                  : 'Projectile Sprite Sheet';
+                : activeFlightRole === 'roam'
+                  ? 'Roaming Flight Sheet'
+                  : activeFlightRole === 'dig'
+                    ? 'Digging Animation'
+                    : 'Projectile Sprite Sheet';
 
         const assetPathHint =
           activeFlightRole === 'clusters'
@@ -2456,20 +2536,22 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
               ? behaviorStateSheetPath(project, 'homing')
               : activeFlightRole === 'homing_bit'
                 ? behaviorStateSheetPath(project, 'homing_bit')
-                : activeFlightRole === 'dig'
-                  ? digOwningSheetIsBit
-                    ? bitFlightSheetPath(project)
-                    : missileFlightSheetPath(project)
-                  : missileFlightSheetPath(project);
+                : activeFlightRole === 'roam'
+                  ? behaviorStateSheetPath(project, 'roam')
+                  : activeFlightRole === 'dig'
+                    ? digOwningSheetIsBit
+                      ? bitFlightSheetPath(project)
+                      : missileFlightSheetPath(project)
+                    : missileFlightSheetPath(project);
 
         const activeSheetFile = isDigRole
           ? undefined
-          : isSecondaryRole
+          : isSecondaryRole && !roamInheritsPrimary
             ? secondaryRoleObj?.sheetFile
             : missile.sheetFile;
         const activeSheetPreview = isDigRole
           ? undefined
-          : isSecondaryRole
+          : isSecondaryRole && !roamInheritsPrimary
             ? secondaryRoleObj?.sheetPreview
             : missile.sheetPreview;
 
@@ -2833,11 +2915,12 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                   />
                 </div>
 
-                {/* Roam tilt preset: `anim = "roam"` only. A roaming animal has no
-                    velocity of its own while WA walks it, so the art rests. */}
+                {/* Roam tilt preset: `anim = "roam"` only. The ground pose is
+                    side-on, so the art rests at `rest` and may lean a little as
+                    the animal steps; in the air it tracks the heading. */}
                 <div
                   className="space-y-1.5 p-3 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/70 dark:bg-stone-800/40"
-                  title="Preset for the Roam Tilt animation (anim = roam): how far the art may lean from the rest angle while it moves, and the angle it holds while WA walks it with no velocity."
+                  title="Preset for the Roam Tilt animation (anim = roam): the angle the walking art holds while WA walks the animal, and how far it may lean up or down as it steps. In the air the art tracks its heading instead."
                 >
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-semibold text-stone-700 dark:text-stone-300">
@@ -3380,9 +3463,45 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
 
                   {activeFlightRole === 'roam' && (
                     <div className="space-y-3 text-xs">
+                      {/* The flying animal's art: the round's own sheet, or a
+                          role of its own. WA walks the animal until Space in
+                          both cases (`roam = { walk, fly }`). */}
+                      <div className="space-y-1">
+                        <span className="text-[11px] font-semibold text-stone-700 dark:text-stone-300">
+                          Flying art
+                        </span>
+                        <div className="grid grid-cols-2 gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-lg border border-stone-200 dark:border-stone-700">
+                          {(
+                            [
+                              { id: 'inherit', label: 'Round’s sheet' },
+                              { id: 'builder', label: 'Own sheet' },
+                            ] as const
+                          ).map((option) => (
+                            <button
+                              key={option.id}
+                              type="button"
+                              onClick={() =>
+                                updateBehaviorArt('roam', { mode: option.id as FlightRoleArt['mode'] })
+                              }
+                              className={`py-1.5 font-medium rounded-md transition-colors ${
+                                roamRoleMode === option.id
+                                  ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-bold'
+                                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-stone-500 dark:text-stone-400">
+                          {roamRoleMode === 'builder'
+                            ? 'After Space the animal draws this slot’s sheet, with the animation, frames, spin and scale below. WA still walks it on the ground.'
+                            : 'After Space the animal keeps the round’s own sheet (Slot 1), so its animation, frames, spin and scale are Slot 1’s; the controls below are read-only here. Pick Own sheet to give the flown state separate art.'}
+                        </p>
+                      </div>
                       {builderOn && (
                         <p className="text-[11px] rounded-lg border border-amber-300/70 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5 text-amber-800 dark:text-amber-200">
-                          The flight builder owns takeoff (<code className="font-mono">roam = true</code>): it waits for Space, draws the primary sheet, and zeroes <code className="font-mono">sheep.flight_1/2</code>. Turn the builder off to export the two native rotation strips below instead.
+                          The flight builder owns the takeoff (<code className="font-mono">roam</code>): it waits for Space and zeroes <code className="font-mono">sheep.flight_1/2</code>, so the two native strips below are not installed. Turn the builder off to export them instead.
                         </p>
                       )}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3466,7 +3585,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                         { id: 'slow', name: 'Slow Spin', sub: '0.5 rad/f spin', code: 'slow = 1' },
                         { id: 'medium', name: 'Medium Spin', sub: '0.8 rad/f spin', code: 'medium = 1' },
                         { id: 'fast', name: 'Fast Spin', sub: '1.35 rad/f spin', code: 'fast = 1' },
-                        { id: 'roam', name: 'Roam Tilt', sub: 'Clamped tilt, rests on the ground', code: 'roam = 4' },
+                        { id: 'roam', name: 'Roam Tilt', sub: 'Rests flat, tracks in flight', code: 'roam = 4' },
                         { id: 'none', name: 'Fixed Upright', sub: 'Locked 0° turn', code: 'none = 5' },
                       ] as const
                     ).map((item) => {

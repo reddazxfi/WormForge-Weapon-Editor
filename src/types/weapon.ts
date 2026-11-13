@@ -279,6 +279,14 @@ export type ExplosionPreset = 'electric' | 'pyro' | 'ember';
 export type ExplosionMode = 'effect' | 'blast';
 
 /**
+ * What the custom blast's damage reads as to whoever is hit. `electric` sends
+ * the scripted `taze` kind (`crates/game/src/hit_kind.rs`), which WA receives as
+ * a Prod hit but `wa.on.hit` sees as electric — that is how PX's electric
+ * weapons tell their hits apart.
+ */
+export type ExplosionDamageType = 'blast' | 'electric';
+
+/**
  * A WAV uploaded into the bundle and played by path. WA's record sound fields
  * take native sample ids only, so a custom sound is declared in the claim's
  * `sounds` list and played with `wa.sound.play(target, path, priority)`.
@@ -363,6 +371,8 @@ export interface ExplosionEffectConfig {
   hole: number;
   /** `default` is PX's random 69-71 blast, `none` is silent, a number is a WA id. */
   sound: 'default' | 'none' | number;
+  /** Hit kind the custom blast sends: `blast` (plain) or `electric` (taze). */
+  damageType: ExplosionDamageType;
   /** Shape/colour preset the numbers below started from. */
   preset: ExplosionPreset | 'custom';
   /** Ring radius in game pixels. */
@@ -433,7 +443,13 @@ export interface FlightRoleArt {
  * separate so a bit can get its own art; `dig`, `roam_flight` and `gas` read
  * their sentinel ids from the record's own sprite fields.
  */
-export type BehaviorArtKey = 'homing' | 'homing_bit' | 'dig' | 'roam_flight' | 'gas';
+export type BehaviorArtKey =
+  | 'homing'
+  | 'homing_bit'
+  | 'dig'
+  | 'roam'
+  | 'roam_flight'
+  | 'gas';
 
 export interface MissileSpriteConfig {
   enabled: boolean;

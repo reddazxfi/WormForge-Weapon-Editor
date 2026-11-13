@@ -432,6 +432,9 @@ export function wfwsRoleFlags(project: WeaponProject) {
       clusters &&
       bitAction === 'homing' &&
       mode('homing_bit') === 'builder',
+    // A roaming animal's flown art can be its own role. `native` (or no row)
+    // keeps the primary sheet, which is what every bundle written so far does.
+    roam: builderOn && project.action === 'roam' && mode('roam') === 'builder',
     zeroMainDig: builderOn && digUsesBuilder && project.action === 'dig',
     zeroBitDig:
       builderOn && digUsesBuilder && bitMode !== null && clusters && bitAction === 'dig',
@@ -649,6 +652,7 @@ export function generateLuaCode(project: WeaponProject): string {
     digUsesBuilder,
     homing: homingBuilder,
     bitHoming: bitHomingBuilder,
+    roam: roamRole,
     zeroMainDig,
     zeroBitDig,
   } = wfwsRoleFlags(project);
@@ -967,6 +971,7 @@ export function generateLuaCode(project: WeaponProject): string {
     if (bitHomingBuilder) {
       packSprites.push(luaQuote(behaviorStateSheetPath(project, 'homing_bit')));
     }
+    if (roamRole) packSprites.push(luaQuote(behaviorStateSheetPath(project, 'roam')));
   }
   if (usesRibbonTrail) {
     packSprites.push('trail.BEAM', 'trail.GLOW');
@@ -2617,6 +2622,13 @@ export function generateLuaCode(project: WeaponProject): string {
         } else {
           blastRows.push('          destroy = false,');
         }
+        // The hit kind the blast sends. `taze` is the scripted electric kind
+        // (`crates/game/src/hit_kind.rs`): WA takes it as a Prod hit, but a
+        // `wa.on.hit` handler sees "taze", which is how PX's electric weapons
+        // recognise their own damage. Only the custom blast can name a kind.
+        if (e.damageType === 'electric') {
+          blastRows.push('          kind = "taze",');
+        }
         // PX's own default is a random 69-71 blast; `sound = true` asks for it.
         // A pack WAV already covers the blast, so the native one stays off.
         if (!usesExplosionSound) {
@@ -2885,7 +2897,22 @@ export function generateLuaCode(project: WeaponProject): string {
     // which WA moves into the render slot as it takes off — an exact takeoff
     // signal that does not depend on catching the key press.
     if (project.action === 'roam') {
-      if (roamWalkPose !== 0) {
+      const roamArt = project.behaviorArt?.roam;
+      if (roamRole && roamArt) {
+        // Its own role: the animal is still WA's until Space (`walk` is the
+        // pose WA draws; `fly` is the id WA moves into the render slot at the
+        // takeoff). Both are optional — a record whose walk pose cannot draw
+        // gets `fly` only and the builder animates the ground itself.
+        lines.push('      roam = {');
+        lines.push(`        sheet = ${luaQuote(behaviorStateSheetPath(project, 'roam'))},`);
+        for (const row of roleArtRows(roamArt, '        ')) lines.push(row);
+        if (roamWalkPose !== 0) {
+          lines.push(`        walk = ${roamWalkPose}, fly = ${ROAM_FLY_SENTINEL},`);
+        } else {
+          lines.push(`        fly = ${ROAM_FLY_SENTINEL},`);
+        }
+        lines.push('      },');
+      } else if (roamWalkPose !== 0) {
         lines.push(`      roam = { walk = ${roamWalkPose}, fly = ${ROAM_FLY_SENTINEL} },`);
       } else {
         lines.push('      roam = true,');
@@ -2942,6 +2969,8 @@ export function generateModToml(project: WeaponProject): string {
   const usesWfws = usesWfwsBuilder(project);
   const bitMode = bitBuilderMode(project);
   const behaviorStates = resolveBehaviorStates(project);
+  // A roaming animal's flown art can be its own role (its own sheet).
+  const roamRole = wfwsRoleFlags(project).roam;
   // The ribbon trail lives in its own library bundle (`effects.sdk`), which
   // exports `wf-lib/effects/trail` and the beam/glow sheets.
   const usesRibbonTrail =
@@ -3050,6 +3079,7 @@ export function generateModToml(project: WeaponProject): string {
   for (const [owned, key] of [
     [tomlFlags.homing, 'homing'] as const,
     [tomlFlags.bitHoming, 'homing_bit'] as const,
+    [tomlFlags.roam, 'roam'] as const,
   ]) {
     if (!owned) continue;
     const statePath = behaviorStateSheetPath(project, key);

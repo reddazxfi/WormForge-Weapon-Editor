@@ -27,7 +27,7 @@ Maintenance and hand-off notes live in [AGENTS.md](AGENTS.md).
   - The `spec/pre_weapon_preview.png` landscape is the preview backdrop, with 1x–5x pixelated zoom and a true left/right facing flip.
 - **50 Hz Missile Flight Sprite Preview**:
   - Reimplements the WFWS builder's `sb.flight` animation at a fixed 50 Hz game frame: `track`, `rotation`, `slow`/`medium`/`fast`, `none`, `cyclical` frames, `anim_speed`, `spin`, `mirror` and `scale`.
-  - **WFWS role art**: the primary round, the cluster bits and each behaviour state (homing, homing bit, dig, roam flight, gas) can keep WA's sprite, draw an uploaded sheet, or inherit the parent art. State art is signalled by the record's own sprite ids (`homing.sprite`, `dig.dive_sprite`/`sprite_1..3`, `sheep.flight_1/2`, `roam.gas.animal_sprite`), so art can swap mid-flight.
+  - **WFWS role art**: the primary round, the cluster bits and each behaviour role (homing, homing bit, dig, the Sheep slot's own flown sheet) can keep WA's sprite, draw an uploaded sheet, or inherit the parent art. The Sheep slot only owns art when it is set to **Own sheet**; `anim = "roam"` rests the walk flat and tracks the heading in the air. Timed and walk art is signalled by the record's own fields (`homing.sprite`, `dig.dive_sprite`/`sprite_1..3`, `sheep.flight_1/2`, `roam.gas.animal_sprite`), with the Space takeoff for a roaming animal.
   - No terrain or collision simulation: the old Launch Simulator tab was retired because its collision loop could lock the renderer.
 - **Modern Asset Workflow**:
   - 32×32 PNG icon importer and exporter (saved to `sprites/<mod_name>/icon.png`).
@@ -59,7 +59,7 @@ bun run dev
 # 3. Build for production (web / dist)
 bun run build
 
-# 4. Dev only: generate the in-game behaviour test pack (31 weapons + profile)
+# 4. Dev only: generate the in-game behaviour test pack (35 weapons + profile)
 bun run tools/gen_test_pack.ts
 ```
 

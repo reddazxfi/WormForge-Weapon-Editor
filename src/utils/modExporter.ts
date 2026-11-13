@@ -105,6 +105,7 @@ export async function exportModZip(project: WeaponProject): Promise<Blob> {
     for (const [owned, key] of [
       [flags.homing, 'homing'] as const,
       [flags.bitHoming, 'homing_bit'] as const,
+      [flags.roam, 'roam'] as const,
     ]) {
       if (!owned) continue;
       const role = project.behaviorArt?.[key];

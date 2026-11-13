@@ -1870,3 +1870,64 @@ Two separate bugs made every weapon look the same:
    and push 0), but the stale donor numbers hid it: everything looked constant.
    `rebaseToDonor` still keeps an author's own edits and adopts the new donor's
    values for the rest.
+
+## 2026-11-13 - Roam tilt in game, the Sheep slot's own preview and params
+
+### The roam tilt rested upright in game
+
+`anim = "roam"` was documented as "the art leans `up`/`down` around `rest` and
+sits at `rest` when slow". The editor's `DEFAULT_ROAM_TILT.rest` became 90 (a
+sheet that points up lies flat for a side-on walk), but the builder's fallback
+still read `tilt.rest or 0.0`. At the default no `tilt` table is emitted, so the
+game rested at 0 degrees (upright) while the preview showed 90 - the exact
+"implementation is wrong in game" symptom.
+
+The builder now defaults to `rest = 90`, and the flight behaviour is right:
+
+- **On the ground** (`grounded`) it holds `rest` and lets the art lean at most
+  `up` above / `down` below it while the animal steps. The ground heading is
+  measured right-facing, because `facing` mirrors the sheet; using the signed
+  `vx` made every leftward step read as a steep climb.
+- **In the air** it tracks the velocity exactly like `track`. The old clamp
+  applied in the air too, so a flying animal never pointed where it flew. The
+  ground clamp is only the walk.
+- The `up`/`down` sides were swapped (a positive delta runs clockwise, which is
+  the nose *down*); `up` now limits the raised side.
+
+`roam_angle` takes `grounded` and the previous angle, and the caller passes
+`roam and ident == main and not flying`. The takeoff gate now runs for every
+roam missile (it used to need a stock walk pose), so a builder-drawn walk also
+switches to air tracking on Space, and the role table always carries `fly` for
+the render-slot signal.
+
+### The Sheep slot's own art was not previewed, and its params touched Slot 1
+
+The hotbar's Sheep slot gained `behaviorArt.roam` (own sheet vs the round's
+sheet), but `activeRolePreviewCfg` had no roam branch: it fell through to
+`missile`. `secondarySheetPreview` also returned the primary's preview whenever
+the builder was on. So selecting the Sheep slot showed the *primary* sheet with
+the *roam* animation/scale - which read as "the sheep's params override the main
+weapon's".
+
+- The preview config now returns the roam role in Builder mode (and the round's
+  row in "Round's sheet"), and the role sheet loader loads `roam.sheetPreview`.
+  The canvas falls back to the default missile art for a builder roam with no
+  upload, like the exporter does.
+- `updateActiveRoleParams` always writes a secondary role's own row; the roam
+  slot in "Round's sheet" mode is read-only (its values are Slot 1's) and a
+  stray edit can no longer write `missile`.
+- The `sb.flight` snippet shows `roam = { sheet, ... }` (or `walk`/`fly`, or
+  `roam = true`) exactly as the generator will.
+
+Verified with Playwright on WF 35: the Sheep tab shows `state_roam.png`, the
+snippet has the role table and keeps the primary `anim = "track"`, dragging the
+Sheep's Role Scale to 2x leaves the Main tab at 1x, and the two tabs' canvases
+differ in static mode (the sheep sheet is drawn).
+
+### Test pack
+
+WF 34 now documents the tracked air pose and the 90 degree walk rest; WF 35
+(**Roam Own Sheet**) covers the role's own `state_roam.png`, and
+`tools/check_mod_import.ts` asserts the role round-trips and that the primary
+`track` stays at the top level. 35 weapons; `wfcheck` and every check script are
+clean.

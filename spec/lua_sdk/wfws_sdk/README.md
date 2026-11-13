@@ -154,19 +154,21 @@ sprite cannot draw underneath.
 
 WA walks a roaming animal itself, so on the ground the entity has no velocity
 and `track` leaves the art pointing at the last heading — a walking animal that
-looks frozen. `anim = "roam"` points the sheet along the velocity but clamps it
-to a tilt range, and holds the rest angle while the animal is slow:
+looks frozen. `anim = "roam"` holds a ground pose and lets the art lean a little
+while the animal steps; **in the air it tracks the velocity exactly like
+`track`**, so a flying animal points where it flies:
 
 ```lua
 sb.flight(ctx, { weapon = ctx.id, sheet = "...", anim = "roam",
-                 tilt = { up = 25, down = 25, rest = 0 } })  -- degrees
+                 tilt = { up = 25, down = 25, rest = 90 } })  -- degrees
 ```
 
-`up`/`down` are how far the art may lean each way from `rest`; `down` is a
-magnitude, applied as `-down`. Below 0.05 px/frame the art sits at `rest`, which
-is the walking case. The clamp uses the shortest signed difference from `rest`,
-so a heading across the wrap point still limits on the near side. It replaces
-`track` for this animation only; the other roles keep their own `anim`.
+`rest` is the walking pose (`90` lays a sheet that points up along the ground),
+and `up`/`down` are how far the art may lean above/below it as it steps. Below
+0.05 px/frame the art sits at `rest`. The ground heading is measured on the
+right-facing side, because `facing` mirrors the sheet when it walks left, and
+the clamp uses the shortest signed difference from `rest`. It replaces `track`
+for this animation only; the other roles keep their own `anim`.
 
 ### Roaming (the builder owns the flying state)
 
@@ -189,16 +191,22 @@ The walk has two routes:
   The generator zeroes the record `sprite` and the builder draws the animal from
   the first frame with the role's own animation.
 
-The animation is the same on the ground and in the air: `track` points the art
-along the vector, `rotation` spins it, the strip cycles. (A "walking" pose that
-stood upright would ignore `track` for however long it took to take off, which
-looks like the animation being broken.)
+The animation is the role's own on the ground and in the air: `track` points
+the art along the vector, `rotation` spins it, the strip cycles. Only
+`anim = "roam"` distinguishes the two (rest/lean on the ground, tracking in the
+air). A "walking" pose that stood upright would ignore `track` for however long
+it took to take off, which looks like the animation being broken.
+
+A roaming animal can also fly on art of its own instead of the primary sheet —
+`roam` carries the role's keys when it does:
 
 ```lua
 sb.flight(ctx, { weapon = ctx.id,
                  sheet = "sprites/<mod>/missile.png",
                  anim = "track", cyclical = 32,
-                 roam = true })
+                 roam = { sheet = "sprites/<mod>/state_roam.png",
+                          anim = "roam", cyclical = 8, scale = 1.5,
+                          walk = 153, fly = 699 } })
 ```
 
 Without the builder, the claim key installs the two WA flying sheets instead.
