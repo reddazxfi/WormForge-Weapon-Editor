@@ -1938,12 +1938,21 @@ The 90 degree rest was right, but the leftward walk came out belly-up. The
 engine's `mirror_x` flips the sheet about its *own* vertical axis while keeping
 the rotation (see `crates/render/src/geom.rs`: "mirroring swaps the source
 columns rather than the geometry, so a mirrored sprite keeps its rotation"). For
-an upright missile that is invisible, but a walking pose lies flat, so the same
+an upright missile that is invisible, but a walking pose lies flat, so a bare
 mirror is a top-to-bottom flip.
 
-`anim = "roam"` now never mirrors (`b.facing = 1`, the role's Mirror toggle is
-ignored): the ground pose is turned through the left instead (`drawn = -drawn`
-for `vx < 0`, offset included), and in the air `track_angle` already points both
-ways. `roam_angle` still measures the lean on the right-facing side; only the
-final angle is mirrored. The 50 Hz preview's `anim = "roam"` does the same, and
-its `facing` stays 1 so the later leftward pose cannot flip.
+The first attempt stopped mirroring and only turned the pose
+(`drawn = -drawn`, `facing = 1`). That is not a mirror either: it is a
+180-degree-different rotation, so the animal still read upside down relative to
+the other side. The working form is a **true horizontal mirror**:
+
+- the heading is measured right-facing (`abs(vx)`), so a leftward step is not a
+  climb;
+- the sheet is mirrored (`b.facing = -1`);
+- the whole drawn angle is negated (`drawn = -(deg(rot) + angle)`), offset
+  included. `R(-theta) * mirror` is exactly `H * R(theta)`.
+
+`roam_side` keeps the side through a straight drop (`vx == 0`), and the 50 Hz
+preview carries the same `roamLeft` side and draws the same
+`rotate(-rot - angle)` + mirrored image. Without that preview mirror the canvas
+showed the pure-rotation flip while the game looked right.

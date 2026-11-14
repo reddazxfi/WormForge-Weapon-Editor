@@ -483,12 +483,15 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     arcT: number;
     frame: number;
     drumTime: number;
+    /** The last side the roaming walk faced; kept through a straight drop. */
+    roamLeft: boolean;
   }>({
     phase: 0,
     rotation: 0,
     arcT: 0,
     frame: 0,
     drumTime: 0,
+    roamLeft: false,
   });
 
   const [activeFrameDisplay, setActiveFrameDisplay] = useState(0);
@@ -994,7 +997,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
     let vx = 0;
     let vy = 0;
     let rot = animStateRef.current.rotation || 0;
-    let roamLeft = false;
+    let roamLeft = animStateRef.current.roamLeft;
     let phase = animStateRef.current.phase || 0;
     let frame = animStateRef.current.frame || 0;
     let started = false;
@@ -1063,8 +1066,11 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       if (anim === 'roam') {
         // `M.roam_angle`: on the ground (Walk mode) the art holds `rest` and
         // leans at most `up`/`down` from it while the animal steps; in the air
-        // it tracks the velocity exactly like `track`. The ground heading is
-        // measured right-facing, because `facing` mirrors the sheet.
+        // it tracks the velocity exactly like `track`. Everything here is the
+        // right-facing pose; the left side is a true mirror at draw time (the
+        // sheet's `facing = -1` plus a negated drawn angle, as the builder
+        // does). A bare mirror without the negation is a top-to-bottom flip
+        // once the walking pose lies flat.
         const tilt = {
           up: Math.abs(missile.roamTilt?.up ?? DEFAULT_ROAM_TILT.up),
           down: Math.abs(missile.roamTilt?.down ?? DEFAULT_ROAM_TILT.down),
@@ -1075,23 +1081,24 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
         const down = (tilt.down * Math.PI) / 180;
         const speed = Math.hypot(vx, vy);
         const grounded = flightMode === 'walk';
-        roamLeft = false;
+        // Keep the side through a straight drop, as `roam_side` does in the
+        // builder, instead of snapping back to the right. The builder only
+        // mirrors when the role's Mirror toggle is on, so match that too.
+        const roamMirrorOn = activeRolePreviewCfg.mirror !== false;
+        if (roamMirrorOn) {
+          if (vx < 0) roamLeft = true;
+          else if (vx > 0) roamLeft = false;
+        }
+        const hx = roamMirrorOn ? Math.abs(vx) : vx;
         if (!grounded) {
-          if (speed >= 0.05) rot = Math.atan2(vy, vx) + Math.PI / 2;
+          if (speed >= 0.05) rot = Math.atan2(vy, hx) + Math.PI / 2;
         } else if (speed < 0.05) {
           rot = restRad;
         } else {
-          const want = Math.atan2(vy, Math.abs(vx)) + Math.PI / 2;
+          const want = Math.atan2(vy, hx) + Math.PI / 2;
           let delta = want - restRad;
           delta = Math.atan2(Math.sin(delta), Math.cos(delta));
           rot = restRad + Math.min(down, Math.max(-up, delta));
-          // A mirrored sheet would be flipped top to bottom once the pose lies
-          // flat, so walk left by turning the pose instead (the builder does
-          // the same). `facing` stays 1 for `anim = roam`.
-          if (vx < 0) {
-            rot = -rot;
-            roamLeft = true;
-          }
         }
       } else if (anim === 'track') {
         rot = Math.atan2(vy, vx) + Math.PI / 2;
@@ -1130,6 +1137,7 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       animStateRef.current.rotation = rot;
       animStateRef.current.phase = phase;
       animStateRef.current.frame = frame;
+      animStateRef.current.roamLeft = roamLeft;
       animStateRef.current.drumTime = (animStateRef.current.drumTime + STEP) % 1.0;
     };
 
@@ -1173,16 +1181,18 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       const numFrames = Math.max(1, activeRolePreviewCfg.frames || 1);
       const scaleMult = (activeRolePreviewCfg.scale || 1.0) * (missile.size ?? 1);
       const mirror = activeRolePreviewCfg.mirror !== false;
-      // `anim = roam` never mirrors: a walking pose lies flat, so the engine's
-      // sprite-local mirror would show it upside down. Its ground pose is
-      // turned through the left instead (`roamLeft`), and its air pose tracks
-      // the heading on both sides.
+      // `anim = roam` walks left as a true horizontal mirror: the sheet is
+      // mirrored (`facing = -1`) and the whole drawn angle is negated. A bare
+      // mirror, or a bare angle turn, is a top-to-bottom flip once the walk
+      // lies flat. This is exactly the builder's `roam_side` pose.
       const roamAnim = anim === 'roam';
-      const facing = mirror && !roamAnim && vx < 0 ? -1 : 1;
+      const roamMirror = roamAnim && mirror && roamLeft;
+      const facing = roamAnim ? (roamMirror ? -1 : 1) : mirror && vx < 0 ? -1 : 1;
       // `angle` is added to the drawn rotation, negated on a mirrored sheet (or
-      // on a left-turned roam pose), as the builder does it.
+      // on a left-mirrored roam pose), as the builder does it.
       const angleOffset =
-        (((missile.angle ?? 0) * Math.PI) / 180) * (roamLeft || facing < 0 ? -1 : 1);
+        (((missile.angle ?? 0) * Math.PI) / 180) * (roamMirror || facing < 0 ? -1 : 1);
+      const drawRot = roamMirror ? -rot : rot;
 
       // DRAW CANVAS
       ctx.clearRect(0, 0, width, height);
@@ -1278,10 +1288,10 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
       ctx.save();
       ctx.imageSmoothingEnabled = false;
       ctx.translate(posX, posY);
-      ctx.rotate(rot + angleOffset);
+      ctx.rotate(drawRot + angleOffset);
 
-      // `b.facing = mirror and (m.vx < 0 and -1 or 1) or 1` (1 for a roam
-      // pose, which is never mirrored; see above).
+      // `b.facing = mirror and (m.vx < 0 and -1 or 1) or 1`; a roam pose uses
+      // its remembered side instead (`roamMirror`).
       const zoom = missileZoom;
       ctx.scale(facing * scaleMult * (zoom / 4), scaleMult * (zoom / 4));
 
