@@ -493,8 +493,18 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   `missile.explosion.power`/`push_pct` (or `mine.explosion.*`) and lets
   `custom_explosion.explode` supply damage, push, crater and sound. Emits
   `require("wf-lib/effects/px_effects")` (+ `custom_explosion` in blast mode),
-  `fx.install{ trail = … }` before the claim, `trail.BEAM`/`trail.GLOW` and
-  `fx.SMOKE` when smoke is on. Applies to `power` and `drop` (missile or mine)
+  `fx.install{ trail = …, depth = { burst = wa.depth.FRONT } }` before the claim,
+  `trail.BEAM`/`trail.GLOW` and
+  `fx.SMOKE` when smoke is on. The `depth` is not cosmetic: on the SDK's own
+  `EFFECTS` band an `effect`-mode burst is drawn *under* WA's blast animation
+  (worms, objects and effects all cover that band), so the ring only surfaced
+  once the boom had played out — about a second later, with the envelope nearly
+  gone. `FRONT` is the nearest band WA's water still covers. The burst's
+  `thickness` is a PX **half**-width (the beam pass is `0.9 × thickness`, the
+  glow `1 × thickness`, both doubled by `wa.draw.ribbon`), and an explicit `core`
+  replaces the derived sharp pass at that half-width for the ring and the lens —
+  the SDK reads it, so the preview's Core slider is what the game draws. Applies
+  to `power` and `drop` (missile or mine)
   only: an **air strike's bombs are built from the strike's own record copy and
   have no weapon-table slot**, so `missile_boom::weapon_of` cannot map them and
   `on_explode` never fires. When a custom Lua `on_explode` exists in the snippet,

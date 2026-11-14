@@ -862,7 +862,15 @@ export function generateLuaCode(project: WeaponProject): string {
     // px_effects draws through a hidden driver actor, so it has to be installed
     // before a round can explode; `trail = true` also installs the ribbon
     // module the trail block below samples with.
-    lines.push(`    fx.install{ trail = ${usesRibbonTrail ? 'true' : 'false'} }`);
+    //
+    // The burst goes in front (`wa.depth.FRONT`), not on the SDK's `EFFECTS`
+    // band: in `effect` mode WA's own blast animation is drawn over that band,
+    // so the ring only surfaced once the boom had played out — a second later,
+    // by which time the envelope was nearly gone. Worms and the whole blast are
+    // what it should cover; the smoke stays on its own band behind it.
+    lines.push(
+      `    fx.install{ trail = ${usesRibbonTrail ? 'true' : 'false'}, depth = { burst = wa.depth.FRONT } }`,
+    );
   }
   if (usesHoldArt) {
     lines.push('    local hold = {');

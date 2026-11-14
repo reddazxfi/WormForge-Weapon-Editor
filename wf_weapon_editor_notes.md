@@ -1984,3 +1984,23 @@ itself (`keep_while_firing` without a burst): both would draw the gun, and the
 helper only knows frame 0 of an animated strip. WF 36 (**Sequential Flash**)
 covers hold + flash on a burst; WF 32's firing sheet is the ice sprite now, so a
 flash that sticks or never lights is visible. 36 weapons.
+
+### The explosion ring was drawn under WA's own blast
+
+`fx.install` left the burst on the effects SDK's `EFFECTS` band (`0xC0000`).
+`wa.depth` documents that band as *behind* worms, objects and WA's own effects,
+so in `effect` mode (where the record's native blast still plays) the ring sat
+under WA's explosion animation. By the time the boom played out — around a
+second — the burst's `1 - timer/duration` envelope had already dropped close to
+zero, which is exactly the "appears about a second late" report. The generator
+now passes `depth = { burst = wa.depth.FRONT }` to `fx.install` (the nearest band
+WA's front water still covers); the smoke keeps its own band behind the ring, and
+`blast` mode is unaffected because there is no native boom to hide behind.
+
+The same config also exposed a real geometry gap: the preview honoured a `core`
+key (the Core slider) that the SDK had no key for, so a sharp core line existed
+only on the site. `BURST_KEYS`/`burst_state`/`draw_burst` now read `core` as the
+sharp pass's half-width (floored at 1.25 half, 2.5 px full) for both the ring and
+the lens, and fall back to PX's `0.9 x thickness` / `1 x thickness` derivation
+when it is absent or zero — every existing bundle draws exactly as before.
+`effects.sdk` 0.3.5.
