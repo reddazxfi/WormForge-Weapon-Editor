@@ -114,8 +114,14 @@ Node 26.x, Vite 8.3.x, React 19.3.x, Tailwind 4.3.x, TypeScript 7.0.x.
   `visibleRecordTabs(burst, bitAction, fireType, teleport, bodyFuse)` returns the
   tab set that applies to the weapon family: projectile/dynamite and air strike
   get Physics (or Strike & Bombs) · Missile Action · Explodes Into · Sprites &
-  Trail · Fine Tuning · Lua Script, while a mine, teleport tool, firearm, flame
-  stream, arrow or special tool gets only its own setup page plus Lua Script.
+  Trail · Lua Script, while a mine, teleport tool, firearm, flame stream, arrow
+  or special tool gets only its own setup page plus Lua Script. There is no
+  "Fine Tuning" tab: its rare fields live where they apply — blast bias,
+  damage randomness, random flight wobble and collision outline under
+  **Blast Shaping & Random Motion** in Physics & Blast, the pre-explosion
+  warning under **Pre-Explosion Warning Sound** there, and the homing sprite /
+  animation / trail under **Homing Art & Trail** inside Missile Action's homing
+  block (the bounce extras were already in its Bounce Settings).
   When the family changes, `App` moves `activeSubTab` to the first visible tab.
 - **Explodes Into owns the payload as one page with three inner views**
   (Ejection & Bit Physics · Bit Targets · Bit Action) instead of the old

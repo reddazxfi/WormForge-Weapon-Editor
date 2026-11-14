@@ -1043,6 +1043,34 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
               />
             </div>
           </div>
+
+          <div className="space-y-3 border-t border-stone-200/80 pt-4 dark:border-stone-800">
+            <SubSectionTitle
+              title="Blast Shaping &amp; Random Motion"
+              desc="Less common native fields. Left alone they keep the value the template or .wep already carries."
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              {numField('missile.explosion.bias', 'Blast Bias', 0, 'Vertical elevation bias of the main explosion.')}
+              {numField('missile.explosion.variation', 'Damage Randomness', 0, 'Random variation applied to explosion damage.')}
+              {numField('missile.random_motion', 'Random Flight Wobble', 0, 'Native random-motion parameter (depends on base weapon).')}
+              {numField('missile.collision_shape', 'Collision Outline', 0, 'Numeric physical clearance preset; keep inherited unless tested.')}
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t border-stone-200/80 pt-4 dark:border-stone-800">
+            <SubSectionTitle title="Pre-Explosion Warning Sound" code="missile.explosion_sound" />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 items-end">
+              <CheckboxCard
+                checked={!!project.recordOverrides['missile.explosion_sound.enabled']}
+                onChange={(v) => updateOverride('missile.explosion_sound.enabled', v)}
+                label="Play Warning Sound"
+                code="missile.explosion_sound.enabled"
+                desc="Plays a sound shortly before a timed explosion goes off."
+              />
+              {numField('missile.explosion_sound.sound', 'Sound ID', 0, 'Native sound ID (0 = none).')}
+              {numField('missile.explosion_sound.before', 'Lead Time', 0, 'Milliseconds before detonation to play the sound.', { step: 50, unit: 'ms' })}
+            </div>
+          </div>
         </div>
       )}
 
@@ -1198,19 +1226,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
 
             {project.action === 'homing' && (
               <div className="space-y-4 rounded-xl bg-stone-50/70 p-4 dark:bg-stone-950/40">
-                <SubSectionTitle
-                  title="Homing Settings"
-                  code="missile.homing"
-                  right={
-                    <button
-                      type="button"
-                      onClick={() => onSelectSubTab('advanced')}
-                      className="text-[11px] font-semibold text-forge-600 hover:underline dark:text-forge-400 whitespace-nowrap shrink-0 cursor-pointer"
-                    >
-                      Homing sprite &amp; trail →
-                    </button>
-                  }
-                />
+                <SubSectionTitle title="Homing Settings" code="missile.homing" />
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <TooltipLabel
@@ -1256,6 +1272,36 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                       onChange={(e) => updateBody({ homing_time_ms: Number(e.target.value) })}
                       unit="ms"
                     />
+                  </div>
+                </div>
+
+                <div className="space-y-3 border-t border-stone-200/80 pt-3 dark:border-stone-800">
+                  <SubSectionTitle
+                    title="Homing Art &amp; Trail"
+                    desc="Stock art WA draws while the round is guiding. The WFWS builder draws its own sheet when it owns this role, and then these ids are not needed."
+                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                    <StockSpriteInput
+                      id="homing-sprite"
+                      label="Homing Sprite"
+                      code="missile.homing.sprite"
+                      value={project.recordOverrides['missile.homing.sprite'] ?? ''}
+                      onChange={(v) => updateOverride('missile.homing.sprite', v)}
+                      desc="Stock sprite shown while homing."
+                    />
+                    {animField('missile.homing.animation', 'Homing Animation Mode', 0)}
+                    <StockSpriteInput
+                      id="homing-trail-sprite"
+                      label="Homing Trail Sprite"
+                      code="missile.homing.trail.sprite"
+                      value={project.recordOverrides['missile.homing.trail.sprite'] ?? ''}
+                      onChange={(v) => updateOverride('missile.homing.trail.sprite', v)}
+                      options={TRAIL_SPRITES}
+                      desc="Stock trail sprite emitted while homing (0 or blank disables it)."
+                    />
+                    {numField('missile.homing.trail.power', 'Homing Trail Density', 0, 'Particle density while homing.')}
+                    {numField('missile.homing.trail.speed', 'Homing Trail Speed', 0, 'Particle ejection speed while homing.')}
+                    {numField('missile.homing.trail.bubbles_per_second', 'Homing Bubbles / sec', 0, 'Underwater bubble rate while homing (0.25 steps).', { min: 0, max: 20, step: 0.25 })}
                   </div>
                 </div>
               </div>
@@ -2454,85 +2500,6 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* PANEL 5: Fine Tuning */}
-      {normalizedTab === 'advanced' && (
-        <div className="p-4 sm:p-5 space-y-5">
-          <SectionHeader
-            title="Fine Tuning"
-            desc="Less common projectile fields carried by native records. Unchanged values stay inherited from the template or .wep."
-          />
-
-          <div className="space-y-3">
-            <SubSectionTitle title="Blast Shaping &amp; Random Motion" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-              {numField('missile.explosion.bias', 'Blast Bias', 0, 'Vertical elevation bias of the main explosion.')}
-              {numField('missile.explosion.variation', 'Damage Randomness', 0, 'Random variation applied to explosion damage.')}
-              {numField('missile.random_motion', 'Random Flight Wobble', 0, 'Native random-motion parameter (depends on base weapon).')}
-              {numField('missile.collision_shape', 'Collision Outline', 0, 'Numeric physical clearance preset; keep inherited unless tested.')}
-            </div>
-          </div>
-
-          <div className="space-y-3 border-t border-stone-200/80 pt-4 dark:border-stone-800">
-            <SubSectionTitle title="Pre-Explosion Warning Sound" code="missile.explosion_sound" />
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 items-end">
-              <CheckboxCard
-                checked={!!project.recordOverrides['missile.explosion_sound.enabled']}
-                onChange={(v) => updateOverride('missile.explosion_sound.enabled', v)}
-                label="Play Warning Sound"
-                code="missile.explosion_sound.enabled"
-                desc="Plays a sound shortly before a timed explosion goes off."
-              />
-              {numField('missile.explosion_sound.sound', 'Sound ID', 0, 'Native sound ID (0 = none).')}
-              {numField('missile.explosion_sound.before', 'Lead Time', 0, 'Milliseconds before detonation to play the sound.', { step: 50, unit: 'ms' })}
-            </div>
-          </div>
-
-          {project.action === 'bounce' && (
-            <div className="space-y-3 border-t border-stone-200/80 pt-4 dark:border-stone-800">
-              <SubSectionTitle title="Bounce Extras" code="missile.bounce" />
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-                {numField('missile.bounce.contact_sides', 'Counted Impact Sides', 0, 'Native side mask controlling bounce-limit hits and contact explosions.')}
-                {numField('missile.bounce.extra_reverse_chance_pct', 'Extra Rebound Chance', 0, 'Chance for an extra horizontal reversal before normal collision.', { min: 0, max: 100, unit: '%' })}
-                {numField('missile.bounce.sound', 'Bounce Sound', 0, 'Native sound ID played on bounce (0 = none).')}
-                {numField('missile.bounce.explosion.power', 'Contact Blast Power', 0, 'Contact-explosion power; 0 disables it.')}
-                {numField('missile.bounce.explosion.push_pct', 'Contact Knockback', 100, 'Knockback percentage for bounce explosions.', { min: 0, max: 400, unit: '%' })}
-                {numField('missile.bounce.explosion.bias', 'Contact Blast Bias', 0, 'Vertical bias for bounce contact explosions.')}
-                {numField('missile.bounce.explosion.variation', 'Contact Damage Spread', 0, 'Random variation applied to contact blasts.')}
-              </div>
-            </div>
-          )}
-
-          {project.action === 'homing' && (
-            <div className="space-y-3 border-t border-stone-200/80 pt-4 dark:border-stone-800">
-              <SubSectionTitle title="Homing Art &amp; Trail" code="missile.homing" />
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                <StockSpriteInput
-                  id="homing-sprite"
-                  label="Homing Sprite"
-                  code="missile.homing.sprite"
-                  value={project.recordOverrides['missile.homing.sprite'] ?? ''}
-                  onChange={(v) => updateOverride('missile.homing.sprite', v)}
-                  desc="Stock sprite shown while homing. When the WFWS builder is active, it draws its own homing sheet instead."
-                />
-                {animField('missile.homing.animation', 'Homing Animation Mode', 0)}
-                <StockSpriteInput
-                  id="homing-trail-sprite"
-                  label="Homing Trail Sprite"
-                  code="missile.homing.trail.sprite"
-                  value={project.recordOverrides['missile.homing.trail.sprite'] ?? ''}
-                  onChange={(v) => updateOverride('missile.homing.trail.sprite', v)}
-                  options={TRAIL_SPRITES}
-                  desc="Stock trail sprite emitted while homing (0 or blank disables it)."
-                />
-                {numField('missile.homing.trail.power', 'Homing Trail Density', 0, 'Particle density while homing.')}
-                {numField('missile.homing.trail.speed', 'Homing Trail Speed', 0, 'Particle ejection speed while homing.')}
-                {numField('missile.homing.trail.bubbles_per_second', 'Homing Bubbles / sec', 0, 'Underwater bubble rate while homing (0.25 steps).', { min: 0, max: 20, step: 0.25 })}
-              </div>
-            </div>
-          )}
         </div>
       )}
 

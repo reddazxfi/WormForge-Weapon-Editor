@@ -18,7 +18,6 @@ export type RecordTabId =
   | 'action'
   | 'burst'
   | 'sprite'
-  | 'advanced'
   | 'collisions'
   | 'callbacks'
   | 'gun'
@@ -45,7 +44,6 @@ export const RECORD_TABS: RecordTabDef[] = [
   { id: 'action', label: 'Missile Action', hint: 'Bounce, homing, roam, dig & targets', icon: Zap },
   { id: 'burst', label: 'Explodes Into', hint: 'Single blast, cluster bits or fire', icon: Sparkles },
   { id: 'sprite', label: 'Sprites & Trail', hint: 'Missile sprite, smoke trail & sounds', icon: Sliders },
-  { id: 'advanced', label: 'Fine Tuning', hint: 'Blast shape, wobble & action extras', icon: Sliders },
   { id: 'gun', label: 'Firearm Specs', hint: 'Bullets, spread cone, pellets & hits', icon: Crosshair },
   { id: 'gun_mine', label: 'Tool & Setup', hint: 'Mine, arrow, teleport or special tool', icon: Wrench },
   { id: 'callbacks', label: 'Lua Script', hint: 'Custom game event hooks', icon: Code2 },
@@ -139,7 +137,6 @@ export function visibleRecordTabs(
     { id: 'action', label: 'Missile Action', hint: 'Bounce, homing, roam, dig & targets', icon: Zap },
     { id: 'burst', label: 'Explodes Into', hint: 'Single blast, cluster bits or fire', icon: Sparkles },
     { id: 'sprite', label: 'Sprites & Trail', hint: 'Missile sprite, smoke trail & sounds', icon: Sliders },
-    { id: 'advanced', label: 'Fine Tuning', hint: 'Blast shape, wobble & action extras', icon: Sliders },
-    { id: 'callbacks', label: 'Lua Script', hint: 'Custom game event hooks', icon: Code2 },
+      { id: 'callbacks', label: 'Lua Script', hint: 'Custom game event hooks', icon: Code2 },
   ];
 }

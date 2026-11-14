@@ -2029,3 +2029,15 @@ navigation, one `aria-current`), the family-scoped tab bar lives inside
 `RecordEditor`, and the mines/guns/arrows/specials pages carry only the groups
 their family can actually reach — a mine has no custom art (`mine.rs` hardcodes
 `mineon`/`mineoff`) and a hitscan weapon has no missile body.
+
+### Fine Tuning was a junk drawer, so it is gone
+
+The redesign's sixth tab held four unrelated leftovers under "Fine Tuning". They
+moved next to the thing they change: `missile.explosion.bias` / `.variation`,
+`missile.random_motion` and `missile.collision_shape` to **Blast Shaping &
+Random Motion** in Physics & Blast, `missile.explosion_sound.*` to
+**Pre-Explosion Warning Sound** there, and `missile.homing.sprite` / `.animation`
+/ `.trail.*` into Missile Action's homing block as **Homing Art & Trail** (which
+was previously a "Homing sprite & trail →" jump into the other tab). The bounce
+extras it duplicated were already in Bounce Settings, so nothing was lost.
+Projectile and strike weapons now have five tabs.
