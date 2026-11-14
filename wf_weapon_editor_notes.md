@@ -2004,3 +2004,28 @@ sharp pass's half-width (floored at 1.25 half, 2.5 px full) for both the ring an
 the lens, and fall back to PX's `0.9 x thickness` / `1 x thickness` derivation
 when it is absent or zero — every existing bundle draws exactly as before.
 `effects.sdk` 0.3.5.
+
+### Porting the Gemini Hydrogen redesign (branch `redesign/hydrogen-port`)
+
+The redesign zip was cut from an older tree, so porting it file-by-file silently
+removed two of the fixes that had already shipped: its `RecordEditor` had its own
+local `UnitNumberInput` (the pre-draft version) and its `WeaponSettings` had the
+`withWfwsPrefix(e.target.value)` id handler. Both were re-applied on top of the
+new layout rather than merged the other way round.
+
+- `RecordEditor`'s `UnitNumberInput` is now a thin styling wrapper over
+  `useNumberDraft` from `NumberInput.tsx`, so the burst/effects/sequence cards
+  that import it from there get the draft behaviour too. The 14 remaining raw
+  `<input type="number">` fields in `RecordEditor` (dig, cluster, trail, spread)
+  became `NumberInput`; the three native sound-id boxes deliberately stayed raw
+  because clearing them means "inherit", not zero.
+- `WeaponSettings` keeps `idDraft`, so clearing the id keeps the last one instead
+  of writing `wfws.weapon`.
+- `Crate Weight` is `Crate Chance`: the engine's `defaults.crate.chance_pct` is a
+  percentage, not a relative weight.
+
+Layout decisions worth keeping: the sidebar is workspace navigation only (one
+navigation, one `aria-current`), the family-scoped tab bar lives inside
+`RecordEditor`, and the mines/guns/arrows/specials pages carry only the groups
+their family can actually reach — a mine has no custom art (`mine.rs` hardcodes
+`mineon`/`mineoff`) and a hitscan weapon has no missile body.

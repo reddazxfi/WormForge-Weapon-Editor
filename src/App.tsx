@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { WeaponProject } from './types/weapon';
 import { Sidebar, MobileBar } from './components/Sidebar';
 import { WeaponSettings } from './components/WeaponSettings';
-import { TooltipTap } from './components/TooltipTap';
 import { RecordEditor } from './components/RecordEditor';
 import { HoldPreview } from './components/HoldPreview';
 import { EffectsWorkspace } from './components/EffectsWorkspace';
@@ -175,10 +174,11 @@ export default function App() {
       project.burst,
       bitActionOf(project.body.clustlet),
       project.fireType,
-      project.teleport
+      project.teleport,
+      project.body.fuse
     );
     if (!allowed.some((tab) => tab.id === activeSubTab)) {
-      setActiveSubTab('missile');
+      setActiveSubTab(allowed[0]?.id ?? 'missile');
     }
   }, [
     project.burst,
@@ -187,6 +187,7 @@ export default function App() {
     project.body.clustlet.contact,
     project.fireType,
     project.teleport,
+    project.body.fuse,
     activeSubTab,
   ]);
 
@@ -360,7 +361,7 @@ export default function App() {
         onCopyId={copyId}
       />
 
-      <div className="flex min-h-screen flex-col lg:pl-72">
+      <div className="flex min-h-screen flex-col lg:pl-68">
         <MobileBar
           project={project}
           activeTab={activeTab}
@@ -376,36 +377,31 @@ export default function App() {
 
         <main
           id="main"
-          className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8"
+          className="mx-auto w-full max-w-6xl flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6"
         >
-          <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-forge-600 dark:text-forge-400">
                 {pageMeta.eyebrow}
               </div>
-              <h1 className="mt-1 font-heading text-2xl font-bold tracking-tight text-stone-900 dark:text-stone-50">
+              <h1 className="mt-0.5 font-heading text-2xl font-bold tracking-tight text-stone-900 dark:text-stone-50">
                 {pageMeta.title}
               </h1>
-              <p className="mt-1 max-w-2xl text-xs text-stone-500 dark:text-stone-400">
+              <p className="mt-0.5 max-w-2xl text-xs text-stone-500 dark:text-stone-400">
                 {pageMeta.description}
               </p>
             </div>
           </header>
 
           {activeTab === 'editor' && (
-            <div className="space-y-6">
-              {/* Weapon identity and panel placement are their own section now:
-                  they used to sit above every record page, which pushed the
-                  section you were editing off the first screen. */}
-              {activeSubTab === 'weapon' ? (
-                <WeaponSettings project={project} onChange={updateProject} />
-              ) : (
-                <RecordEditor
-                  project={project}
-                  onChange={updateProject}
-                  activeSubTab={activeSubTab}
-                />
-              )}
+            <div className="space-y-4">
+              <WeaponSettings project={project} onChange={updateProject} />
+              <RecordEditor
+                project={project}
+                onChange={updateProject}
+                activeSubTab={activeSubTab}
+                onSelectSubTab={setActiveSubTab}
+              />
             </div>
           )}
 
@@ -452,8 +448,6 @@ export default function App() {
         onClose={() => setIsWepModalOpen(false)}
         onApply={handleApplyWepImport}
       />
-
-      <TooltipTap />
 
       {toastMessage && (
         <div

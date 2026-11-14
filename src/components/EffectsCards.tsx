@@ -11,7 +11,15 @@ import { DEFAULT_EXPLOSION_EFFECT, EXPLOSION_PRESETS } from '../data/explosionPr
 import { DEFAULT_CUSTOM_SOUNDS, INTERVAL_PRESETS, SOUND_PRIORITIES } from '../data/soundPresets';
 import { ExplosionPreview } from './ExplosionPreview';
 import { NumberInput } from './NumberInput';
-import { AlertTriangle, HelpCircle, Sparkles, Volume2, Zap } from 'lucide-react';
+import { RibbonTrailPreview } from './RibbonTrailPreview';
+import {
+  SectionHeader,
+  SubSectionTitle,
+  TooltipLabel,
+  UnitNumberInput,
+  buildTooltip,
+} from './RecordEditor';
+import { AlertTriangle, Sparkles, Volume2, Zap } from 'lucide-react';
 
 const RIBBON_DEFAULT: RibbonTrailConfig = {
   enabled: false,
@@ -53,275 +61,280 @@ interface CardProps {
   onChange: (updated: Partial<WeaponProject>) => void;
 }
 
-const cardClass =
-  'p-5 rounded-xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-850/40 space-y-4';
 const inputClass =
-  'w-full text-xs font-mono px-2 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white';
-const labelClass = 'text-xs font-semibold text-stone-700 dark:text-stone-300';
+  'w-full rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 font-mono text-xs tabular-nums text-stone-900 focus:outline-hidden focus:ring-2 focus:ring-forge-500 disabled:opacity-50 dark:border-stone-700 dark:bg-stone-900 dark:text-white';
+const selectClass =
+  'w-full rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-xs text-stone-900 focus:outline-hidden focus:ring-2 focus:ring-forge-500 disabled:opacity-50 dark:border-stone-700 dark:bg-stone-900 dark:text-white';
 
-function updateRibbon(project: WeaponProject, onChange: CardProps['onChange'], patch: Partial<RibbonTrailConfig>) {
+function updateRibbon(
+  project: WeaponProject,
+  onChange: CardProps['onChange'],
+  patch: Partial<RibbonTrailConfig>
+) {
   onChange({ ribbonTrail: { ...(project.ribbonTrail ?? RIBBON_DEFAULT), ...patch } });
 }
 
-/** The effects-SDK ribbon trail, moved here from the Indices & Trail tab. */
 export function RibbonTrailCard({ project, onChange }: CardProps) {
   if (!supportsRibbonTrail(project)) return null;
   const ribbon = project.ribbonTrail ?? RIBBON_DEFAULT;
   const update = (patch: Partial<RibbonTrailConfig>) => updateRibbon(project, onChange, patch);
 
   return (
-    <div className={cardClass}>
-      <div className="flex items-center justify-between border-b border-stone-200 dark:border-stone-700/80 pb-2.5">
-        <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-2">
-          <Zap className="w-4 h-4 text-forge-500" />
-          Ribbon Trail (`wf-lib/effects/trail`)
-        </span>
-        <label className="flex items-center gap-1.5 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={ribbon.enabled}
-            onChange={(e) => update({ enabled: e.target.checked })}
-            className="rounded text-forge-600 focus:ring-forge-500 w-3.5 h-3.5"
-          />
-          <span className="text-xs font-semibold text-stone-700 dark:text-stone-300">Enable</span>
-        </label>
-      </div>
-
-      <p className="text-[11px] text-stone-500 dark:text-stone-400">
-        Lua samples the round every {ribbon.every} game frame(s) and the engine draws a tapering
-        ribbon through those points, so the colour and widths are yours — the stock particle trail
-        on Indices &amp; Trail is a record field with a stock sprite. Adds the `effects.sdk` library
-        to the bundle.
-      </p>
-
-      <div className="flex flex-wrap gap-1.5 items-center">
-        <span className="text-[10px] text-stone-400 font-medium mr-1 uppercase">Presets:</span>
-        {[
-          {
-            name: 'PX bullet',
-            patch: { max: 12, every: 2, vanish: 2, coreWidth: 8, glowWidth: 13, color: '#ffffff' },
-          },
-          {
-            name: 'Thin line',
-            patch: { max: 8, every: 1, vanish: 2, coreWidth: 3, glowWidth: 6, color: '#ffffff' },
-          },
-          {
-            name: 'Green streak',
-            patch: { max: 12, every: 1, vanish: 1, coreWidth: 5, glowWidth: 9, color: '#7cff5a' },
-          },
-        ].map((preset) => (
-          <button
-            key={preset.name}
-            type="button"
-            onClick={() => update(preset.patch)}
-            className="px-2 py-1 text-[11px] rounded bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 font-medium transition-colors cursor-pointer"
-          >
-            {preset.name}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="space-y-1">
-          <label htmlFor="ribbon-color" className={labelClass}>
-            Colour (`r`, `g`, `b`)
-          </label>
-          <div className="flex items-center gap-2">
+    <div className="space-y-5">
+      <SectionHeader
+        title="Ribbon Trail"
+        code="wf-lib/effects/trail (effects.sdk)"
+        icon={<Zap className="h-4 w-4 text-sky-500" aria-hidden="true" />}
+        desc="Samples the flying projectile and draws an additive tapered beam + glow ribbon trail. Automatically adds effects.sdk to mod dependencies."
+        right={
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-sky-200 bg-sky-50/80 px-3 py-1.5 dark:border-sky-800/70 dark:bg-sky-950/30">
             <input
-              id="ribbon-color"
-              type="color"
-              value={/^#[0-9a-fA-F]{6}$/.test(ribbon.color) ? ribbon.color : '#ffffff'}
-              onChange={(e) => update({ color: e.target.value })}
-              className="h-8 w-10 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 cursor-pointer"
+              type="checkbox"
+              checked={ribbon.enabled}
+              onChange={(e) => update({ enabled: e.target.checked })}
+              className="h-3.5 w-3.5 cursor-pointer rounded text-forge-600 focus:ring-forge-500"
             />
-            <input
-              aria-label="Ribbon colour hex"
-              type="text"
-              value={ribbon.color}
-              onChange={(e) => update({ color: e.target.value })}
-              spellCheck={false}
-              className={inputClass}
-            />
-          </div>
-        </div>
-
-        <div className="space-y-1">
-          <label htmlFor="ribbon-core" className={labelClass}>
-            Core width (`core_w`)
-          </label>
-          <div className="flex items-stretch w-full rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden focus-within:ring-2 focus-within:ring-forge-500 focus-within:border-forge-500">
-            <NumberInput
-              id="ribbon-core"
-              min={0}
-              max={40}
-              step={0.5}
-              value={ribbon.coreWidth}
-              onChange={(e) => update({ coreWidth: Number(e.target.value) })}
-              className="flex-1 min-w-0 text-xs font-mono px-2 py-1.5 bg-transparent text-stone-900 dark:text-white focus:outline-hidden"
-            />
-            <span className="px-2 flex items-center text-[10px] font-mono text-stone-500 dark:text-stone-400 bg-stone-50 dark:bg-stone-800/70 border-l border-stone-200 dark:border-stone-700 select-none shrink-0 pointer-events-none">
-              px
+            <span className="text-xs font-semibold text-sky-900 dark:text-sky-200">
+              Enable Trail
             </span>
-          </div>
-        </div>
-
-        <div className="space-y-1">
-          <label htmlFor="ribbon-glow" className={labelClass}>
-            Glow width (`glow_w`)
           </label>
-          <div className="flex items-stretch w-full rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden focus-within:ring-2 focus-within:ring-forge-500 focus-within:border-forge-500">
-            <NumberInput
-              id="ribbon-glow"
-              min={0}
-              max={40}
-              step={0.5}
-              value={ribbon.glowWidth}
-              onChange={(e) => update({ glowWidth: Number(e.target.value) })}
-              className="flex-1 min-w-0 text-xs font-mono px-2 py-1.5 bg-transparent text-stone-900 dark:text-white focus:outline-hidden"
-            />
-            <span className="px-2 flex items-center text-[10px] font-mono text-stone-500 dark:text-stone-400 bg-stone-50 dark:bg-stone-800/70 border-l border-stone-200 dark:border-stone-700 select-none shrink-0 pointer-events-none">
-              px
+        }
+      />
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+        {/* Controls Column */}
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+              Presets:
             </span>
-          </div>
-          <p className="text-[10px] text-stone-400">0 draws the core only.</p>
-        </div>
-
-        <div className="space-y-1">
-          <label htmlFor="ribbon-max" className={labelClass}>
-            Length (`max`)
-          </label>
-          <NumberInput
-            id="ribbon-max"
-            min={2}
-            max={64}
-            value={ribbon.max}
-            onChange={(e) => update({ max: Number(e.target.value) })}
-            className={inputClass}
-          />
-          <p className="text-[10px] text-stone-400">Points kept.</p>
-        </div>
-
-        <div className="space-y-1">
-          <label htmlFor="ribbon-every" className={labelClass}>
-            Sample every (`every`)
-          </label>
-          <NumberInput
-            id="ribbon-every"
-            min={1}
-            max={10}
-            value={ribbon.every}
-            onChange={(e) => update({ every: Number(e.target.value) })}
-            className={inputClass}
-          />
-          <p className="text-[10px] text-stone-400">Game frames per point.</p>
-        </div>
-
-        <div className="space-y-1">
-          <label htmlFor="ribbon-vanish" className={labelClass}>
-            Fade (`vanish`)
-          </label>
-          <NumberInput
-            id="ribbon-vanish"
-            min={1}
-            max={10}
-            value={ribbon.vanish}
-            onChange={(e) => update({ vanish: Number(e.target.value) })}
-            className={inputClass}
-          />
-          <p className="text-[10px] text-stone-400">Frames between shed points.</p>
-        </div>
-
-        <div className="space-y-1 col-span-2">
-          <span className={labelClass}>Attach to</span>
-          <div className="grid grid-cols-2 gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-lg border border-stone-200 dark:border-stone-700 text-xs">
-            {(
-              [
-                { id: 'main', label: 'Main round' },
-                { id: 'all', label: 'Every round + bits' },
-              ] as const
-            ).map((option) => (
+            {[
+              {
+                name: 'PX Bullet',
+                tone: 'border-sky-300/80 bg-sky-50/80 text-sky-800 hover:bg-sky-100 dark:border-sky-700/60 dark:bg-sky-950/30 dark:text-sky-200',
+                patch: { max: 12, every: 2, vanish: 2, coreWidth: 8, glowWidth: 13, color: '#ffffff' },
+              },
+              {
+                name: 'Thin Streak',
+                tone: 'border-stone-200 bg-white text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200',
+                patch: { max: 8, every: 1, vanish: 2, coreWidth: 3, glowWidth: 6, color: '#ffffff' },
+              },
+              {
+                name: 'Plasma Blue',
+                tone: 'border-sky-300/80 bg-sky-50/80 text-sky-800 hover:bg-sky-100 dark:border-sky-700/60 dark:bg-sky-950/30 dark:text-sky-200',
+                patch: { max: 14, every: 1, vanish: 2, coreWidth: 6, glowWidth: 15, color: '#4cb5ff' },
+              },
+              {
+                name: 'Solar Amber',
+                tone: 'border-amber-300/80 bg-amber-50/80 text-amber-800 hover:bg-amber-100 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-200',
+                patch: { max: 12, every: 1, vanish: 1, coreWidth: 5, glowWidth: 12, color: '#ff9436' },
+              },
+            ].map((preset) => (
               <button
-                key={option.id}
+                key={preset.name}
                 type="button"
-                onClick={() => update({ target: option.id })}
-                className={`py-1.5 font-medium rounded-md transition-colors ${
-                  ribbon.target === option.id
-                    ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-bold'
-                    : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-                }`}
+                onClick={() => update(preset.patch)}
+                className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${preset.tone}`}
               >
-                {option.label}
+                {preset.name}
               </button>
             ))}
           </div>
-          <p className="text-[10px] text-stone-400">
-            Main round skips cluster bits (they are born where the parent's ribbon is still fading).
-            Every round trails a full burst.
-          </p>
-        </div>
-      </div>
 
-      <div className="space-y-1">
-        <div
-          aria-hidden="true"
-          className="h-1.5 w-full rounded-full"
-          style={{
-            background: `linear-gradient(90deg, transparent, ${ribbon.color})`,
-            boxShadow: ribbon.glowWidth > 0 ? `0 0 6px ${ribbon.color}88` : undefined,
-          }}
-        />
-        <p className="text-[10px] text-stone-400">
-          Ribbon fades toward the tail; widths and colour are emitted as `TRAIL` in the generated
-          Lua.
-        </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+            <div>
+              <TooltipLabel
+                label="Trail Colour"
+                code="r, g, b"
+                desc="RGB tint applied multiplicatively to the beam and glow sheets."
+                htmlFor="ribbon-color"
+              />
+              <div className="flex items-center gap-1.5">
+                <input
+                  id="ribbon-color"
+                  type="color"
+                  value={/^#[0-9a-fA-F]{6}$/.test(ribbon.color) ? ribbon.color : '#ffffff'}
+                  onChange={(e) => update({ color: e.target.value })}
+                  className="h-8 w-9 shrink-0 cursor-pointer rounded-lg border border-stone-200 bg-white p-0.5 dark:border-stone-700 dark:bg-stone-900"
+                />
+                <input
+                  aria-label="Ribbon colour hex"
+                  type="text"
+                  value={ribbon.color}
+                  onChange={(e) => update({ color: e.target.value })}
+                  spellCheck={false}
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            <div>
+              <TooltipLabel
+                label="Core Width"
+                code="core_w"
+                desc="Sharp inner beam width in pixels."
+                htmlFor="ribbon-core"
+              />
+              <UnitNumberInput
+                id="ribbon-core"
+                min={0}
+                max={40}
+                step={0.5}
+                value={ribbon.coreWidth}
+                onChange={(e) => update({ coreWidth: Number(e.target.value) })}
+                unit="px"
+              />
+            </div>
+
+            <div>
+              <TooltipLabel
+                label="Glow Width"
+                code="glow_w"
+                desc="Outer halo width in pixels using beam_glow.png. Set to 0 for core only."
+                htmlFor="ribbon-glow"
+              />
+              <UnitNumberInput
+                id="ribbon-glow"
+                min={0}
+                max={40}
+                step={0.5}
+                value={ribbon.glowWidth}
+                onChange={(e) => update({ glowWidth: Number(e.target.value) })}
+                unit="px"
+              />
+            </div>
+
+            <div>
+              <TooltipLabel
+                label="Trail Length"
+                code="max"
+                desc="Maximum number of sampled points held in the ribbon buffer."
+                htmlFor="ribbon-max"
+              />
+              <UnitNumberInput
+                id="ribbon-max"
+                min={2}
+                max={64}
+                value={ribbon.max}
+                onChange={(e) => update({ max: Number(e.target.value) })}
+                unit="pts"
+              />
+            </div>
+
+            <div>
+              <TooltipLabel
+                label="Sample Interval"
+                code="every"
+                desc="Game frames between position samples (50 Hz; 1 = every frame)."
+                htmlFor="ribbon-every"
+              />
+              <UnitNumberInput
+                id="ribbon-every"
+                min={1}
+                max={10}
+                value={ribbon.every}
+                onChange={(e) => update({ every: Number(e.target.value) })}
+                unit="f"
+              />
+            </div>
+
+            <div>
+              <TooltipLabel
+                label="Tail Fade Rate"
+                code="vanish"
+                desc="Frames between shedding trailing points once flight ends."
+                htmlFor="ribbon-vanish"
+              />
+              <UnitNumberInput
+                id="ribbon-vanish"
+                min={1}
+                max={10}
+                value={ribbon.vanish}
+                onChange={(e) => update({ vanish: Number(e.target.value) })}
+                unit="f"
+              />
+            </div>
+          </div>
+
+          <div>
+            <TooltipLabel
+              label="Attach To"
+              code="wa.on.missile_frame"
+              desc="Main Projectile skips cluster bits (which spawn while the parent ribbon is fading). Every Round attaches trails to all cluster bits too."
+            />
+            <div className="grid grid-cols-2 gap-1 rounded-xl border border-stone-200 bg-stone-100 p-1 dark:border-stone-800 dark:bg-stone-950/60">
+              {(
+                [
+                  { id: 'main', label: 'Main Projectile' },
+                  { id: 'all', label: 'Every Round & Cluster Bits' },
+                ] as const
+              ).map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => update({ target: option.id })}
+                  className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    ribbon.target === option.id
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-white'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Live Action Canvas Column */}
+        <RibbonTrailPreview config={ribbon} />
       </div>
     </div>
   );
 }
 
-interface NumberFieldProps {
+interface BurstNumFieldProps {
   id: string;
   label: string;
+  code: string;
   hint: string;
   value: number;
   min: number;
   max: number;
   step: number;
+  unit?: string;
   onChange: (value: number) => void;
 }
 
-function NumberField({ id, label, hint, value, min, max, step, onChange }: NumberFieldProps) {
+function BurstNumField({
+  id,
+  label,
+  code,
+  hint,
+  value,
+  min,
+  max,
+  step,
+  unit,
+  onChange,
+}: BurstNumFieldProps) {
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between gap-1">
-        <label htmlFor={id} className={`${labelClass} truncate`} title={hint}>
-          {label}
-        </label>
-        {hint && (
-          <span className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-help shrink-0" title={hint}>
-            <HelpCircle className="w-3 h-3" />
-          </span>
-        )}
-      </div>
-      <NumberInput
+    <div>
+      <TooltipLabel label={label} code={code} desc={hint} htmlFor={id} />
+      <UnitNumberInput
         id={id}
         min={min}
         max={max}
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className={inputClass}
+        title={buildTooltip(hint, code)}
+        unit={unit}
       />
     </div>
   );
 }
 
-/**
- * The effects SDK's `px_effects` burst — the electric mine's explosion. In
- * `effect` mode the claim keeps WA's blast and only draws on top of it; in
- * `blast` mode the record's own blast is zeroed and `custom_explosion` supplies
- * damage, push, crater and sound before drawing the same burst.
- */
 export function ExplosionEffectCard({ project, onChange }: CardProps) {
   if (!supportsExplosionEffect(project)) return null;
   const fx: ExplosionEffectConfig = project.explosionEffect ?? DEFAULT_EXPLOSION_EFFECT;
@@ -329,220 +342,115 @@ export function ExplosionEffectCard({ project, onChange }: CardProps) {
     onChange({ explosionEffect: { ...fx, ...patch } });
   };
   const customOnExplode =
-    !!project.enableCustomLua &&
-    /^\s*on_explode\s*=/m.test(project.customLuaSnippet || '');
+    !!project.enableCustomLua && /^\s*on_explode\s*=/m.test(project.customLuaSnippet || '');
   const soundMode = typeof fx.sound === 'number' ? 'id' : fx.sound;
 
   return (
-    <div className={cardClass}>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 dark:border-stone-700/80 pb-2.5">
-        <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-forge-500" />
-          Explosion Burst (`wf-lib/effects/px_effects`)
-        </span>
-        <label className="flex items-center gap-1.5 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={fx.enabled}
-            onChange={(e) => update({ enabled: e.target.checked })}
-            className="rounded text-forge-600 focus:ring-forge-500 w-3.5 h-3.5"
-          />
-          <span className="text-xs font-semibold text-stone-700 dark:text-stone-300">Enable</span>
-        </label>
-      </div>
-
-      <p className="text-[11px] text-stone-500 dark:text-stone-400">
-        Project X's explosion ring and squashed lens, drawn from a claim `on_explode` hook. Adds
-        `effects.sdk` and registers the SDK's beam, glow (and optional cloud) sheets on this weapon.
-        A mine is a `drop` record without a fuse; both families use the same hook.
-      </p>
+    <div className="space-y-5">
+      <SectionHeader
+        title="Explosion Burst"
+        code="wf-lib/effects/px_effects (effects.sdk)"
+        icon={<Sparkles className="h-4 w-4 text-amber-500" aria-hidden="true" />}
+        desc="Shockwave ring and squashed lens rendered from on_explode using beam, beam_glow, and optional smoke sheets."
+        right={
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-1.5 dark:border-amber-800/70 dark:bg-amber-950/30">
+            <input
+              type="checkbox"
+              checked={fx.enabled}
+              onChange={(e) => update({ enabled: e.target.checked })}
+              className="h-3.5 w-3.5 cursor-pointer rounded text-forge-600 focus:ring-forge-500"
+            />
+            <span className="text-xs font-semibold text-amber-900 dark:text-amber-200">
+              Enable Burst
+            </span>
+          </label>
+        }
+      />
 
       {customOnExplode && (
-        <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-300 dark:border-amber-800/70 bg-amber-50 dark:bg-amber-950/30 text-[11px] text-amber-900 dark:text-amber-200">
-          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50/70 p-3 text-[11px] text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <p>
-            A custom Lua <code className="font-mono">on_explode</code> is enabled on the Lua
-            Callbacks tab. Two `on_explode` keys would not compile, so the custom hook wins and this
-            burst is not emitted. Disable one of the two.
+            Custom Lua defines <code className="font-mono">on_explode</code> on the Record page.
+            The custom snippet wins on export unless disabled.
           </p>
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="space-y-3">
-          {/* Native blast: what the record's own blast does, and what the SDK
-              does instead when it replaces it. */}
-          <div className="rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/40 p-2.5 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className={labelClass}>Native blast</span>
-              <code className="text-[10px] font-mono text-stone-500 dark:text-stone-400">
-                {fx.mode === 'blast' ? 'explosion.power = 0' : 'record blast kept'}
-              </code>
-            </div>
-            <div className="grid grid-cols-2 gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-lg border border-stone-200 dark:border-stone-700 text-xs">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
+        <div className="space-y-4">
+          {/* Blast Integration Mode */}
+          <div>
+            <TooltipLabel
+              label="Blast Mode"
+              code="custom_explosion / on_explode"
+              desc="Layer Over Game Blast keeps the native WA crater/damage. Replace Game Blast zeros record damage and deals damage, knockback, crater, and sound through custom_explosion."
+            />
+            <div className="grid grid-cols-2 gap-1 rounded-xl border border-stone-200 bg-stone-100 p-1 dark:border-stone-800 dark:bg-stone-950/60">
               {(
                 [
-                  { id: 'effect', label: 'Keep WA blast' },
-                  { id: 'blast', label: 'Replace WA blast' },
+                  { id: 'effect', label: 'Layer Over Game Blast' },
+                  { id: 'blast', label: 'Replace Game Blast' },
                 ] as const
               ).map((option) => (
                 <button
                   key={option.id}
                   type="button"
                   onClick={() => update({ mode: option.id })}
-                  className={`py-1.5 font-medium rounded-md transition-colors ${
+                  className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     fx.mode === option.id
-                      ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-bold'
-                      : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                      ? option.id === 'blast'
+                        ? 'bg-forge-600 text-white shadow-xs'
+                        : 'bg-sky-600 text-white shadow-xs'
+                      : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-white'
                   }`}
                 >
                   {option.label}
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-stone-500 dark:text-stone-400">
-              {fx.mode === 'blast'
-                ? 'The record blast is silenced (power and push 0) and the SDK supplies the damage, push, crater and sound. Only this mode can change the hit kind.'
-                : 'WA blasts normally: the record keeps its damage, push and crater and the burst is drawn on top at the same point. The damage controls below do not apply.'}
-            </p>
-
-            {fx.mode === 'blast' && (
-              <>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 pt-0.5">
-                  <NumberField
-                    id="explosion-damage"
-                    label="Damage (`damage`)"
-                    hint="Blast damage. The effect radius follows it when left at the preset's formula."
-                    value={fx.damage}
-                    min={0}
-                    max={200}
-                    step={1}
-                    onChange={(damage) => update({ damage })}
-                  />
-                  <NumberField
-                    id="explosion-push"
-                    label="Push (`push`)"
-                    hint="Knockback percent."
-                    value={fx.push}
-                    min={0}
-                    max={400}
-                    step={1}
-                    onChange={(push) => update({ push })}
-                  />
-                  <NumberField
-                    id="explosion-hole"
-                    label="Crater (`hole`)"
-                    hint="0 leaves the terrain."
-                    value={fx.hole}
-                    min={0}
-                    max={200}
-                    step={1}
-                    onChange={(hole) => update({ hole })}
-                  />
-                  <div className="space-y-1">
-                    <label htmlFor="explosion-sound" className={labelClass}>
-                      Sound (`sound`)
-                    </label>
-                    <select
-                      id="explosion-sound"
-                      value={soundMode}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (value === 'default' || value === 'none') update({ sound: value });
-                        else update({ sound: typeof fx.sound === 'number' ? fx.sound : 69 });
-                      }}
-                      className={inputClass}
-                    >
-                      <option value="default">PX random 69–71</option>
-                      <option value="none">Silent</option>
-                      <option value="id">Sound id…</option>
-                    </select>
-                    {soundMode === 'id' && (
-                      <NumberInput
-                        aria-label="Explosion sound id"
-                        min={0}
-                        value={typeof fx.sound === 'number' ? fx.sound : 69}
-                        onChange={(e) => update({ sound: Number(e.target.value) })}
-                        className={inputClass}
-                      />
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <span className={labelClass}>Damage type (`kind`)</span>
-                  <div className="grid grid-cols-2 gap-1 p-1 bg-stone-100 dark:bg-stone-800 rounded-lg border border-stone-200 dark:border-stone-700 text-xs">
-                    {(
-                      [
-                        { id: 'blast', label: 'Explosive' },
-                        { id: 'electric', label: 'Electrical (taze)' },
-                      ] as const
-                    ).map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        title={
-                          option.id === 'electric'
-                            ? 'Sends the scripted `taze` kind: WA still takes a Prod hit with the same damage, but `wa.on.hit` handlers and PX-style electric weapons read it as electric, and an oil drum goes off at once instead of burning.'
-                            : 'Sends a plain blast hit.'
-                        }
-                        onClick={() => update({ damageType: option.id })}
-                        className={`py-1.5 font-medium rounded-md transition-colors ${
-                          (fx.damageType ?? 'blast') === option.id
-                            ? 'bg-white dark:bg-stone-900 text-stone-900 dark:text-white shadow-xs font-bold'
-                            : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-[10px] text-stone-500 dark:text-stone-400">
-                    {(fx.damageType ?? 'blast') === 'electric'
-                      ? 'The blast sends `kind = "taze"`. WA takes it as a Prod hit, so the damage and push above are unchanged; what differs is the hit kind scripts and electric weapons read.'
-                      : 'The blast sends a plain hit. Pair the Electric damage type with the Electric preset for PX’s electric-mine look.'}
-                  </p>
-                </div>
-              </>
-            )}
           </div>
 
-          <div className="flex flex-wrap gap-1.5 items-center">
-            <span className="text-[10px] text-stone-400 font-medium mr-1 uppercase">Presets:</span>
+          {/* Presets */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+              Presets:
+            </span>
             {(Object.keys(EXPLOSION_PRESETS) as ExplosionPreset[]).map((preset) => (
               <button
                 key={preset}
                 type="button"
                 title={EXPLOSION_PRESETS[preset].hint}
                 onClick={() => update({ ...EXPLOSION_PRESETS[preset].patch, preset })}
-                className={`px-2 py-1 text-[11px] rounded border font-medium transition-colors ${
+                className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   fx.preset === preset
-                    ? 'bg-forge-600 text-white border-forge-600'
-                    : 'bg-white dark:bg-stone-800 border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300'
+                    ? preset === 'ember'
+                      ? 'border-amber-600 bg-amber-600 text-white'
+                      : 'border-sky-600 bg-sky-600 text-white'
+                    : 'border-stone-200 bg-white text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700'
                 }`}
               >
                 {EXPLOSION_PRESETS[preset].label}
               </button>
             ))}
-            <span className="text-[10px] text-stone-400">
-              {fx.preset === 'custom'
-                ? 'Custom numbers'
-                : EXPLOSION_PRESETS[fx.preset as ExplosionPreset]?.hint}
-            </span>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <label htmlFor="explosion-color" className={labelClass}>
-                Colour (`r`, `g`, `b`)
-              </label>
-              <div className="flex items-center gap-2">
+          {/* Core Burst Geometry & Timing */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div>
+              <TooltipLabel
+                label="Ring Colour"
+                code="r, g, b"
+                desc="RGB tint for the shockwave ring, lens flare, and optional smoke."
+                htmlFor="explosion-color"
+              />
+              <div className="flex items-center gap-1.5">
                 <input
                   id="explosion-color"
                   type="color"
                   value={/^#[0-9a-fA-F]{6}$/.test(fx.color) ? fx.color : '#6496dc'}
                   onChange={(e) => update({ color: e.target.value, preset: 'custom' })}
-                  className="h-8 w-10 rounded border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 cursor-pointer"
+                  className="h-8 w-9 shrink-0 cursor-pointer rounded-lg border border-stone-200 bg-white p-0.5 dark:border-stone-700 dark:bg-stone-900"
                 />
                 <input
                   aria-label="Explosion colour hex"
@@ -554,155 +462,255 @@ export function ExplosionEffectCard({ project, onChange }: CardProps) {
                 />
               </div>
             </div>
-            <NumberField
+
+            <BurstNumField
               id="explosion-radius"
-              label="Radius (`radius`)"
-              hint="Game pixels before growth. PX's custom explosion uses (damage + 2) × 2, so a 45-damage blast is 94 px."
+              label="Base Radius"
+              code="radius"
+              hint="Initial ring radius in game pixels before growth. PX custom blast formula is (damage + 2) × 2."
               value={fx.radius}
               min={1}
               max={400}
               step={1}
+              unit="px"
               onChange={(radius) => update({ radius, preset: 'custom' })}
             />
-            <NumberField
+            <BurstNumField
               id="explosion-thickness"
-              label="Thickness (`thickness`)"
-              hint="Beam width of the ring: the glow pass, and the core when no sharpness is set."
+              label="Glow Thickness"
+              code="thickness"
+              hint="Width of the outer halo glow pass in pixels."
               value={fx.thickness}
               min={0.5}
               max={80}
               step={0.5}
+              unit="px"
               onChange={(thickness) => update({ thickness, preset: 'custom' })}
             />
-            <NumberField
+            <BurstNumField
               id="explosion-core"
-              label="Sharpness (`core`)"
-              hint="Sharp core pass width in game pixels. 0 derives it from the thickness (0.9 ×, as the SDK does); the floor is 2.5 px, below which the beam's bright band stops reading as a line."
+              label="Core Sharpness"
+              code="core"
+              hint="Inner bright core line width in pixels (0 derives 0.9× from thickness; 2.5px floor)."
               value={fx.core ?? 0}
               min={0}
               max={80}
               step={0.5}
+              unit="px"
               onChange={(core) => update({ core, preset: 'custom' })}
             />
-            <NumberField
+            <BurstNumField
               id="explosion-noise"
-              label="Noise (`noise`)"
-              hint="0 is a clean circle."
+              label="Jagged Noise"
+              code="noise"
+              hint="Vertex jitter intensity around the ring (0 = smooth circle)."
               value={fx.noise}
               min={0}
               max={4}
               step={0.05}
               onChange={(noise) => update({ noise, preset: 'custom' })}
             />
-            <NumberField
+            <BurstNumField
               id="explosion-duration"
-              label="Duration (`duration`)"
-              hint="Frames to fade out."
+              label="Fade Duration"
+              code="duration"
+              hint="Target fade curve denominator in frames."
               value={fx.duration}
               min={1}
               max={120}
               step={1}
+              unit="f"
               onChange={(duration) => update({ duration, preset: 'custom' })}
             />
-            <NumberField
+            <BurstNumField
               id="explosion-fade"
-              label="Fade step (`fade`)"
-              hint="Envelope lost per frame."
+              label="Fade Step"
+              code="fade"
+              hint="Envelope step consumed each game frame."
               value={fx.fade}
               min={-2}
               max={2}
               step={0.05}
               onChange={(fade) => update({ fade, preset: 'custom' })}
             />
-            <NumberField
+            <BurstNumField
               id="explosion-grow"
-              label="Grow (`grow`)"
-              hint="Radius gain over the fade."
+              label="Growth Scale"
+              code="grow"
+              hint="Outward expansion multiplier across the fade duration."
               value={fx.grow}
               min={0}
               max={10}
               step={0.1}
+              unit="×"
               onChange={(grow) => update({ grow, preset: 'custom' })}
             />
-            <NumberField
+            <BurstNumField
               id="explosion-live"
-              label="Live (`live`)"
-              hint="Frames the effect exists."
+              label="Effect Lifetime"
+              code="live"
+              hint="Total frames the shockwave exists at 50 Hz."
               value={fx.live}
               min={1}
               max={120}
               step={1}
+              unit="f"
               onChange={(live) => update({ live, preset: 'custom' })}
             />
-            <NumberField
+            <BurstNumField
               id="explosion-segments"
-              label="Segments (`segments`)"
-              hint="0 = radius × 1.2."
+              label="Polygon Sides"
+              code="segments"
+              hint="Number of ring polygon edges (0 auto-computes radius × 1.2)."
               value={fx.segments}
               min={0}
               max={255}
               step={1}
               onChange={(segments) => update({ segments, preset: 'custom' })}
             />
-            <NumberField
+            <BurstNumField
               id="explosion-ellipse-x"
-              label="Ellipse X (`ellipse[1]`)"
-              hint="Lens width multiplier."
+              label="Lens Width Scale"
+              code="ellipse[1]"
+              hint="Horizontal multiplier on the squashed inner lens flare."
               value={fx.ellipseX}
               min={0.1}
               max={4}
               step={0.05}
+              unit="×"
               onChange={(ellipseX) => update({ ellipseX, preset: 'custom' })}
             />
-            <NumberField
+            <BurstNumField
               id="explosion-ellipse-y"
-              label="Ellipse Y (`ellipse[2]`)"
-              hint="1 / 1 keeps it a circle."
+              label="Lens Height Scale"
+              code="ellipse[2]"
+              hint="Vertical multiplier on the inner lens flare (1 / 1 is a circle)."
               value={fx.ellipseY}
               min={0.1}
               max={4}
               step={0.05}
+              unit="×"
               onChange={(ellipseY) => update({ ellipseY, preset: 'custom' })}
             />
           </div>
 
+          {/* Flags */}
           <div className="flex flex-wrap gap-4 pt-1">
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-stone-700 dark:text-stone-300">
+            <label
+              title={buildTooltip('Spawns tinted smoke puffs underneath the shockwave ring.', 'fx.SMOKE')}
+              className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-stone-700 dark:text-stone-300"
+            >
               <input
                 type="checkbox"
                 checked={fx.smoke}
                 onChange={(e) => update({ smoke: e.target.checked, preset: 'custom' })}
-                className="rounded text-forge-600 focus:ring-forge-500 w-3.5 h-3.5"
+                className="h-3.5 w-3.5 rounded text-forge-600 focus:ring-forge-500"
               />
-              Smoke puff (`fx.SMOKE`)
+              <span>Add Smoke Cloud</span>
             </label>
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-stone-700 dark:text-stone-300">
+            <label
+              title={buildTooltip('Re-noises and reverses fade envelope at frame 16 (electric mine flash).', 'rebuffer')}
+              className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-stone-700 dark:text-stone-300"
+            >
               <input
                 type="checkbox"
                 checked={fx.rebuffer}
                 onChange={(e) => update({ rebuffer: e.target.checked, preset: 'custom' })}
-                className="rounded text-forge-600 focus:ring-forge-500 w-3.5 h-3.5"
+                className="h-3.5 w-3.5 rounded text-forge-600 focus:ring-forge-500"
               />
-              Re-buffer at frame 16
+              <span>Frame-16 Second Pulse</span>
             </label>
           </div>
 
+          {/* Custom Damage / Crater overrides when Replace Game Blast is selected */}
+          {fx.mode === 'blast' && (
+            <div className="space-y-3 border-t border-stone-200/80 pt-3.5 dark:border-stone-800">
+              <SubSectionTitle
+                title="Custom Explosion Hit Values"
+                code="custom_explosion"
+                desc="Applied directly when Replace Game Blast mode is active."
+              />
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <BurstNumField
+                  id="explosion-damage"
+                  label="Blast Damage"
+                  code="damage"
+                  hint="Maximum damage dealt by custom_explosion."
+                  value={fx.damage}
+                  min={0}
+                  max={200}
+                  step={1}
+                  unit="dmg"
+                  onChange={(damage) => update({ damage })}
+                />
+                <BurstNumField
+                  id="explosion-push"
+                  label="Knockback"
+                  code="push"
+                  hint="Push force percentage applied to nearby worms."
+                  value={fx.push}
+                  min={0}
+                  max={400}
+                  step={1}
+                  unit="%"
+                  onChange={(push) => update({ push })}
+                />
+                <BurstNumField
+                  id="explosion-hole"
+                  label="Crater Radius"
+                  code="hole"
+                  hint="Terrain crater cut radius in pixels (0 leaves terrain intact)."
+                  value={fx.hole}
+                  min={0}
+                  max={200}
+                  step={1}
+                  unit="px"
+                  onChange={(hole) => update({ hole })}
+                />
+                <div className="space-y-1">
+                  <TooltipLabel
+                    label="Blast Sound"
+                    code="sound"
+                    desc="Native sound played by custom_explosion unless overridden by a custom WAV."
+                    htmlFor="explosion-sound"
+                  />
+                  <select
+                    id="explosion-sound"
+                    value={soundMode}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === 'default' || value === 'none') update({ sound: value });
+                      else update({ sound: typeof fx.sound === 'number' ? fx.sound : 69 });
+                    }}
+                    className={selectClass}
+                  >
+                    <option value="default">PX Random 69–71</option>
+                    <option value="none">Silent</option>
+                    <option value="id">Sound ID…</option>
+                  </select>
+                  {soundMode === 'id' && (
+                    <NumberInput
+                      aria-label="Explosion sound id"
+                      min={0}
+                      value={typeof fx.sound === 'number' ? fx.sound : 69}
+                      onChange={(e) => update({ sound: Number(e.target.value) })}
+                      className={inputClass}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="space-y-2">
-          <ExplosionPreview config={fx} />
-          <p className="text-[10px] text-stone-400">
-            The ring grows by `grow`, fades over `duration` and (when re-buffered) re-noises and
-            recolours at frame 16. The squashed lens uses the `ellipse` pair, exactly as PX's
-            electric explosion does.
-          </p>
-        </div>
+        {/* Live 50 Hz Preview */}
+        <ExplosionPreview config={fx} />
       </div>
     </div>
   );
 }
 
-/** WormForge's custom sample bank takes up to 32 MiB per WAV. */
+/** WormForge's custom sample bank caps one PCM WAV at 32 MiB. */
 const MAX_WAV_BYTES = 32 * 1024 * 1024;
 
 interface SoundUploadProps {
@@ -713,7 +721,7 @@ interface SoundUploadProps {
   onRemove: () => void;
 }
 
-/** One WAV slot: a validated upload, its name/size and an `<audio>` preview. */
+/** One WAV slot: validated PCM WAV upload, filename readout, and audio player. */
 export function SoundUpload({ id, asset, disabled, onPick, onRemove }: SoundUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -722,11 +730,11 @@ export function SoundUpload({ id, asset, disabled, onPick, onRemove }: SoundUplo
     const file = files?.[0];
     if (!file) return;
     if (!/\.wav$/i.test(file.name)) {
-      setError('Use a .wav file — WormForge loads PCM WAVs only (convert MP3 first).');
+      setError('Use a .wav file — WormForge loads PCM WAVs only.');
       return;
     }
     if (file.size > MAX_WAV_BYTES) {
-      setError(`That WAV is ${(file.size / 1024 / 1024).toFixed(1)} MiB; the engine caps one file at 32 MiB.`);
+      setError(`WAV is ${(file.size / 1024 / 1024).toFixed(1)} MiB; max 32 MiB per file.`);
       return;
     }
     setError(null);
@@ -764,21 +772,22 @@ export function SoundUpload({ id, asset, disabled, onPick, onRemove }: SoundUplo
           type="button"
           disabled={disabled}
           onClick={() => inputRef.current?.click()}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          title="Mono or stereo 8/16-bit PCM WAV exported under sounds/<mod_folder>/."
+          className="inline-flex items-center gap-1.5 rounded-lg border border-sky-300/80 bg-sky-50/75 px-2.5 py-1.5 text-[11px] font-semibold text-sky-900 transition-colors hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-sky-700/60 dark:bg-sky-950/30 dark:text-sky-200 dark:hover:bg-sky-900/40 whitespace-nowrap shrink-0 cursor-pointer"
         >
-          <Volume2 className="w-3.5 h-3.5" />
-          {asset?.file ? 'Replace WAV' : 'Upload WAV'}
+          <Volume2 className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" aria-hidden="true" />
+          <span>{asset?.file ? 'Replace WAV' : 'Upload WAV'}</span>
         </button>
         {asset?.file && (
           <>
-            <span className="font-mono text-[10px] text-stone-500 dark:text-stone-400 truncate max-w-[220px]">
+            <span className="max-w-[200px] truncate font-mono text-[10px] text-stone-500 dark:text-stone-400">
               {asset.fileName}
               {asset.size ? ` · ${(asset.size / 1024).toFixed(0)} KiB` : ''}
             </span>
             <button
               type="button"
               onClick={remove}
-              className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 hover:underline"
+              className="text-[11px] font-semibold text-forge-600 hover:underline dark:text-forge-400 cursor-pointer"
             >
               Remove
             </button>
@@ -794,26 +803,11 @@ export function SoundUpload({ id, asset, disabled, onPick, onRemove }: SoundUplo
           className="h-8 w-full max-w-sm"
         />
       )}
-      {error && <p className="text-[10px] text-rose-600 dark:text-rose-400">{error}</p>}
-      {!asset?.file && !error && (
-        <p className="text-[10px] text-stone-400">
-          Mono/stereo 8/16-bit PCM WAV. Written to `sounds/&lt;mod folder&gt;/` in the ZIP.
-        </p>
-      )}
+      {error && <p className="text-[11px] text-forge-600 dark:text-forge-400">{error}</p>}
     </div>
   );
 }
 
-/**
- * Pack WAVs played with `wa.sound.play`. WA's record sound fields are native
- * sample ids, so the only way to use an imported WAV is to declare it in the
- * claim's `sounds` list and play it by path.
- *
- * - On explosion: `on_explode` (the same hook as the burst), on the firing worm.
- * - Interval: ticked from `wa.on.missile_frame`. Lua has no handle to a flying
- *   missile's emitter, so the firing worm (whose turn it is) plays it; the voice
- *   is therefore positioned at the worm, not the round.
- */
 export function CustomSoundsCard({ project, onChange }: CardProps) {
   const sounds: CustomSoundsConfig = project.customSounds ?? DEFAULT_CUSTOM_SOUNDS;
   const update = (patch: Partial<CustomSoundsConfig>) =>
@@ -825,48 +819,43 @@ export function CustomSoundsCard({ project, onChange }: CardProps) {
     !!project.enableCustomLua && /^\s*on_explode\s*=/m.test(project.customLuaSnippet || '');
 
   return (
-    <div className={cardClass}>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 dark:border-stone-700/80 pb-2.5">
-        <span className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide flex items-center gap-2">
-          <Volume2 className="w-4 h-4 text-forge-500" />
-          Custom Sounds (`sounds`, `wa.sound.play`)
-        </span>
-        <span className="font-mono text-[10px] text-stone-400">WAV · custom bank</span>
-      </div>
+    <div className="space-y-5">
+      <SectionHeader
+        title="Custom WAV Audio"
+        code="sounds / wa.sound.play"
+        icon={<Volume2 className="h-4 w-4 text-sky-500" aria-hidden="true" />}
+        desc="Import custom PCM WAV files declared in the mod's sounds list and played via wa.sound.play without using native WA sample slots."
+      />
 
-      <p className="text-[11px] text-stone-500 dark:text-stone-400">
-        The record&apos;s sound fields are WA&apos;s own sample ids, so an imported WAV cannot go
-        there. The exporter writes it under `sounds/&lt;mod folder&gt;/` and the claim declares it in
-        `sounds`; Lua plays it by path, without using one of WA&apos;s 49 spare sample slots.
-        Identical files share one voice and higher priorities cut lower ones.
-      </p>
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="p-4 rounded-lg border border-stone-200 dark:border-stone-700 bg-white/60 dark:bg-stone-900/40 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-bold text-stone-800 dark:text-stone-200">
-              On explosion (`on_explode`)
-            </span>
-            <label className="flex items-center gap-1.5 cursor-pointer">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+        {/* On Detonation */}
+        <div className="space-y-3.5 rounded-xl bg-stone-50/70 p-4 dark:bg-stone-950/40">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200/80 pb-2.5 dark:border-stone-800">
+            <SubSectionTitle
+              title="On Detonation"
+              code="on_explode"
+              desc="Plays on the firing worm right before blast execution. Silences random PX blast sound when Replace Game Blast is active."
+            />
+            <label className="flex cursor-pointer items-center gap-1.5">
               <input
                 type="checkbox"
                 checked={sounds.explosionEnabled}
                 disabled={!canExplode}
                 onChange={(e) => update({ explosionEnabled: e.target.checked })}
-                className="rounded text-forge-600 focus:ring-forge-500 w-3.5 h-3.5"
+                className="h-3.5 w-3.5 rounded text-forge-600 focus:ring-forge-500"
               />
-              <span className="text-[11px] font-semibold text-stone-700 dark:text-stone-300">
+              <span className="text-xs font-semibold text-stone-700 dark:text-stone-300">
                 Enable
               </span>
             </label>
           </div>
 
           {!canExplode ? (
-            <p className="text-[11px] text-stone-400">
-              This family has no native blast, so `on_explode` never runs.
+            <p className="text-xs text-stone-500">
+              This weapon type has no detonation hook.
             </p>
           ) : (
-            <>
+            <div className="space-y-3">
               <SoundUpload
                 id="sound-explosion"
                 asset={sounds.explosion}
@@ -874,15 +863,18 @@ export function CustomSoundsCard({ project, onChange }: CardProps) {
                 onPick={(asset) => update({ explosion: asset, explosionEnabled: true })}
                 onRemove={() => update({ explosion: undefined, explosionEnabled: false })}
               />
-              <div className="space-y-1">
-                <label htmlFor="sound-explosion-priority" className={labelClass}>
-                  Priority
-                </label>
+              <div>
+                <TooltipLabel
+                  label="Voice Priority"
+                  code="priority"
+                  desc="Higher priorities interrupt lower-priority sounds if the engine voice pool is full."
+                  htmlFor="sound-explosion-priority"
+                />
                 <select
                   id="sound-explosion-priority"
                   value={sounds.explosionPriority}
                   onChange={(e) => update({ explosionPriority: Number(e.target.value) })}
-                  className={inputClass}
+                  className={selectClass}
                 >
                   {SOUND_PRIORITIES.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -890,52 +882,44 @@ export function CustomSoundsCard({ project, onChange }: CardProps) {
                     </option>
                   ))}
                 </select>
-                <p className="text-[10px] text-stone-400">
-                  Played on the firing worm (`ev.worm`), before WA&apos;s own blast. In{' '}
-                  <strong>Replace WA blast</strong> mode above it also silences the SDK&apos;s random
-                  blast sound.
-                </p>
               </div>
-
               {customOnExplode && (
-                <div className="flex items-start gap-2 p-2.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-100/60 dark:bg-stone-800/40 text-[11px] text-stone-700 dark:text-stone-300">
-                  <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-forge-500" />
-                  <p>
-                    Your custom Lua `on_explode` hook is automatically merged with this explosion sound
-                    and any visual burst into a single unified callback.
-                  </p>
-                </div>
+                <p className="text-[11px] text-sky-700 dark:text-sky-300">
+                  Merged automatically into your custom Lua <code className="font-mono">on_explode</code> hook.
+                </p>
               )}
-            </>
+            </div>
           )}
         </div>
 
-        <div className="p-4 rounded-lg border border-stone-200 dark:border-stone-700 bg-white/60 dark:bg-stone-900/40 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-bold text-stone-800 dark:text-stone-200">
-              On an interval (`wa.on.missile_frame`)
-            </span>
-            <label className="flex items-center gap-1.5 cursor-pointer">
+        {/* In-Flight Interval Sound */}
+        <div className="space-y-3.5 rounded-xl bg-stone-50/70 p-4 dark:bg-stone-950/40">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200/80 pb-2.5 dark:border-stone-800">
+            <SubSectionTitle
+              title="In-Flight Repeat"
+              code="wa.on.missile_frame"
+              desc="Plays a repeating WAV while airborne on the firing worm's voice emitter. Placed proximity mines have no flight frames."
+            />
+            <label className="flex cursor-pointer items-center gap-1.5">
               <input
                 type="checkbox"
                 checked={sounds.intervalEnabled}
                 disabled={!canInterval}
                 onChange={(e) => update({ intervalEnabled: e.target.checked })}
-                className="rounded text-forge-600 focus:ring-forge-500 w-3.5 h-3.5"
+                className="h-3.5 w-3.5 rounded text-forge-600 focus:ring-forge-500"
               />
-              <span className="text-[11px] font-semibold text-stone-700 dark:text-stone-300">
+              <span className="text-xs font-semibold text-stone-700 dark:text-stone-300">
                 Enable
               </span>
             </label>
           </div>
 
           {!canInterval ? (
-            <p className="text-[11px] text-stone-400">
-              Only a fired or thrown round (a missile family) gives `wa.on.missile_frame` samples. A
-              placed mine has no flight frames.
+            <p className="text-xs text-stone-500">
+              Only airborne projectiles fire flight frame callbacks (switch dropped weapons to Timed Dynamite to enable).
             </p>
           ) : (
-            <>
+            <div className="space-y-3">
               <SoundUpload
                 id="sound-interval"
                 asset={sounds.interval}
@@ -943,8 +927,11 @@ export function CustomSoundsCard({ project, onChange }: CardProps) {
                 onPick={(asset) => update({ interval: asset, intervalEnabled: true })}
                 onRemove={() => update({ interval: undefined, intervalEnabled: false })}
               />
-              <div className="flex flex-wrap gap-1.5 items-center">
-                <span className="text-[10px] text-stone-400 font-medium mr-1 uppercase">Presets:</span>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wide text-stone-400">
+                  Presets:
+                </span>
                 {INTERVAL_PRESETS.map((preset) => (
                   <button
                     key={preset.label}
@@ -956,52 +943,76 @@ export function CustomSoundsCard({ project, onChange }: CardProps) {
                         intervalLimit: preset.limit,
                       })
                     }
-                    className="px-2 py-1 text-[11px] rounded bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 font-medium"
+                    className="rounded-md border border-amber-200 bg-amber-50/75 px-2 py-1 text-[11px] font-semibold text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200 dark:hover:bg-amber-900/40 whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     {preset.label}
                   </button>
                 ))}
               </div>
+
               <div className="grid grid-cols-2 gap-3">
-                <NumberField
-                  id="sound-interval-ms"
-                  label="Every (ms)"
-                  hint={`${Math.max(1, Math.round(sounds.intervalMs / 20))} game frames at 50 Hz.`}
-                  value={sounds.intervalMs}
-                  min={20}
-                  max={5000}
-                  step={10}
-                  onChange={(intervalMs) => update({ intervalMs })}
-                />
-                <NumberField
-                  id="sound-interval-delay"
-                  label="Delay (ms)"
-                  hint="Before the first play."
-                  value={sounds.intervalDelayMs}
-                  min={0}
-                  max={10000}
-                  step={20}
-                  onChange={(intervalDelayMs) => update({ intervalDelayMs })}
-                />
-                <NumberField
-                  id="sound-interval-limit"
-                  label="Plays"
-                  hint="0 keeps it going for the whole flight."
-                  value={sounds.intervalLimit}
-                  min={0}
-                  max={50}
-                  step={1}
-                  onChange={(intervalLimit) => update({ intervalLimit })}
-                />
-                <div className="space-y-1">
-                  <label htmlFor="sound-interval-priority" className={labelClass}>
-                    Priority
-                  </label>
+                <div>
+                  <TooltipLabel
+                    label="Repeat Interval"
+                    code="every"
+                    desc={`${Math.max(1, Math.round(sounds.intervalMs / 20))} game frames at 50 Hz between sound plays.`}
+                    htmlFor="sound-interval-ms"
+                  />
+                  <UnitNumberInput
+                    id="sound-interval-ms"
+                    min={20}
+                    max={5000}
+                    step={10}
+                    value={sounds.intervalMs}
+                    onChange={(e) => update({ intervalMs: Number(e.target.value) })}
+                    unit="ms"
+                  />
+                </div>
+                <div>
+                  <TooltipLabel
+                    label="Initial Delay"
+                    code="delay"
+                    desc="Milliseconds after launch before the first repeat plays."
+                    htmlFor="sound-interval-delay"
+                  />
+                  <UnitNumberInput
+                    id="sound-interval-delay"
+                    min={0}
+                    max={10000}
+                    step={20}
+                    value={sounds.intervalDelayMs}
+                    onChange={(e) => update({ intervalDelayMs: Number(e.target.value) })}
+                    unit="ms"
+                  />
+                </div>
+                <div>
+                  <TooltipLabel
+                    label="Max Plays"
+                    code="limit"
+                    desc="Maximum repeat count (0 plays continuously while airborne)."
+                    htmlFor="sound-interval-limit"
+                  />
+                  <NumberInput
+                    id="sound-interval-limit"
+                    min={0}
+                    max={50}
+                    value={sounds.intervalLimit}
+                    onChange={(e) => update({ intervalLimit: Number(e.target.value) })}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <TooltipLabel
+                    label="Voice Priority"
+                    code="priority"
+                    desc="Higher priorities interrupt lower-priority sounds if the engine voice pool is full."
+                    htmlFor="sound-interval-priority"
+                  />
                   <select
                     id="sound-interval-priority"
                     value={sounds.intervalPriority}
                     onChange={(e) => update({ intervalPriority: Number(e.target.value) })}
-                    className={inputClass}
+                    className={selectClass}
                   >
                     {SOUND_PRIORITIES.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -1011,15 +1022,7 @@ export function CustomSoundsCard({ project, onChange }: CardProps) {
                   </select>
                 </div>
               </div>
-              <div className="flex items-start gap-2 p-2.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-100/60 dark:bg-stone-800/40 text-[10px] text-stone-500 dark:text-stone-400">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                <p>
-                  WA gives Lua no handle to a flying missile&apos;s emitter, so the voice plays on the
-                  worm whose turn it is (else any living worm) and is positioned there, not at the
-                  round. Cluster bits tick their own interval from `m.id`.
-                </p>
-              </div>
-            </>
+            </div>
           )}
         </div>
       </div>

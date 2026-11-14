@@ -107,39 +107,48 @@ Node 26.x, Vite 8.3.x, React 19.3.x, Tailwind 4.3.x, TypeScript 7.0.x.
 
 - `activeTab: 'editor' | 'hold' | 'effects' | 'code'` (hotkeys `1` / `2` / `3` /
   `4`, ignored while typing in an input/textarea/select);
-- `activeSubTab: RecordTabId` (the record sections, shared with the sidebar and
-  mobile `<select>`); `recordTabs.tsx` nests a section under another with
-  `parent`. Collision Bitmask sits under Missile Action, and Burst Payload owns
-  Bit Behaviour, Bit Collision and one entry per bit action (Bit Bounce/Homing/
-  Roam/Dig). The parent row still selects its own tab and a chevron opens/closes
-  the children (sidebar `openGroups`, open by default); the mobile picker
-  prefixes children with `—`.
-- The burst sub-tabs are **navigation helpers over one page**, not separate
-  views: every payload section is rendered together (selector, ejection, bit
-  behaviour, bit collision, the selected action group, fire payload), and
-  clicking a child scrolls to its `id` (`RecordEditor`'s `activeSubTab` effect).
-  `visibleRecordTabs(burst, bitAction)` in `recordTabs.tsx` hides the bit
-  sections unless the payload is clusters and an action entry unless that action
-  is selected; `bitActionOf()` is the single bit-action expression. Other tabs
-  (Flight, Action, …) stay exclusive — do not mix the two models.
+- `activeSubTab: RecordTabId` (the record sections). Since the redesign it is
+  owned by the **workbench tab bar inside `RecordEditor`** — the sidebar and the
+  mobile bar are workspace navigation only and no longer list record sections.
+  `recordTabs.tsx` defines the ids, labels, hints and icons;
+  `visibleRecordTabs(burst, bitAction, fireType, teleport, bodyFuse)` returns the
+  tab set that applies to the weapon family: projectile/dynamite and air strike
+  get Physics (or Strike & Bombs) · Missile Action · Explodes Into · Sprites &
+  Trail · Fine Tuning · Lua Script, while a mine, teleport tool, firearm, flame
+  stream, arrow or special tool gets only its own setup page plus Lua Script.
+  When the family changes, `App` moves `activeSubTab` to the first visible tab.
+- **Explodes Into owns the payload as one page with three inner views**
+  (Ejection & Bit Physics · Bit Targets · Bit Action) instead of the old
+  `burst_bit_*` sub-tabs; the selected bit action (bounce/homing/roam/dig) is
+  rendered inside the Bit Action view. `bitActionOf()` is the single bit-action
+  expression. The other tabs stay exclusive — do not mix the two models.
+- Collision targets belong to Missile Action: `Detonates On Contact` is always
+  shown, `Bounces Off` only while the action is bounce.
 - The **Effects & Libraries** workspace (`EffectsWorkspace.tsx`) is where every
-  claim hook and library bundle lives, not a record section: the ribbon trail,
-  the explosion burst with its `ExplosionPreview` canvas, the custom WAVs and
-  the sequential-fire card. It shows an empty state for families with no
-  claim-owned round or blast (guns, arrows, sprays, specials, air strikes) and a
-  "More libraries" note for anything not modelled yet. A new library gets a card
-  here instead of a record tab.
+  claim hook and library bundle lives, not a record section: the ribbon trail
+  (with its 50 Hz `RibbonTrailPreview`), the explosion burst with its
+  `ExplosionPreview` canvas, the custom WAVs and the sequential-fire card, as one
+  workbench tab bar filtered by weapon family. It shows an empty state for
+  families with no claim-owned round or blast (guns, arrows, sprays, specials,
+  air strikes) and a "More libraries" note for anything not modelled yet. A new
+  library gets a tab here instead of a record tab.
 - `isDark` with `localStorage['wf_theme_v2']`; **light is the default** unless a
   stored value says dark. `index.html` applies the stored class before paint.
 - modals: `.wep` import and the inline bundle-code view.
 
 `Sidebar.tsx` is the desktop navigation (logo, live project card with copyable
-ID, workspace buttons, record sections, import/export, theme toggle).
-`MobileBar` replaces it below `lg`. `recordTabs.tsx` is the single source of
-section ids, labels, hints and icons.
+ID, the four workspace buttons, import/export, theme toggle); `MobileBar`
+replaces it below `lg`. `recordTabs.tsx` is the single source of section ids,
+labels, hints and icons.
 
 `RecordEditor.tsx` is controlled: it receives `activeSubTab` and renders only
-that section. Do not reintroduce its old internal tab bar.
+that section, plus the workbench tab bar that selects it.
+
+Weapon identity and the five defaults live in `WeaponSettings.tsx`, rendered
+above the workbench on the record page as one **Weapon Loadout** card (icon,
+name, id, author, description · weapon type, base template, inventory slot ·
+start ammo, turn delay, crate chance, crate pool, after firing), with turn
+handling in a drawer. There is no separate `weapon` section any more.
 
 The old top `Header.tsx` and `GeminiAntigravityModal.tsx` were deleted. There is
 no Gemini/Antigravity route or `@google/genai` dependency; do not add them back.
@@ -744,16 +753,23 @@ edits the suffix only, so no id can collide with a mod the reader shows.
   control `accent-color`, reduced-motion handling and thin scrollbars.
 - **No emerald/green theme accents.** The only green left is art (e.g. the
   grenade stem). Do not reintroduce `emerald-*`/`green-*` utility classes.
+- **Three accent families carry meaning**, introduced by the redesign: `forge`
+  (the brand terracotta) for primary actions, physics and blast; `amber` for
+  action/payload states (Missile Action, Explodes Into, cursor teleport, timed
+  dynamite, import `.wep`); `sky` for art and setup (Sprites & Trail, Firearm
+  Specs, Tool & Setup, Mine Setup, Read installed mods). Workspace icons follow
+  the same split. Red (`rose`/`red-*`) is reserved for warnings and destructive
+  actions; Export is `forge-600`, not red.
 - Light mode is the default. The toggle persists `wf_theme_v2`; `index.html`
   applies it before paint and `App.tsx` keeps `theme-color` in sync.
 - Branding: `public/assets/wormforge-logo.png` (327×57 wordmark) and
   `wormforge-mark.png` (49×49, also the favicon), cropped from
   `spec/modloader_banner.png`.
-- **Weapon identity is a section of its own** (`weapon` in `recordTabs.tsx`):
-  name/id/description, fire archetype, panel slot and position, donor, icon and
-  the defaults live in `WeaponSettings.tsx` and no longer sit above every record
-  page. `App` renders `WeaponSettings` for `activeSubTab === 'weapon'` and
-  `RecordEditor` otherwise.
+- **Weapon identity is the Weapon Loadout card**, not a record section: icon,
+  name/id/description, author, fire archetype, donor, slot, position and the five
+  defaults live in `WeaponSettings.tsx`, rendered above the workbench on the
+  record page. The record sections are chosen by the workbench tab bar, not by
+  the sidebar.
 - **Tooltips are tappable** (`TooltipTap.tsx`, mounted once in `App`). Most
   explanations are `title` attributes, which a phone can never show: a tap on any
   element with a `title` opens the same text in a bubble (the attribute is moved
@@ -1129,10 +1145,19 @@ Done and validated:
   `tools/check_mod_import.ts` guarding it.
 - `px_hold_art` + `fire_seq` kept the held sheet on the repeat-fire frames, and
   the exporter now writes the `shot.wav` that `on_shot` names.
+- **Redesigned record workbench** (branch `redesign/hydrogen-port`, ported from
+  Gemini Hydrogen's mock-up): one Weapon Loadout card above a family-scoped
+  tab bar, Effects & Libraries as one filtered workbench, an in-page ribbon-trail
+  preview at 50 Hz, coloured accent families, and no record tree in the sidebar.
+  The four behaviour fixes from before the redesign were re-applied on top
+  (`NumberInput` draft boxes, the id draft, `hold`/firing tables, burst depth).
 - GitHub Pages workflow, `.gitignore`, Pages-subpath smoke test.
 
 Likely next steps:
 
+- Review the redesign in game and on a phone, then decide whether to merge the
+  branch or keep the current shell; `reqs/redesign_rebase_notes.md` still lists
+  the behaviour deltas if Hydrogen rebases instead.
 - Task 3 in `reqs/wfws_builder_findings.md`: harden `gen_test_pack.ts`
   (generated `mod.toml`/profile, distinct art per state, golden snapshots, new
   builder cases).

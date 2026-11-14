@@ -3,20 +3,17 @@ import {
   Zap,
   Sparkles,
   Sliders,
-  Layers,
-  ShieldAlert,
   Code2,
-  Cpu,
   Crosshair,
   Plane,
   Wrench,
-  Settings2,
+  Flame,
+  Navigation,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { FireType } from '../types/weapon';
 
 export type RecordTabId =
-  | 'weapon'
   | 'missile'
   | 'action'
   | 'burst'
@@ -39,41 +36,19 @@ export interface RecordTabDef {
   label: string;
   hint: string;
   icon: LucideIcon;
-  /** A sub-section of another tab: shown under it in the sidebar, indented in
-   *  the mobile picker, and ordered right after its parent in this list. */
   parent?: RecordTabId;
 }
 
-/** The record editor's sections, shared by the sidebar and the mobile nav. */
+/** Canonical definitions for every section in the Weapon Record workbench. */
 export const RECORD_TABS: RecordTabDef[] = [
-  {
-    id: 'weapon',
-    label: 'Weapon & Panel',
-    hint: 'Name, id, donor, slot, icon, defaults',
-    icon: Settings2,
-  },
-  { id: 'missile', label: 'Flight & Physics', hint: 'Gravity, wind, fuse, damage', icon: Bomb },
-  { id: 'action', label: 'Missile Action', hint: 'Bounce, homing, roam, dig', icon: Zap },
-  {
-    id: 'collisions',
-    label: 'Collision Targets',
-    hint: 'What ends flight or bounces',
-    icon: ShieldAlert,
-    parent: 'action',
-  },
-  { id: 'burst', label: 'Explodes Into', hint: 'Plain blast, clusters, or fire', icon: Sparkles },
-  { id: 'burst_bit', label: 'Cluster Bits', hint: 'Child physics, sprite & trail', icon: Cpu, parent: 'burst' },
-  { id: 'burst_bit_collision', label: 'Bit Collisions', hint: 'What stops or bounces bits', icon: ShieldAlert, parent: 'burst' },
-  { id: 'burst_bit_bounce', label: 'Bit Bounce', hint: 'Bounciness, sound, contact blast', icon: Layers, parent: 'burst' },
-  { id: 'burst_bit_homing', label: 'Bit Homing', hint: 'Guidance mode, delay, art', icon: Crosshair, parent: 'burst' },
-  { id: 'burst_bit_roam', label: 'Bit Roaming', hint: 'Walk, jumps, gas, targets', icon: Zap, parent: 'burst' },
-  { id: 'burst_bit_dig', label: 'Bit Digging', hint: 'Sound and digging frames', icon: Sliders, parent: 'burst' },
-  { id: 'sprite', label: 'Sprites & Trail', hint: 'Stock sprites, smoke trail, audio', icon: Sliders },
-  { id: 'advanced', label: 'Advanced', hint: 'Blast shape, wobble, extras', icon: Layers },
-  { id: 'gun', label: 'Hitscan Gun', hint: 'Bullets, spread cone, pellets, hits', icon: Crosshair },
-  { id: 'strike', label: 'Air Strike', hint: 'Plane, drop count, spacing, speed', icon: Plane },
-  { id: 'gun_mine', label: 'Mine & Specials', hint: 'Proximity mine, arrow, special tools', icon: Wrench },
-  { id: 'callbacks', label: 'Lua Callbacks', hint: 'Custom event scripts', icon: Code2 },
+  { id: 'missile', label: 'Physics & Blast', hint: 'Power, gravity, wind, fuse & handling', icon: Bomb },
+  { id: 'action', label: 'Missile Action', hint: 'Bounce, homing, roam, dig & targets', icon: Zap },
+  { id: 'burst', label: 'Explodes Into', hint: 'Single blast, cluster bits or fire', icon: Sparkles },
+  { id: 'sprite', label: 'Sprites & Trail', hint: 'Missile sprite, smoke trail & sounds', icon: Sliders },
+  { id: 'advanced', label: 'Fine Tuning', hint: 'Blast shape, wobble & action extras', icon: Sliders },
+  { id: 'gun', label: 'Firearm Specs', hint: 'Bullets, spread cone, pellets & hits', icon: Crosshair },
+  { id: 'gun_mine', label: 'Tool & Setup', hint: 'Mine, arrow, teleport or special tool', icon: Wrench },
+  { id: 'callbacks', label: 'Lua Script', hint: 'Custom game event hooks', icon: Code2 },
 ];
 
 /** The cluster bit's action, from the same expression the editor uses. */
@@ -88,27 +63,83 @@ export function bitActionOf(clustlet: {
   );
 }
 
+/** Whether the current weapon configuration has a native projectile body. */
+export function hasProjectileBody(
+  fireType?: FireType,
+  teleport?: boolean,
+  bodyFuse?: boolean
+): boolean {
+  if (!fireType || fireType === 'power') return true;
+  if (fireType === 'cursor') return !teleport;
+  if (fireType === 'drop') return !!bodyFuse;
+  return false;
+}
+
 /**
- * Tabs for the current record. Family-specific tabs (`gun`, `strike`,
- * `gun_mine`) only appear when the matching Fire Archetype is selected
- * (`spray` shares `gun` parameters for inspection), and cluster bit
- * sub-sections only appear while `Explodes Into` is Clusters.
+ * Sections strictly restricted to what actually applies to the selected
+ * Fire Archetype (plus Mine vs. Dynamite and Air Strike vs. Teleport modes).
  */
 export function visibleRecordTabs(
-  burst: string | undefined,
-  bitAction: string,
+  _burst: string | undefined,
+  _bitAction: string,
   fireType?: FireType,
-  teleport?: boolean
+  teleport?: boolean,
+  bodyFuse?: boolean
 ): RecordTabDef[] {
-  return RECORD_TABS.filter((tab) => {
-    if (tab.id === 'gun') return fireType === 'hitscan' || fireType === 'spray';
-    if (tab.id === 'strike') return fireType === 'cursor' && !teleport;
-    if (tab.id === 'gun_mine') {
-      return fireType === 'drop' || fireType === 'arrow' || fireType === 'special';
-    }
-    if (tab.parent !== 'burst') return true;
-    if (burst !== 'clusters') return false;
-    if (tab.id === 'burst_bit' || tab.id === 'burst_bit_collision') return true;
-    return tab.id === (`burst_bit_${bitAction}` as RecordTabId);
-  });
+  if (fireType === 'hitscan') {
+    return [
+      { id: 'gun', label: 'Firearm Specs', hint: 'Bullets, spread cone, damage & hits', icon: Crosshair },
+      { id: 'callbacks', label: 'Lua Script', hint: 'Custom game event hooks', icon: Code2 },
+    ];
+  }
+
+  if (fireType === 'spray') {
+    return [
+      { id: 'gun', label: 'Flame Inspector', hint: 'Raw 0x3c–0x64 stream parameters', icon: Flame },
+      { id: 'callbacks', label: 'Lua Script', hint: 'Custom game event hooks', icon: Code2 },
+    ];
+  }
+
+  if (fireType === 'drop' && !bodyFuse) {
+    return [
+      { id: 'gun_mine', label: 'Mine Setup', hint: 'Proximity sensor, timers & blast', icon: Wrench },
+      { id: 'callbacks', label: 'Lua Script', hint: 'Custom game event hooks', icon: Code2 },
+    ];
+  }
+
+  if (fireType === 'cursor' && teleport) {
+    return [
+      { id: 'gun_mine', label: 'Teleport Setup', hint: 'Cursor placement & firing animation', icon: Navigation },
+      { id: 'callbacks', label: 'Lua Script', hint: 'Custom game event hooks', icon: Code2 },
+    ];
+  }
+
+  if (fireType === 'arrow') {
+    return [
+      { id: 'gun_mine', label: 'Arrow Specs', hint: 'Direct-hit damage & firing animation', icon: Wrench },
+      { id: 'callbacks', label: 'Lua Script', hint: 'Custom game event hooks', icon: Code2 },
+    ];
+  }
+
+  if (fireType === 'special') {
+    return [
+      { id: 'gun_mine', label: 'Special Tool', hint: 'Tool subtype & native behaviour', icon: Wrench },
+      { id: 'callbacks', label: 'Lua Script', hint: 'Custom game event hooks', icon: Code2 },
+    ];
+  }
+
+  const isStrike = fireType === 'cursor' && !teleport;
+  return [
+    {
+      id: 'missile',
+      label: isStrike ? 'Strike & Bombs' : 'Physics & Blast',
+      hint: isStrike ? 'Aircraft drop & bomb physics' : 'Power, gravity, wind, fuse & blast',
+      icon: isStrike ? Plane : Bomb,
+    },
+    { id: 'action', label: 'Missile Action', hint: 'Bounce, homing, roam, dig & targets', icon: Zap },
+    { id: 'burst', label: 'Explodes Into', hint: 'Single blast, cluster bits or fire', icon: Sparkles },
+    { id: 'sprite', label: 'Sprites & Trail', hint: 'Missile sprite, smoke trail & sounds', icon: Sliders },
+    { id: 'advanced', label: 'Fine Tuning', hint: 'Blast shape, wobble & action extras', icon: Sliders },
+    { id: 'callbacks', label: 'Lua Script', hint: 'Custom game event hooks', icon: Code2 },
+  ];
 }
