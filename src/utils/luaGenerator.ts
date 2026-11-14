@@ -791,17 +791,26 @@ export function generateLuaCode(project: WeaponProject): string {
   // local before the claim (the helper keeps the table and reads it on every
   // draw), otherwise it stays inline in the claim.
   const holdRows: string[] = [];
+  // The hand art and its live placement, shared by the hold table and the
+  // firing-state table: `px_hold_art` redraws both during WA's 0x6A/0x6B
+  // frames, and the engine only draws the hand in the aiming states, so
+  // without this it disappears for the whole burst.
+  const handRows: string[] = [];
   let holdArtSize = 0;
   if (usesHold) {
     const h = project.hold;
     const handIdx = h.handType === 'lower' ? 1 : h.handType === 'upper' ? 3 : 2;
-    holdRows.push(`sheet = ${luaQuote(holdSheetPath(project))},`);
-    holdRows.push(`hand = holds.PX_HANDS[${handIdx}],`);
-    holdRows.push(`hand_type = ${handIdx},`);
     const drawHand = h.drawHand !== false;
-    holdRows.push(`hand_radius = ${drawHand ? (h.handRadius ?? 10) : 0.01},`);
-    holdRows.push('hand_rotation = 1,');
-    holdRows.push('hand_radial_rotation = 1,');
+    handRows.push(`hand = holds.PX_HANDS[${handIdx}],`);
+    handRows.push(`hand_type = ${handIdx},`);
+    handRows.push(`hand_radius = ${drawHand ? (h.handRadius ?? 10) : 0.01},`);
+    handRows.push('hand_rotation = 1,');
+    handRows.push('hand_radial_rotation = 1,');
+    // `px_hold_art` draws explicit quads, so it needs the hand cell's pixel
+    // size; the engine scales each sheet natively and ignores this key. PX's
+    // three hand sheets are 60x60.
+    handRows.push('hand_size = 60,');
+    holdRows.push(`sheet = ${luaQuote(holdSheetPath(project))},`);
     holdRows.push(`weap_radius = ${h.weapRadius ?? 6},`);
     holdRows.push(`weap_rotation = ${(1 + (h.weapRotation || 0) / 180).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')},`);
     holdRows.push('weap_radial_rotation = 1,');
@@ -819,8 +828,11 @@ export function generateLuaCode(project: WeaponProject): string {
         holdRows.push(`anim_speed = ${formatNumber(animSpeed)},`);
       }
     }
-    if (h.handScale && h.handScale !== 1) holdRows.push(`hand_scale = ${h.handScale},`);
-    if (!drawHand) holdRows.push('draw_hand = false,');
+    if (h.handScale && h.handScale !== 1) handRows.push(`hand_scale = ${h.handScale},`);
+    if (!drawHand) handRows.push('draw_hand = false,');
+    // The engine reads the hand keys off the claim's hold table; `px_hold_art`
+    // reads them again from the local table it draws with.
+    for (const row of handRows) holdRows.push(row);
     if (h.keepWhileFiring) holdRows.push('keep_while_firing = true,');
     if (h.thrown) holdRows.push('thrown = true,');
     if (h.putAway) holdRows.push('put_away = true,');
@@ -883,6 +895,18 @@ export function generateLuaCode(project: WeaponProject): string {
       `      weap_rotation = ${(1 + (h.weapRotation || 0) / 180).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')},`,
     );
     lines.push('      weap_radial_rotation = 1,');
+    // The firing sheet draws in place of the hold, so it needs the hand too:
+    // `px_hold_art` only gets these keys from the table it is given.
+    for (const row of handRows) lines.push(`      ${row}`);
+    if (usesFireSequence) {
+      // A burst keeps WA's firing states for its whole length; only the shot
+      // frames should show the firing sheet, so it follows `fire_seq`'s shot
+      // marks — the weapon passes its own sequencer table, because an exported
+      // library module is instanced per pack and would see a different one. A
+      // single shot needs no mark: its two firing states are the shot.
+      lines.push('      flash = true,');
+      lines.push('      shots = seq.shot_at,');
+    }
     lines.push('    }');
   }
   lines.push(extraAssignments.length > 0 ? '    local rec = {' : '    wa.weapons.replace{');
@@ -2670,11 +2694,14 @@ export function generateLuaCode(project: WeaponProject): string {
 
   if (usesHoldArt) {
     // WA draws the held sheet on the firing frames only while `h.firing` is
-    // set, and the engine sets that on the fire message alone; a fire_seq burst
+    // set, and only the turn's own fire message sets it; a fire_seq burst
     // repeats the shot without one, so 0x6A/0x6B would hide it every other
-    // frame. The helper redraws exactly those two states.
-    if (usesFireSequence) {
-      lines.push('    -- Keep the held art on WA\'s repeat-fire frames (0x6A/0x6B).');
+    // frame. A plain shot has that message, so with `keep_while_firing` the
+    // engine draws the sheet itself and only the firing sheet is added here —
+    // adding both would draw the gun twice.
+    const keeper = !!project.hold?.keepWhileFiring && !usesFireSequence;
+    if (!keeper) {
+      lines.push('    -- Fill WA\'s repeat-fire frames (0x6A/0x6B) with the held art.');
       lines.push('    hold_art.add(hold)');
     }
     if (usesFiringArt) {

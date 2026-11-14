@@ -456,14 +456,21 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   **Held art needs `px_hold_art`.** WA draws the held sheet on its firing frames
   (0x6A/0x6B) only while `h.firing` is set, and the engine sets that from the
   turn's fire message; a burst repeats the shot without one, so from the second
-  shot the sheet blinks every other frame. When the weapon has hold art the
-  generator also emits `local hold_art = require("wf-lib/px_hold_art")`,
+  shot the sheet blinks every other frame. When a burst or a firing sheet needs
+  it, the generator emits `local hold_art = require("wf-lib/px_hold_art")`,
   declares the hold table as a **local before the claim** (adding `weapon =
-  ctx.id` and `size = cell × weap_scale`, both ignored by the engine) and calls
-  `hold_art.add(hold)` after the replace. `size` is the sheet's pixel cell — the
-  uploaded sheet's width/`height ÷ frames`, else the default art's 46 or 32 —
-  because the helper draws a square quad and has no scale key of its own (a
-  wrong size is the classic "pump looks 2x" bug). `holds` is `wf.sdk`, so the
+  ctx.id`, `size = cell × weap_scale` and `hand_size = 60`, all ignored by the
+  engine) and calls `hold_art.add(hold)` after the replace. `size` is the
+  sheet's pixel cell — the uploaded sheet's width/`height ÷ frames`, else the
+  default art's 46 or 32 — because the helper draws a square quad and has no
+  scale key of its own (a wrong size is the classic "pump looks 2x" bug). The
+  helper draws the **hand** too (`hand`/`hand_radius`/`hand_rotation`/
+  `hand_radial_rotation`/`hand_scale` from the same table), because the engine
+  only draws it in the aiming states; without it the hand vanishes for the whole
+  burst. It walks a `frames`/`anim_speed` strip on the world clock at the
+  engine's own rate. `hold_art.add(hold)` is skipped when the engine already
+  draws the sheet itself (`keep_while_firing` with no burst) — adding both draws
+  the gun twice, frame 0 over the engine's animation. `holds` is `wf.sdk`, so the
   dependency set is `wf.sdk` + `px.fire_seq`; the hold sheet is auto-GPU
   (`apply.rs`'s `hold_sheet` test), so no `gpu_prefix` is required. The claim
   still emits `params = { gpu_prefix = "sprites/" }` — PX's own fire_seq weapons
@@ -506,15 +513,21 @@ Reference implementation: `WormForgeNew/crates/weapons/src/record.rs`,
   `hand_radius = 0.01`).
 - **Firing-state sprite (`hold.flashFile`), PX's FAMAS pattern.** It is not the
   engine's `hold.flash` overlay. The generator emits a *second hold entry* — the
-  same `weap_radius` / `weap_rotation` / `weap_radial_rotation`, its own sheet,
-  `size = cell × weap_scale` — and hands it to `wf-lib/px_hold_art` after the
-  claim (`hold_art.add(firing)`). The helper draws it in WA's two firing states
-  (0x6A / 0x6B) with the worm's live aim, facing and radius, so it follows the
-  gun 1:1 in position, rotation and scale, and it needs no offsets of its own
-  (`flashOut`/`flashSide`/`flashScale`/`flashFrames` are legacy state, read from
-  an old bundle's `hold.flash` on import and never emitted). The dependency is
-  `px.fire_seq` (that bundle exports the helper) and the sheet goes in the
-  claim's `sprites`.
+  same `weap_radius` / `weap_rotation` / `weap_radial_rotation` and hand keys,
+  its own sheet, `size = cell × weap_scale` — and hands it to
+  `wf-lib/px_hold_art` after the claim (`hold_art.add(firing)`). The helper draws
+  it in WA's two firing states (0x6A / 0x6B) with the worm's live aim, facing
+  and radius, so it follows the gun 1:1 in position, rotation and scale, and it
+  needs no offsets of its own (`flashOut`/`flashSide`/`flashScale`/`flashFrames`
+  are legacy state, read from an old bundle's `hold.flash` on import and never
+  emitted). **A burst lights it per shot, not for the whole burst:** the entry
+  carries `flash = true` and `shots = seq.shot_at` (the weapon's own sequencer
+  table — an exported library module is instanced per pack, so the helper must
+  not `require` it), and the helper draws it for the two frames around a mark
+  (plus the first draw that follows one, so a skipped simulation frame cannot
+  swallow a flash). A single shot needs neither: its 0x6A/0x6B pair is the
+  shot. The dependency is `px.fire_seq` (that bundle exports the helper) and the
+  sheet goes in the claim's `sprites`.
 - **Hold animation:** `worm_hold.rs` does
   `phase += anim_speed * 0.03` once per 50 Hz game frame, so the sheet plays
   `1.5 × frames × anim_speed` frames per second. The UI asks for the real

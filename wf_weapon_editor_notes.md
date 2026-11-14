@@ -1956,3 +1956,31 @@ the other side. The working form is a **true horizontal mirror**:
 preview carries the same `roamLeft` side and draws the same
 `rotate(-rot - angle)` + mirrored image. Without that preview mirror the canvas
 showed the pure-rotation flip while the game looked right.
+
+### The held hand vanished during a burst, and the firing sheet stayed on
+
+`px_hold_art` redrew the gun on WA's 0x6A/0x6B frames but never the hand, which
+the engine only draws in the aiming states, so the worm held nothing from the
+second shot of a burst. The helper now draws the hand with `worm_hold::place`'s
+own math (`rot_h = rot - PI * hand_radial_rotation`, the same facing mirror on
+`dx` and on the drawn angle) from the keys the hold table already carries, plus
+a presentation-only `hand_size = 60` (the cell of PX's three hand sheets) since
+it draws explicit quads. `holds.PX_HANDS` stays the source of the sheet.
+
+The firing sheet was also wrong in two ways. It was added on top of the hold for
+the *whole* burst, because a burst keeps WA in its firing states for its length,
+so the flash read as the gun. And it was added without the hand. The generator
+now marks it `flash = true` and hands it the weapon's own sequencer table
+(`shots = seq.shot_at`) — not a `require`, because an exported library module is
+instanced per pack and the helper's instance would see a different table than
+the one firing the weapon. `fire_seq` writes that mark on every shot (the first
+one included); the helper draws the flash for the two frames after a mark and
+for the first draw that follows one, so a skipped simulation frame cannot
+swallow a flash entirely. A single-shot weapon needs no mark: its 0x6A/0x6B pair
+*is* the shot.
+
+`hold_art.add(hold)` is now skipped when the engine already draws the sheet
+itself (`keep_while_firing` without a burst): both would draw the gun, and the
+helper only knows frame 0 of an animated strip. WF 36 (**Sequential Flash**)
+covers hold + flash on a burst; WF 32's firing sheet is the ice sprite now, so a
+flash that sticks or never lights is visible. 36 weapons.

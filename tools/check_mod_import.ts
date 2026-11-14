@@ -57,7 +57,7 @@ const files: ModFile[] = walk(BUNDLE).map((full) => {
 const bundles = readBundles(files);
 const weapons = readWeapons(bundles, files);
 check('test pack has one bundle', bundles.length === 1, String(bundles.length));
-check('test pack has 35 weapons', weapons.length === 35, String(weapons.length));
+check('test pack has 36 weapons', weapons.length === 36, String(weapons.length));
 
 const byName = new Map(weapons.map((weapon) => [weapon.name, weapon]));
 const projects = new Map<string, WeaponProject>();
@@ -479,9 +479,31 @@ return {
   // inherits the gun's placement: only the file and its cell survive a round
   // trip, exactly like PX's FAMAS.
   check('WF 32: firing sheet attached', !!p.hold.flashFile, 'no file attached');
-  near('WF 32: firing sheet width', p.hold.flashWidth, 32);
+  near('WF 32: firing sheet width', p.hold.flashWidth, 60);
   near('WF 32: keep while firing', p.hold.keepWhileFiring, true);
   check('WF 32: old overlay geometry gone', p.hold.flashOut === undefined, 'flashOut set');
+}
+
+// ---- burst + firing sheet (WF 36) ---------------------------------------
+{
+  const p = project('WF 36 Sequential Flash')!;
+  check(
+    'WF 36: hold and firing sheets both attached',
+    !!p.hold.sheetFile && !!p.hold.flashFile,
+    `hold ${!!p.hold.sheetFile}, flash ${!!p.hold.flashFile}`,
+  );
+  check('WF 36: burst came back', !!p.fireSequence?.enabled, 'no fire sequence');
+  const lua = generateLuaCode(fullProject(p, 'WF 36 Sequential Flash'));
+  check(
+    'WF 36: the plain hold fills the burst frames',
+    lua.includes('hold_art.add(hold)'),
+    'hold never handed to px_hold_art',
+  );
+  check(
+    'WF 36: the firing sheet is gated to the shot',
+    lua.includes('flash = true,'),
+    'firing table not marked as a flash',
+  );
 }
 
 // ---- fire subtype is settable, and not forced to the Minigun's -----------

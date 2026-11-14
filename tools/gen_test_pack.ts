@@ -1225,11 +1225,51 @@ const TESTS: TestCase[] = [
       },
     }),
     intent:
-      '`hold.flash`: a firing-state sprite drawn at the gun\'s muzzle while WA is in its firing states (0x6A / 0x6B).',
+      'The firing-state sheet: a second hold entry (`local firing`) drawn by `px_hold_art` in WA\'s firing states, in the held gun\'s own place.',
     expect:
-      'Every shot lights the flash for four game frames (frames = 3, plus the first) 14 px out along the aim, 2 px to the side, at 1.5x, on top of the held gun.',
+      'Every shot shows the firing sheet where the held gun draws (same radius, rotation, scale and hand), for the shot\'s frames; between shots the hold sheet is what stays on screen.',
     watch:
-      'No flash (the hold table has no flash, or keep_while_firing is off so WA hides the hold on those frames), the flash sitting on the worm centre (out/side lost), or the gun blinking out while firing.',
+      'No flash (the `firing` table missing, or the helper gated by `flash` with no shot mark), the flash at a fixed offset instead of the gun\'s, or the hand missing while firing.',
+  },
+  {
+    project: makeOp({
+      id: 'wftest.36_seq_flash',
+      name: 'WF 36 Sequential Flash',
+      slot: 'grenade',
+      // Both art roles on one burst: the hold sheet fills WA's firing frames
+      // for the whole burst (`px_hold_art`), and the firing sheet replaces it
+      // only on the frames around each shot (`flash = true` + fire_seq's shot
+      // marks), which is PX's `OnFiringAnim(isFiring)`.
+      hold: {
+        enabled: true,
+        handType: 'mid',
+        handRadius: 10,
+        weapRadius: -8,
+        weapRotation: 0,
+        scale: 0.7,
+        frames: 1,
+        drawHand: true,
+        thrown: false,
+        flashFile: file(AIM_PNG, 'flash.png'),
+      },
+      fireSequence: {
+        enabled: true,
+        mode: 'missiles',
+        count: 6,
+        delay: 6,
+        speed: 14,
+        standoff: 20,
+        offsetY: -3,
+        liveAim: true,
+        cancelOnWeaponChange: true,
+      },
+    }),
+    intent:
+      '`px_hold_art` + `wf-lib/fire_seq` with both a hold sheet and a firing sheet: the aim sheet fills the burst\'s firing frames, and the firing sheet lights only on each shot.',
+    expect:
+      'During the six-shot burst the held grenade stays visible at 0.7x between shots, and the firing sheet flashes over it for a couple of frames on every shot only.',
+    watch:
+      'The firing sheet stuck on for the whole burst (the `flash` gate missing), the gun blinking out between shots (the plain hold not added), or the hand disappearing on firing frames.',
   },
 ];
 
@@ -1287,10 +1327,11 @@ for (const test of TESTS) {
   if (project.hold?.enabled) {
     mkdirSync(join(BUNDLE, 'sprites', folder), { recursive: true });
     writeFileSync(join(BUNDLE, holdSheetPath(project)), AIM_PNG);
-    // The firing-state sprite (`hold.flash`). Loaded through the hold table,
-    // so it needs no `mod.toml` declaration — only the file.
+    // The firing-state sheet. Loaded through the hold table, so it needs no
+    // `mod.toml` declaration — only the file. The ice sprite keeps it visibly
+    // different from the held gun, so a missing or stuck flash is obvious.
     if (project.hold.flashFile) {
-      writeFileSync(join(BUNDLE, flashSheetPath(project)), AIM_PNG);
+      writeFileSync(join(BUNDLE, flashSheetPath(project)), ICE_PNG);
     }
   }
 
