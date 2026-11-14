@@ -1,8 +1,9 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { WeaponProject, FireType } from '../types/weapon';
 import { STOCK_WEAPONS, STOCK_BY_ID } from '../data/stockWeapons';
 import { sanitizeWepFileName } from '../utils/luaGenerator';
 import { WFWS_PREFIX, weaponIdSuffix, withWfwsPrefix } from '../utils/weaponId';
+import { NumberInput } from './NumberInput';
 import { Image as ImageIcon, Trash2, Info, Sparkles , HelpCircle } from 'lucide-react';
 
 interface WeaponSettingsProps {
@@ -40,6 +41,9 @@ const TooltipLabel: React.FC<{
 
 export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChange }) => {
   const iconInputRef = useRef<HTMLInputElement>(null);
+  // The id box keeps the typed text (spaces and capitals included) while it is
+  // being edited, and shows the slugged id again on blur.
+  const [idDraft, setIdDraft] = useState<string | null>(null);
 
   const handleIconUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -177,8 +181,16 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
             <input
               id="ws-component-id"
               type="text"
-              value={weaponIdSuffix(project.id)}
-              onChange={(e) => onChange({ id: withWfwsPrefix(e.target.value) })}
+              value={idDraft ?? weaponIdSuffix(project.id)}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setIdDraft(raw);
+                // Clearing the box keeps the last id: `wfws.` alone is not an
+                // id, and the old fallback quietly wrote `wfws.weapon`.
+                if (!raw.replace(/[^a-zA-Z0-9_-]/g, '')) return;
+                onChange({ id: withWfwsPrefix(raw) });
+              }}
+              onBlur={() => setIdDraft(null)}
               placeholder="moon_grenade"
               maxLength={64 - WFWS_PREFIX.length}
               className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-transparent text-stone-900 dark:text-white focus:outline-hidden"
@@ -389,8 +401,7 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <div>
             <TooltipLabel label="Start Ammo" code="ammo" desc="Default ammunition count (-1 = infinite)." />
-            <input
-              type="number"
+            <NumberInput
               value={project.defaults.ammo}
               onChange={(e) =>
                 onChange({
@@ -403,8 +414,7 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
 
           <div>
             <TooltipLabel label="Turn Delay" code="delay" desc="Number of turns before this weapon unlocks." />
-            <input
-              type="number"
+            <NumberInput
               min={0}
               value={project.defaults.delay}
               onChange={(e) =>
@@ -418,8 +428,7 @@ export const WeaponSettings: React.FC<WeaponSettingsProps> = ({ project, onChang
 
           <div>
             <TooltipLabel label="Crate Chance" code="chance_pct" desc="Probability of appearing in crate drops (0-100%)." />
-            <input
-              type="number"
+            <NumberInput
               min={0}
               max={100}
               value={project.defaults.crateChance}

@@ -3,6 +3,7 @@ import type { CustomSoundsConfig, FireSequenceConfig, WeaponProject } from '../t
 import { DEFAULT_CUSTOM_SOUNDS, SOUND_PRIORITIES } from '../data/soundPresets';
 import { DEFAULT_FIRE_SEQUENCE, supportsFireSequence } from '../data/fireSequence';
 import { SoundUpload } from './EffectsCards';
+import { NumberInput } from './NumberInput';
 
 interface Props {
   project: WeaponProject;
@@ -93,9 +94,8 @@ export const FireSequenceCard: React.FC<Props> = ({ project, onChange }) => {
     opts: { min?: number; max?: number; step?: number } = {},
   ) => (
     <Field id={id} label={label} hint={hint}>
-      <input
+      <NumberInput
         id={id}
-        type="number"
         min={opts.min}
         max={opts.max}
         step={opts.step ?? 1}
@@ -266,9 +266,8 @@ export const FireSequenceCard: React.FC<Props> = ({ project, onChange }) => {
                     label="Every N shots"
                     hint="Play the WAV on every Nth shot; 1 is every shot, 3 gives a three-round burst one report."
                   >
-                    <input
+                    <NumberInput
                       id="sound-shot-every"
-                      type="number"
                       min={1}
                       max={50}
                       value={sounds.shotEvery}

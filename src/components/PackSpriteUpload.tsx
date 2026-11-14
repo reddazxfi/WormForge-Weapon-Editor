@@ -3,6 +3,7 @@ import { HelpCircle, Image as ImageIcon, Loader2, RotateCw, Trash2, Upload } fro
 import { PackArtAsset, PackArtSlot, WeaponProject } from '../types/weapon';
 import { packArtPath } from '../utils/luaGenerator';
 import { buildRotationSheet } from '../utils/rotateSheet';
+import { NumberInput } from './NumberInput';
 
 interface PackSpriteUploadProps {
   project: WeaponProject;
@@ -239,9 +240,8 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
                 <HelpCircle className="w-3 h-3" />
               </span>
             </div>
-            <input
+            <NumberInput
               id={frameId}
-              type="number"
               min={1}
               max={64}
               value={asset.frames}
@@ -266,9 +266,8 @@ export const PackSpriteUpload: React.FC<PackSpriteUploadProps> = ({
                 <HelpCircle className="w-3 h-3" />
               </span>
             </div>
-            <input
+            <NumberInput
               id={fpsId}
-              type="number"
               min={1}
               max={50}
               value={asset.fps}

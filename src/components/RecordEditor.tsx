@@ -9,6 +9,7 @@ import {
 } from '../types/weapon';
 import { COLLISION_FLAGS, MISSILE_ANIM_HINT, MISSILE_ANIM_TYPES } from '../data/recordSchema';
 import { StockSpriteInput } from './StockSpriteInput';
+import { NumberInput, UnitNumberInput } from './NumberInput';
 import { TRAIL_SPRITES } from '../data/stockSprites';
 import {
   Bomb,
@@ -207,32 +208,6 @@ export const TooltipLabel: React.FC<{
           <HelpCircle className="w-3.5 h-3.5" />
         </span>
       )}
-    </div>
-  );
-};
-
-export const UnitNumberInput: React.FC<
-  React.InputHTMLAttributes<HTMLInputElement> & { unit?: string }
-> = ({ unit, className = '', ...props }) => {
-  if (!unit) {
-    return (
-      <input
-        type="number"
-        {...props}
-        className={`w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white disabled:opacity-50 ${className}`}
-      />
-    );
-  }
-  return (
-    <div className="flex items-stretch w-full rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden focus-within:ring-2 focus-within:ring-forge-500 focus-within:border-forge-500">
-      <input
-        type="number"
-        {...props}
-        className={`flex-1 min-w-0 text-xs font-mono px-3 py-1.5 bg-transparent text-stone-900 dark:text-white focus:outline-hidden disabled:opacity-50 ${className}`}
-      />
-      <span className="px-2.5 flex items-center text-[11px] font-mono text-stone-500 dark:text-stone-400 bg-stone-50 dark:bg-stone-800/70 border-l border-stone-200 dark:border-stone-700 select-none shrink-0 pointer-events-none">
-        {unit}
-      </span>
     </div>
   );
 };
@@ -977,8 +952,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     code="missile.bounce.max_bounces"
                     desc="Detonate after this many bounces. 0 keeps the normal fuse timer."
                   />
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
                     max={20}
                     value={recordField(project, 'missile.bounce.max_bounces', 0)}
@@ -1176,8 +1150,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
                   <TooltipLabel label="Dig Sound" code="missile.dig.sound" desc="Native sound ID played while burrowing underground." />
-                  <input
-                    type="number"
+                  <NumberInput
                     value={project.digConfig.sound}
                     onChange={(e) =>
                       onChange({ digConfig: { ...project.digConfig, sound: Number(e.target.value) } })
@@ -1188,8 +1161,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
 
                 <div>
                   <TooltipLabel label="Dive Sprite" code="missile.dig.dive_sprite" desc="Stock sprite ID shown while diving into terrain." />
-                  <input
-                    type="number"
+                  <NumberInput
                     value={project.digConfig.dive_sprite}
                     onChange={(e) =>
                       onChange({ digConfig: { ...project.digConfig, dive_sprite: Number(e.target.value) } })
@@ -1205,8 +1177,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                       code={`missile.dig.sprite_${n}`}
                       desc={`Native digging sprite frame ${n}.`}
                     />
-                    <input
-                      type="number"
+                    <NumberInput
                       value={project.digConfig[`sprite_${n}` as 'sprite_1' | 'sprite_2' | 'sprite_3']}
                       onChange={(e) =>
                         onChange({
@@ -1276,8 +1247,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <TooltipLabel label="Cluster Count" code="clusters.count" desc="Number of child projectiles spawned on detonation." />
-                    <input
-                      type="number"
+                    <NumberInput
                       min={1}
                       max={20}
                       value={clustlet.count}
@@ -1310,8 +1280,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
 
                   <div>
                     <TooltipLabel label="Bit Blast Power" code="clusters.bit.explosion.power" desc="Damage and crater radius of each cluster bit." />
-                    <input
-                      type="number"
+                    <NumberInput
                       min={5}
                       max={150}
                       value={clustlet.damage}
@@ -1322,8 +1291,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
 
                   <div>
                     <TooltipLabel label="Bit Gravity" code="clusters.bit.gravity_pct" desc="Gravity multiplier applied to cluster bits." />
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
                       max={200}
                       value={clustlet.gravity_pct}
@@ -1369,8 +1337,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                       code="clusters.bit.sprite_count"
                       desc="Consecutive stock sprite IDs cycled across bits. Use 1 with an uploaded pack sheet."
                     />
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
                       value={clustlet.sprite_count}
                       onChange={(e) => updateClustlet({ sprite_count: Number(e.target.value) })}
@@ -1811,8 +1778,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
                     code="missile.fire.spread_generations"
                     desc="How many times flames can branch outward (0 keeps initial flames only)."
                   />
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
                     max={25}
                     value={project.fireConfig.spread_generations}
@@ -2058,8 +2024,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
               <div className="grid grid-cols-2 gap-3 pt-1">
                 <div>
                   <TooltipLabel label="Trail Density" code="missile.trail.power" desc="Emission density of trail particles." />
-                  <input
-                    type="number"
+                  <NumberInput
                     min={1}
                     max={100}
                     value={recordField(project, 'missile.trail.power', 25)}
@@ -2071,8 +2036,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
 
                 <div>
                   <TooltipLabel label="Ejection Speed" code="missile.trail.speed" desc="Initial ejection speed of trail particles." />
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
                     max={1000}
                     step={10}
@@ -2096,8 +2060,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
 
                 <div>
                   <TooltipLabel label="Underwater Bubbles / sec" code="missile.trail.bubbles_per_second" desc="Bubble emission rate when travelling underwater (0 disables bubbles)." />
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
                     max={20}
                     step={0.25}
@@ -2197,8 +2160,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
 
                 <div>
                   <TooltipLabel label="Dive Sprite ID" code="missile.dig.dive_sprite" desc="Stock sprite ID shown while diving or drilling into landscape." />
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
                     value={project.digConfig.dive_sprite ?? 0}
                     onChange={(e) =>
@@ -2455,8 +2417,7 @@ export const RecordEditor: React.FC<RecordEditorProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
                   <TooltipLabel label="Detection Radius" code="mine.proximity" desc="Trigger radius in pixels around the armed mine." />
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
                     max={150}
                     value={body.proximity ?? 25}

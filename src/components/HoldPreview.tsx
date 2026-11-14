@@ -17,6 +17,7 @@ import {
   roamWalkPoseId,
 } from '../utils/luaGenerator';
 import { StockSpriteInput } from './StockSpriteInput';
+import { NumberInput } from './NumberInput';
 import { stockSpriteName } from '../data/stockSprites';
 import { assetUrl } from '../utils/assetUrl';
 import { defaultArtFor } from '../utils/defaultArt';
@@ -231,9 +232,8 @@ const RoamSheetField: React.FC<{
           <label htmlFor={`${id}-frames`} className="text-[10px] text-stone-500 dark:text-stone-400">
             Frames
           </label>
-          <input
+          <NumberInput
             id={`${id}-frames`}
-            type="number"
             min={1}
             max={64}
             value={frames}
@@ -2204,9 +2204,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                   <label htmlFor="hold-total-frames" className="block text-xs font-medium text-stone-600 dark:text-stone-400">
                     Total Frames
                   </label>
-                  <input
+                  <NumberInput
                     id="hold-total-frames"
-                    type="number"
                     min={1}
                     max={64}
                     value={hold.frames}
@@ -2223,9 +2222,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                   >
                     FPS
                   </label>
-                  <input
+                  <NumberInput
                     id="hold-fps"
-                    type="number"
                     min={1}
                     max={60}
                     value={hold.fps}
@@ -2978,9 +2976,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                           >
                             {field.label}
                           </label>
-                          <input
+                          <NumberInput
                             id={`flight-tilt-${field.key}`}
-                            type="number"
                             min={field.min}
                             max={field.max}
                             step={5}
@@ -3678,9 +3675,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                       >
                         Total Frames
                       </label>
-                      <input
+                      <NumberInput
                         id="flight-num-frames"
-                        type="number"
                         min={1}
                         max={64}
                         disabled={activeSheetLocked}
@@ -3699,9 +3695,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                       >
                         Anim Speed
                       </label>
-                      <input
+                      <NumberInput
                         id="flight-anim-speed"
-                        type="number"
                         step={0.1}
                         min={0.1}
                         max={10.0}
@@ -3723,9 +3718,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                       >
                         Spin Rate
                       </label>
-                      <input
+                      <NumberInput
                         id="flight-spin-rate"
-                        type="number"
                         step={0.1}
                         min={0.1}
                         max={10.0}
@@ -3747,9 +3741,8 @@ export const HoldPreview: React.FC<HoldPreviewProps> = ({ project, onChange }) =
                       >
                         Depth (z)
                       </label>
-                      <input
+                      <NumberInput
                         id="flight-z-depth"
-                        type="number"
                         step={0.5}
                         min={0}
                         max={20}

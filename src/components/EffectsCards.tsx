@@ -10,6 +10,7 @@ import type {
 import { DEFAULT_EXPLOSION_EFFECT, EXPLOSION_PRESETS } from '../data/explosionPresets';
 import { DEFAULT_CUSTOM_SOUNDS, INTERVAL_PRESETS, SOUND_PRIORITIES } from '../data/soundPresets';
 import { ExplosionPreview } from './ExplosionPreview';
+import { NumberInput } from './NumberInput';
 import { AlertTriangle, HelpCircle, Sparkles, Volume2, Zap } from 'lucide-react';
 
 const RIBBON_DEFAULT: RibbonTrailConfig = {
@@ -149,9 +150,8 @@ export function RibbonTrailCard({ project, onChange }: CardProps) {
             Core width (`core_w`)
           </label>
           <div className="flex items-stretch w-full rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden focus-within:ring-2 focus-within:ring-forge-500 focus-within:border-forge-500">
-            <input
+            <NumberInput
               id="ribbon-core"
-              type="number"
               min={0}
               max={40}
               step={0.5}
@@ -170,9 +170,8 @@ export function RibbonTrailCard({ project, onChange }: CardProps) {
             Glow width (`glow_w`)
           </label>
           <div className="flex items-stretch w-full rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden focus-within:ring-2 focus-within:ring-forge-500 focus-within:border-forge-500">
-            <input
+            <NumberInput
               id="ribbon-glow"
-              type="number"
               min={0}
               max={40}
               step={0.5}
@@ -191,9 +190,8 @@ export function RibbonTrailCard({ project, onChange }: CardProps) {
           <label htmlFor="ribbon-max" className={labelClass}>
             Length (`max`)
           </label>
-          <input
+          <NumberInput
             id="ribbon-max"
-            type="number"
             min={2}
             max={64}
             value={ribbon.max}
@@ -207,9 +205,8 @@ export function RibbonTrailCard({ project, onChange }: CardProps) {
           <label htmlFor="ribbon-every" className={labelClass}>
             Sample every (`every`)
           </label>
-          <input
+          <NumberInput
             id="ribbon-every"
-            type="number"
             min={1}
             max={10}
             value={ribbon.every}
@@ -223,9 +220,8 @@ export function RibbonTrailCard({ project, onChange }: CardProps) {
           <label htmlFor="ribbon-vanish" className={labelClass}>
             Fade (`vanish`)
           </label>
-          <input
+          <NumberInput
             id="ribbon-vanish"
-            type="number"
             min={1}
             max={10}
             value={ribbon.vanish}
@@ -307,9 +303,8 @@ function NumberField({ id, label, hint, value, min, max, step, onChange }: Numbe
           </span>
         )}
       </div>
-      <input
+      <NumberInput
         id={id}
-        type="number"
         min={min}
         max={max}
         step={step}
@@ -463,9 +458,8 @@ export function ExplosionEffectCard({ project, onChange }: CardProps) {
                       <option value="id">Sound id…</option>
                     </select>
                     {soundMode === 'id' && (
-                      <input
+                      <NumberInput
                         aria-label="Explosion sound id"
-                        type="number"
                         min={0}
                         value={typeof fx.sound === 'number' ? fx.sound : 69}
                         onChange={(e) => update({ sound: Number(e.target.value) })}
