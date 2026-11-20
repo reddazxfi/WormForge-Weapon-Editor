@@ -4981,3 +4981,50 @@ the moment the turn ends anyway.
 `check_mod_import.ts` pins the three halves (no `eat_fire`, the ghost rows, no
 `finish`), the WF 50 entry in `test_pack/README.md` states what a player should
 see, and `wfcheck` stays clean on all 61 files.
+
+## 2026-11-20: wfws.sdk 0.16.6, the follower's owner, the split flash and `a:look`
+
+A replay of WF 33 (homing cluster bits) through a diagnostics build, logging the
+follower's drawn position per rendered frame, measured what the follower actors
+cost. Ballistic flight tracks the round exactly and homing within about a pixel;
+no art lingers after the explosion. What it found instead:
+
+1. **A shot with no turn worm had no art.** The follower took `owner =
+   current_worm()`, a worm that lost control leaves none, and a spawn without an
+   owner errors, every frame (about 450 times in one shot), with `m.sprite`
+   already 0. It now falls back to `owner = "none"`: it only draws.
+2. **The stock clustlet flashed at every split.** A burst listed on the round's
+   own frame waits one frame to be classified, and WA drew `m.sprite` (54) in it.
+   The wait now hides it and keeps the id in `sig`, as the first sight does.
+3. **A state switch held for one frame.** The swap respawned the follower, and a
+   new actor has no motion history, so its first frame drew untweened (as large as
+   the round's speed). `a:look(sheet)` keeps the actor, and `render_motion` keys
+   its history by the actor, so the switch frame is tweened. It changes the
+   actors' sync hash, so it runs in `missile_frame` (a simulation callback) and
+   cannot be replay-tested; it was checked in the harness and needs a live look
+   at WF 25's switch at 800 ms.
+
+What is left is the one-frame hold of a **new** follower (launch, a split), which
+no pack change can give history. That is the native missile-art verb's to remove.
+`harness_flight` now refuses a spawn without an owner, as the engine does, which
+is why the first defect never showed there.
+
+## 2026-11-20: `hold_as` for builder rounds on thrown and placed donors
+
+WF 33 aimed with empty hands. The builder writes `sprite = 0` on the round, and
+WA picks a thrown weapon's pose by that sprite (`Weapon__hold_sheet`, 0x51C060:
+grenade, banana, cluster, petrol bomb and holy grenade give a sheet, anything
+else none; placed weapons the same by their flight sprite). Keeping the sprite
+and hiding the round with `m.sprite = 0` doesn't work: a replay with render-frame
+logging showed WA draws a launched missile for one frame before its first
+`missile_frame` (its parent, the physics filter, was already walked that frame),
+so the stock round would flash at every throw. Cluster bits get their first
+`missile_frame` before any draw. The builder also needs the 0 to tell the round
+from its bits.
+
+wkLua 1.0.0 adds `hold_as = "stock.<name>"`: the worm takes out and aims the
+weapon in that stock weapon's pose. The generator writes it beside the zero for
+a `copy_from` claim whose donor is in `POSE_BY_SPRITE_DONORS`, not under hold art
+(`PX_POSTURE` draws the posture there) and not for a `.wep` (its record may not
+be the donor's family). In the test pack: WF 05, 24, 26, 30, 33, 51 and 52. An
+older DLL ignores the field and keeps the empty hands. `check_copyfrom.ts` pins it.

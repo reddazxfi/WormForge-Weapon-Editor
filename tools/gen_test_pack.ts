@@ -2747,9 +2747,15 @@ const profile: string[] = [
   '',
   '[weapons]',
 ];
+// Each stock slot once: tests share donor slots, and a repeated key is a TOML
+// error, so the loader refused the whole profile.
+const stockListed = new Set<string>();
 for (const test of TESTS) {
   profile.push(`${quote(test.project.id)} = true`);
-  profile.push(`${quote(`stock.${test.project.slot}`)} = true`);
+  const stock = `stock.${test.project.slot}`;
+  if (stockListed.has(stock)) continue;
+  stockListed.add(stock);
+  profile.push(`${quote(stock)} = true`);
 }
 profile.push('"stock.ninja_rope" = true', '"stock.skip_go" = true', '');
 for (const test of TESTS) {

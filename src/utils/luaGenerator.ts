@@ -1196,6 +1196,18 @@ export function wepBundlePath(project: WeaponProject): string | null {
   return `weps/${slug}${file}`;
 }
 
+/**
+ * Donors whose worm pose WA picks by the record's `sprite` (its
+ * `Weapon__hold_sheet`): the thrown weapons, and the placed ones it knows by
+ * their flight sprite. Zeroing that sprite to hide the round leaves the worm
+ * aiming with empty hands, so the claim lends the donor's pose (`hold_as`).
+ */
+const POSE_BY_SPRITE_DONORS = new Set([
+  'grenade', 'cluster_bomb', 'banana_bomb', 'super_banana', 'holy_grenade', 'petrol_bomb',
+  'ming_vase', 'dynamite', 'sheep', 'super_sheep', 'aqua_sheep', 'old_woman',
+  'salvation_army', 'mad_cow', 'mole_bomb', 'skunk',
+]);
+
 export function generateLuaCode(project: WeaponProject): string {
   /**
    * A melee claim is a real weapon now, and Space fires it.
@@ -1232,6 +1244,8 @@ export function generateLuaCode(project: WeaponProject): string {
   const clusterBitTrailArt = packArtPath(project, 'cluster_trail');
 
   const usesHold = project.hold && project.hold.enabled;
+  // Set where the missile table writes `sprite = 0` for a real shot.
+  let zeroedSprite = false;
   const missileSpriteEnabled = !!project.missileSprite?.enabled;
   // The primary WFWS builder. Bits and behaviour states are drawn by the same
   // `sb.flight` call, so they only exist while it is on.
@@ -2800,9 +2814,11 @@ export function generateLuaCode(project: WeaponProject): string {
       // with. With no usable pose the sprite is zeroed and the builder draws the
       // walk from its own sheet too.
       lines.push('        sprite = 0,');
+      zeroedSprite = true;
     } else if (spriteOverride !== undefined) {
       if (spriteOverride === 0 || spriteOverride === '0') {
         lines.push('        sprite = 0,');
+        zeroedSprite = true;
       } else if (!isNaN(Number(spriteOverride))) {
         lines.push(`        sprite = ${Number(spriteOverride)},`);
       } else {
@@ -2817,6 +2833,7 @@ export function generateLuaCode(project: WeaponProject): string {
       // `hideStock` hides WA's normal flight sprite; a roam record's `sprite`
       // is the walking pose, so it never applies there.
       lines.push('        sprite = 0,');
+      zeroedSprite = true;
     } else if (
       missileSpriteEnabled &&
       !usesMissileSprite &&
@@ -3957,6 +3974,10 @@ export function generateLuaCode(project: WeaponProject): string {
       for (const row of holdRows) lines.push(`        ${row}`);
       lines.push('      },');
     }
+  } else if (zeroedSprite && !wepPath && donorKnown && POSE_BY_SPRITE_DONORS.has(donorName)) {
+    // The record's sprite is 0, so WA gives the worm nothing to hold: it takes
+    // the donor's pose instead. Hold art has its own posture and skips this.
+    lines.push(`      hold_as = ${luaQuote(donor)},`);
   }
 
   // Custom Lua callback (only when checkbox is explicitly enabled)

@@ -13,11 +13,12 @@ It is a development aid, not part of `bun run lint` / `build`: `lupa` is not a
 project dependency.
 """
 import math
+import os
 import sys
 
 from lupa import LuaRuntime
 
-SDK = 'C:/Users/lucia/Documents/GitHub/WormForge Weapon Editor/spec/lua_sdk/wfws_sdk/lib/wfws_sprite_builder.lua'
+SDK = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'spec', 'lua_sdk', 'wfws_sdk', 'lib', 'wfws_sprite_builder.lua')
 
 lua = LuaRuntime(unpack_returned_tuples=True)
 

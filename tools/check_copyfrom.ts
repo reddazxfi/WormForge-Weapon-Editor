@@ -157,6 +157,25 @@ const has = (lua: string, text: string) => lua.includes(text);
   );
 }
 
+// 5. The builder zeroes the round's sprite, which WA picks a thrown or placed
+//    weapon's pose by: the claim lends the donor's pose with `hold_as`, unless
+//    hold art draws the worm or the donor's pose doesn't hang on its sprite.
+{
+  const built = (slot: string): WeaponProject => {
+    const p = projectFor(slot);
+    return { ...p, missileSprite: { ...p.missileSprite!, enabled: true, mode: 'custom', sheet: 'sprites/round.png' } };
+  };
+  const cluster = generateLuaCode(built('cluster_bomb'));
+  check('built cluster bomb zeroes its sprite', has(cluster, 'sprite = 0,'));
+  check('built cluster bomb holds as the cluster bomb', has(cluster, 'hold_as = "stock.cluster_bomb"'));
+  check('built dynamite holds as dynamite', has(generateLuaCode(built('dynamite')), 'hold_as = "stock.dynamite"'));
+  check('built bazooka lends no pose', !has(generateLuaCode(built('bazooka')), 'hold_as'));
+  const withHold = built('cluster_bomb');
+  const held = generateLuaCode({ ...withHold, hold: { ...withHold.hold!, enabled: true, sheet: 'sprites/hold.png' } });
+  check('hold art keeps its own posture', !has(held, 'hold_as') && has(held, 'worm_sprites = holds.PX_POSTURE'));
+  check('an untouched cluster bomb lends no pose', !has(generateLuaCode(projectFor('cluster_bomb')), 'hold_as'));
+}
+
 if (failures.length > 0) {
   console.error(`\n${failures.length} check(s) failed:\n- ${failures.join('\n- ')}`);
   process.exit(1);
