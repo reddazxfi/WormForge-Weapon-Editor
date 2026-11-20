@@ -2071,6 +2071,11 @@ export async function readBundleFeatures(args: {
     notes.push(`dependencies: ${extras.join(', ')}`);
   }
 
+  // `hold_as` lends a stock weapon's held pose. The generator derives the same
+  // value for its own output, so a re-export writes it back either way.
+  const holdAs = str(source?.hold_as);
+  if (holdAs) project.holdAs = holdAs;
+
   const iconPath = str(weapon.icon);
   if (iconPath) {
     const loaded = await readAsset(files, bundleDir, iconPath);

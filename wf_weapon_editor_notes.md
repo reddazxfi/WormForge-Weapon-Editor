@@ -4981,3 +4981,24 @@ the moment the turn ends anyway.
 `check_mod_import.ts` pins the three halves (no `eat_fire`, the ghost rows, no
 `finish`), the WF 50 entry in `test_pack/README.md` states what a player should
 see, and `wfcheck` stays clean on all 61 files.
+
+## 2026-11-20: a thrown builder weapon aims with full hands (`hold_as`)
+
+In game, WF 33 Builder Bit Homing (a Cluster Bomb) aimed with empty hands. The
+builder writes `missile.sprite = 0` so WA never draws the stock round, and WA
+picks a thrown weapon's held pose from that same sprite (`Weapon__hold_sheet`,
+0x51C060): only the stock grenade, banana, cluster, petrol bomb and holy grenade
+sprites give one. Keeping the sprite and hiding the round with `m.sprite = 0` in
+`missile_frame` was ruled out by the engine side: WA draws a launched missile once
+before its first `missile_frame`, so the stock round would show for a frame at the
+throw.
+
+wkLua 1.0.0 adds `hold_as = "stock.<weapon>"` on `replace`, which aims a weapon in
+that stock weapon's pose (PX's ports moved to it in px.ports 0.20.85). The
+generator now writes it whenever the builder zeroes the sprite, the weapon has no
+hold art of its own and no melee swing, and the record's own sprite (the author's
+unless it is the builder's zero, else the donor's, resolved by name or id) is one
+of the five. In the test pack that is WF 05, 24, 33 (`stock.cluster_bomb`) and
+WF 30 (`stock.grenade`); a Bazooka, Homing Pigeon, Super Sheep or Ming Vase donor
+gets none, because none of those sprites gives a pose. The importer reads
+`hold_as` into `project.holdAs`, which the generator writes back as it came.

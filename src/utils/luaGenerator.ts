@@ -15,7 +15,7 @@ import {
 } from '../types/weapon';
 import { getStockPanelPosition } from '../data/stockWeapons';
 import { stockDonor, stockDonorBaseline } from '../data/stockDonors';
-import { resolveStockSprite, stockSpriteId } from '../data/stockSprites';
+import { resolveStockSprite, stockSpriteId, stockSpriteName } from '../data/stockSprites';
 import { supportsFireSequence } from '../data/fireSequence';
 import { STAMP_FRAMES, stampFrameForAngle, supportsTerrainStamp } from '../data/terrainStamp';
 import { COLLISION_FLAGS } from '../data/recordSchema';
@@ -877,6 +877,51 @@ export const WFWS_BUILDER_MODULE = 'wf-lib/wfws_sprite_builder';
  * - Roaming art is not here: WA draws the walking, two flying and gas poses from
  *   separate record fields, so it goes through `sheep_sprites` and the record.
  */
+/**
+ * The stock weapons whose record sprite gives a thrown weapon its held pose
+ * (WA's `Weapon__hold_sheet`, 0x51C060): only these five. Any other sprite,
+ * and 0, aims with empty hands.
+ */
+const HELD_POSE_WEAPON: Record<string, string> = {
+  grenade: 'stock.grenade',
+  banana: 'stock.banana_bomb',
+  cluster: 'stock.cluster_bomb',
+  petrolbm: 'stock.petrol_bomb',
+  hgrenade: 'stock.holy_grenade',
+};
+
+/**
+ * `hold_as` for the claim, or undefined.
+ *
+ * The builder zeroes the record's `missile.sprite` so WA never draws the stock
+ * round (WA draws a launched missile once before its first `missile_frame`, so
+ * hiding it there leaves a frame showing). A thrown weapon's held pose is read
+ * from that same sprite, so the zero also emptied the worm's hands: WF 33, a
+ * Cluster Bomb, aimed holding nothing. `hold_as` lends the pose of the stock
+ * weapon the record's own sprite would have given. A weapon with its own hold
+ * art draws over the empty-handed pose on purpose, and a melee swing owns the
+ * hands, so neither gets one. An imported `hold_as` is kept as written.
+ */
+export function holdAsFor(project: WeaponProject): string | undefined {
+  if (project.holdAs) return project.holdAs;
+  if (!primaryBuilderOn(project) || project.hold?.enabled || project.melee?.enabled) return undefined;
+  const donorName = (project.based_on || project.slot || 'grenade').replace(/^stock\./, '');
+  // The sprite the record would carry without the builder: the author's own,
+  // unless that is the builder's zero, else the baseline's.
+  const own = project.recordOverrides?.['missile.sprite'];
+  const ownSet = own !== undefined && own !== '' && own !== 0 && own !== '0';
+  const sprite = ownSet
+    ? own
+    : recordField(
+        { ...project, recordOverrides: {} },
+        'missile.sprite',
+        stockDonorBaseline(donorName)?.recordOverrides?.['missile.sprite'],
+      );
+  const resolved = resolveStockSprite(sprite);
+  const name = typeof resolved === 'number' ? stockSpriteName(resolved) : resolved;
+  return name ? HELD_POSE_WEAPON[name] : undefined;
+}
+
 export function wfwsRoleFlags(project: WeaponProject) {
   const builderOn = primaryBuilderOn(project);
   const bitMode = bitBuilderMode(project);
@@ -2211,6 +2256,12 @@ export function generateLuaCode(project: WeaponProject): string {
     // A ghost that crosses a crate would collect it for the team, which is a
     // visible effect of a shot nobody asked for.
     lines.push('      collects_crates = false,');
+  }
+  const holdAs = holdAsFor(project);
+  if (holdAs) {
+    // The record's sprite is zeroed below, and a thrown weapon's held pose is
+    // read from it: lend the pose it would have given (`holdAsFor`).
+    lines.push(`      hold_as = ${luaQuote(holdAs)},`);
   }
   if (usesSwing && !meleeGhost) {
     // Space plays the clip instead of firing. WA's dispatch is eaten, so

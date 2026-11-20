@@ -1072,6 +1072,13 @@ export interface WeaponProject {
    * game tests.
    */
   melee?: MeleeConfig;
+  /**
+   * `hold_as = "stock.<weapon>"` on the claim: the stock weapon whose held pose
+   * the worm aims this one in. Set by an import that carried one; otherwise the
+   * generator derives it (`holdAsFor`), so a thrown weapon whose record sprite
+   * the builder zeroes still aims with full hands.
+   */
+  holdAs?: string;
   panel_icon: string; // stock name or custom path
   customIconFile?: File;
   customIconPreview?: string;

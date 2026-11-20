@@ -74,6 +74,7 @@ export const CLAIM_KEYS_MODELLED = [
   'worm_art',
   'mole_dig_rotation',
   'hold',
+  'hold_as',
   'fires',
 ] as const;
 

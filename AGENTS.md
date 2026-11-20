@@ -414,6 +414,17 @@ The editor ships `spec/lua_sdk/wfws_sdk/` (id `wfws.sdk`), exporting
   `missile.sprite` override may survive it. The one exception is a roaming animal
   whose walk pose WA can draw (`roamWalkPoseId()`), which is kept and passed back
   as `roam = { walk, fly }`.
+- **A zeroed sprite needs `hold_as` on a thrown weapon** (`holdAsFor`, wkLua
+  1.0.0). WA reads a thrown weapon's held pose from the same record sprite
+  (`Weapon__hold_sheet`), and only `grenade`, `banana`, `cluster`, `petrolbm`
+  and `hgrenade` give one, so the zero above made WF 33 (a Cluster Bomb) aim with
+  empty hands. The claim writes `hold_as = "stock.<weapon>"` for the pose the
+  record's own sprite (the author's, else the donor's) would have given. Hiding
+  the round with `m.sprite = 0` instead is too late: WA draws a launched missile
+  once before its first `missile_frame`. A weapon with its own hold art, or a
+  melee swing, gets none (they draw over the empty-handed pose on purpose). An
+  imported `hold_as` is kept as written (`project.holdAs`). An older DLL ignores
+  the key, so those weapons aim empty-handed there.
 - **Identity is decided by the burst, not by `m.sprite`** (`classify`): the first
   missile of the weapon is the round; a missile that first appears within
   `bit_window` frames (default 5) after the round was last seen and at the

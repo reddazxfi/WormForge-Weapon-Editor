@@ -1594,6 +1594,45 @@ local afterHook = 42`;
   );
 }
 
+// ---- hold_as: the held pose a zeroed record sprite took away ---------------
+{
+  // The builder zeroes the record's sprite, and a thrown weapon's held pose is
+  // read from it, so WF 33 (a Cluster Bomb) aimed with empty hands. The claim
+  // lends the pose of the stock weapon the record's own sprite would give.
+  const builder = (patch: Partial<WeaponProject> = {}) =>
+    makeProject({
+      missileSprite: { ...(makeProject().missileSprite as any), enabled: true, mode: 'custom', anim: 'track' },
+      ...patch,
+    });
+  const holdAsLine = (p: WeaponProject) => /hold_as = "([^"]+)"/.exec(generateLuaCode(p))?.[1];
+  check('a grenade with the builder aims as a grenade', holdAsLine(builder()) === 'stock.grenade', String(holdAsLine(builder())));
+  const cluster = builder({
+    based_on: 'stock.cluster_bomb',
+    donorBaseline: stockDonorBaseline('cluster_bomb'),
+    recordOverrides: { ...(stockDonor('cluster_bomb')?.recordOverrides ?? {}) },
+  });
+  check('a cluster bomb aims as a cluster bomb', holdAsLine(cluster) === 'stock.cluster_bomb', String(holdAsLine(cluster)));
+  const petrol = builder({
+    based_on: 'stock.petrol_bomb',
+    donorBaseline: stockDonorBaseline('petrol_bomb'),
+    recordOverrides: { ...(stockDonor('petrol_bomb')?.recordOverrides ?? {}) },
+  });
+  check('a pose sprite given as an id resolves (petrol bomb, 55)', holdAsLine(petrol) === 'stock.petrol_bomb', String(holdAsLine(petrol)));
+  const hidden = builder({ recordOverrides: { 'missile.sprite': 0 } });
+  check("the builder's own zero falls back to the donor's sprite", holdAsLine(hidden) === 'stock.grenade', String(holdAsLine(hidden)));
+  const bazooka = builder({
+    based_on: 'stock.bazooka',
+    donorBaseline: stockDonorBaseline('bazooka'),
+    recordOverrides: { ...(stockDonor('bazooka')?.recordOverrides ?? {}) },
+  });
+  check('a launcher gets none (its pose is not the record sprite)', holdAsLine(bazooka) === undefined, String(holdAsLine(bazooka)));
+  check('no builder, no hold_as', holdAsLine(makeProject()) === undefined, String(holdAsLine(makeProject())));
+  const ownHold = builder({ hold: { ...(makeProject().hold as any), enabled: true } });
+  check('own hold art keeps the empty-handed pose', holdAsLine(ownHold) === undefined, String(holdAsLine(ownHold)));
+  const imported = builder({ holdAs: 'stock.banana_bomb' });
+  check('an imported hold_as is written as it came', holdAsLine(imported) === 'stock.banana_bomb', String(holdAsLine(imported)));
+}
+
 if (failed > 0) {
   console.error(`\n${failed} check(s) failed`);
   process.exit(1);

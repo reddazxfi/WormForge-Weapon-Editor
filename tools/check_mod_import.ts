@@ -1999,6 +1999,23 @@ quoted = ["a\\"b,c", "d"] # escaped quote with comma
   );
 }
 
+// ---- hold_as: a thrown builder weapon keeps its held pose ----------------
+// WF 33 is a Cluster Bomb whose record sprite the builder zeroes; the claim
+// lends the stock pose back, and an import must carry it so a re-export does.
+{
+  const name = 'WF 33 Builder Bit Homing';
+  const p = project(name);
+  check('WF 33 imports its hold_as', p?.holdAs === 'stock.cluster_bomb', String(p?.holdAs));
+  const lua = p ? generateLuaCode(fullProject(p, name)) : '';
+  check(
+    'and writes it back once',
+    (lua.match(/\bhold_as = "stock\.cluster_bomb"/g) ?? []).length === 1,
+    String((lua.match(/\bhold_as = /g) ?? []).length),
+  );
+  const bazooka = project('WF 01 Builder Track');
+  check('a builder weapon on a launcher has none', !!bazooka && bazooka.holdAs === undefined, String(bazooka?.holdAs));
+}
+
 if (failures.length > 0) {
   console.error(`\n${failures.length} check(s) failed:\n- ${failures.join('\n- ')}`);
   process.exit(1);
